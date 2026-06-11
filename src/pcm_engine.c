@@ -42,6 +42,7 @@ static void msm6258_decode_nibble(MSM6258 *c, int nibble) {
 void pcm_engine_init(PCMSoundEngine *engine, uint32_t sample_rate) {
     memset(engine, 0, sizeof(PCMSoundEngine));
     engine->sample_rate = sample_rate;
+    engine->ym2612_dac.dac_data = 128; // DACの初期値は中点(128)
 }
 
 void pcm_engine_free(PCMSoundEngine *engine) {

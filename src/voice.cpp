@@ -37,6 +37,10 @@ std::atomic<int> wav_count(0);
 // ★ 追加：完全整数（固定小数点）型のDCブロッカー用状態変数
 int64_t dc_state_l = 0;
 int64_t dc_state_r = 0;
+int32_t eq_lpf_l = 0;
+int32_t eq_lpf_r = 0;
+int32_t eq_bass_l = 0;
+int32_t eq_bass_r = 0;
 int32_t dc_prev_l = 0;
 int32_t dc_prev_r = 0;
 
@@ -260,6 +264,7 @@ void playSong(int index) {
     
     // 曲の開始時にDCブロッカーの状態を完全にクリアする
     dc_state_l = 0; dc_state_r = 0; dc_prev_l = 0; dc_prev_r = 0;
+    eq_lpf_l = 0; eq_lpf_r = 0; eq_bass_l = 0; eq_bass_r = 0;
     
 
 
@@ -429,20 +434,20 @@ void IRAM_ATTR processAudioBlock() {
 
 #if defined(ARDUINO_M5Stack_ATOMS3)
         // ☁E小型スピーカー用 EQ補正 (高音マイルド化 ＋ 低音ブースト)
-        static int32_t lpf_l = 0, lpf_r = 0;
-        static int32_t bass_l = 0, bass_r = 0;
+        
+        
         
         // 1. 高音をさらに削る (より強いローパス)
-        lpf_l += (mix_l - lpf_l) >> 3;
-        lpf_r += (mix_r - lpf_r) >> 3;
-        mix_l = lpf_l;
-        mix_r = lpf_r;
+        eq_lpf_l += (mix_l - eq_lpf_l) >> 3;
+        eq_lpf_r += (mix_r - eq_lpf_r) >> 3;
+        mix_l = eq_lpf_l;
+        mix_r = eq_lpf_r;
 
         // 2. 低音を抽出し、元の音に強く加算してブースト (2倍加算)
-        bass_l += (mix_l - bass_l) >> 5;
-        bass_r += (mix_r - bass_r) >> 5;
-        mix_l += (bass_l * 2);
-        mix_r += (bass_r * 2);
+        eq_bass_l += (mix_l - eq_bass_l) >> 5;
+        eq_bass_r += (mix_r - eq_bass_r) >> 5;
+        mix_l += (eq_bass_l * 2);
+        mix_r += (eq_bass_r * 2);
 #endif
 
         int32_t limit = 26000;
