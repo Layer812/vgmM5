@@ -36,8 +36,6 @@ std::atomic<int> wav_count(0);
 
 // ★ 追加：完全整数（固定小数点）型のDCブロッカー用状態変数
 int64_t dc_state_l = 0;
-float fade_vol = 1.0f;
-float fade_step = 0.0f;
 int64_t dc_state_r = 0;
 int32_t dc_prev_l = 0;
 int32_t dc_prev_r = 0;
@@ -262,10 +260,6 @@ void playSong(int index) {
     
     // 曲の開始時にDCブロッカーの状態を完全にクリアする
     dc_state_l = 0; dc_state_r = 0; dc_prev_l = 0; dc_prev_r = 0;
-    fade_vol = 0.0f;
-    fade_step = 1.0f / (actual_sample_rate * 0.05f);
-
-    M5.Speaker.stop(0); // 前の曲の残響を消す
     
 
 
@@ -432,12 +426,6 @@ void IRAM_ATTR processAudioBlock() {
         
         mix_l = (int32_t)(dc_state_l / 16384);
         mix_r = (int32_t)(dc_state_r / 16384);
-        
-        if (fade_vol < 1.0f) {
-            mix_l = (int32_t)(mix_l * fade_vol);
-            mix_r = (int32_t)(mix_r * fade_vol);
-            fade_vol += fade_step;
-        }
 
 #if defined(ARDUINO_M5Stack_ATOMS3)
         // ☁E小型スピーカー用 EQ補正 (高音マイルド化 ＋ 低音ブースト)
