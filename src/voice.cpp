@@ -41,8 +41,6 @@ int32_t eq_lpf_l = 0;
 int32_t eq_lpf_r = 0;
 int32_t eq_bass_l = 0;
 int32_t eq_bass_r = 0;
-float fade_vol = 1.0f;
-float fade_step = 0.0f;
 int32_t dc_prev_l = 0;
 int32_t dc_prev_r = 0;
 
@@ -267,8 +265,6 @@ void playSong(int index) {
     // 曲の開始時にDCブロッカーの状態を完全にクリアする
     dc_state_l = 0; dc_state_r = 0; dc_prev_l = 0; dc_prev_r = 0;
     eq_lpf_l = 0; eq_lpf_r = 0; eq_bass_l = 0; eq_bass_r = 0;
-    fade_vol = 0.0f;
-    fade_step = 1.0f / (actual_sample_rate * 0.02f); // 20ms micro fade-in
     
 
 
@@ -435,12 +431,6 @@ void IRAM_ATTR processAudioBlock() {
         
         mix_l = (int32_t)(dc_state_l / 16384);
         mix_r = (int32_t)(dc_state_r / 16384);
-        
-        if (fade_vol < 1.0f) {
-            mix_l = (int32_t)(mix_l * fade_vol);
-            mix_r = (int32_t)(mix_r * fade_vol);
-            fade_vol += fade_step;
-        }
 
 #if defined(ARDUINO_M5Stack_ATOMS3)
         // ☁E小型スピーカー用 EQ補正 (高音マイルド化 ＋ 低音ブースト)
@@ -562,8 +552,10 @@ void audio_play_task(void *args) {
                 vTaskDelay(1); 
             }
         } else {
-            // データがない時や再生停止中は通常通り休む
-            vTaskDelay(1); 
+            // データがない・またはプリバッファリング・停止中も常に無音を流してアンプの電源ON/OFF（プツ音）を防ぐ
+            static const int16_t idle_silence[512 * 2] = {0};
+            M5.Speaker.playRaw(idle_silence, 512 * 2, actual_sample_rate, true, 1, 0, false);
+            vTaskDelay(1);
         }
     }
 }
