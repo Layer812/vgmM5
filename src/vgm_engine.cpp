@@ -797,10 +797,7 @@ void audio_play_task(void *args) {
         }
         if (wav_count > 0 && isPlaying && !prebuffering) {
             if (isPaused) {
-                // Pause中もI2Sが途切れないように無音を流し続ける
-                static const int16_t idle_silence[512 * 2] = {0};
-                M5.Speaker.playRaw(idle_silence, 512 * 2, actual_sample_rate, true, 1, 0, false);
-                vTaskDelay(1);
+                vTaskDelay(pdMS_TO_TICKS(10));
                 continue;
             }
             bool queued = M5.Speaker.playRaw((const int16_t *)wav_buff[rd], wav_buff_size[rd] * 2, actual_sample_rate, true, 1, 0, false);
@@ -858,6 +855,8 @@ void audio_play_task(void *args) {
         M5.Speaker.setVolume(128);
     } else if (M5.getBoard() == m5::board_t::board_M5AtomVoiceS3R || M5.getBoard() == m5::board_t::board_M5AtomS3R) {
         M5.Speaker.setVolume(80); // 音割れ防止のためAtomS3R専用に音量を下げる
+        // アンプ起動時のポップノイズを防ぐため、無音トーンを短く鳴らしてI2Sを安全にアクティブ化
+        M5.Speaker.tone(0, 50);
     } else {
         M5.Speaker.setVolume(48); // AtomS3 + 外部アンプ等は音量を絞る
     }
