@@ -27,7 +27,27 @@ struct state {
     int bitbuf;
     int bitcnt;
     jmp_buf env;
+    int (*write_cb)(void*, const unsigned char*, unsigned long);
+    void *write_ctx;
+    unsigned long window_size;
+    int (*read_cb)(void*, unsigned char*, unsigned long);
+    void *read_ctx;
+    unsigned long in_buf_size;
 };
+
+local inline int read_byte(struct state *s) {
+    if (s->incnt == s->inlen) {
+        if (s->read_cb) {
+            int n = s->read_cb(s->read_ctx, (unsigned char*)s->in, s->in_buf_size);
+            if (n <= 0) longjmp(s->env, 1);
+            s->inlen = n;
+            s->incnt = 0;
+        } else {
+            longjmp(s->env, 1);
+        }
+    }
+    return s->in[s->incnt++];
+}
 
 struct huffman {
     short *count;
@@ -39,9 +59,7 @@ local int bits(struct state *s, int need)
     long val;
     val = s->bitbuf;
     while (s->bitcnt < need) {
-        if (s->incnt == s->inlen)
-            longjmp(s->env, 1);
-        val |= (long)(s->in[s->incnt++]) << s->bitcnt;
+        val |= (long)(read_byte(s)) << s->bitcnt;
         s->bitcnt += 8;
     }
     s->bitbuf = (int)(val >> need);
@@ -51,27 +69,29 @@ local int bits(struct state *s, int need)
 
 local int stored(struct state *s)
 {
-    unsigned len;
+    unsigned len, nlen;
     s->bitbuf = 0;
     s->bitcnt = 0;
-    if (s->incnt + 4 > s->inlen)
-        return 2;
-    len = s->in[s->incnt++];
-    len |= s->in[s->incnt++] << 8;
-    if (s->in[s->incnt++] != (~len & 0xff) ||
-        s->in[s->incnt++] != ((~len >> 8) & 0xff))
+    len = read_byte(s);
+    len |= read_byte(s) << 8;
+    nlen = read_byte(s);
+    nlen |= read_byte(s) << 8;
+    if (nlen != (~len & 0xffff))
         return -2;
-    if (s->incnt + len > s->inlen)
-        return 2;
     if (s->out != NIL) {
         if (s->outcnt + len > s->outlen)
             return 1;
-        while (len--)
-            s->out[s->outcnt++] = s->in[s->incnt++];
+        while (len--) {
+            s->out[s->window_size ? (s->outcnt % s->window_size) : s->outcnt] = read_byte(s);
+            s->outcnt++;
+            if (s->window_size && (s->outcnt % s->window_size) == 0) {
+                if (s->write_cb(s->write_ctx, s->out, s->window_size) < 0) return 1;
+            }
+        }
     }
     else {
         s->outcnt += len;
-        s->incnt += len;
+        while (len--) read_byte(s);
     }
     return 0;
 }
@@ -104,9 +124,7 @@ local int decode(struct state *s, const struct huffman *h)
         left = (MAXBITS+1) - len;
         if (left == 0)
             break;
-        if (s->incnt == s->inlen)
-            longjmp(s->env, 1);
-        bitbuf = s->in[s->incnt++];
+        bitbuf = read_byte(s);
         if (left > 8)
             left = 8;
     }
@@ -168,9 +186,12 @@ local int codes(struct state *s,
             if (s->out != NIL) {
                 if (s->outcnt == s->outlen)
                     return 1;
-                s->out[s->outcnt] = symbol;
+                s->out[s->window_size ? (s->outcnt % s->window_size) : s->outcnt] = symbol;
             }
             s->outcnt++;
+            if (s->window_size && s->out != NIL && (s->outcnt % s->window_size) == 0) {
+                if (s->write_cb(s->write_ctx, s->out, s->window_size) < 0) return 1;
+            }
         }
         else if (symbol > 256) {
             symbol -= 257;
@@ -185,8 +206,12 @@ local int codes(struct state *s,
                 if (s->outcnt + len > s->outlen)
                     return 1;
                 while (len--) {
-                    s->out[s->outcnt] = s->out[s->outcnt - dist];
+                    s->out[s->window_size ? (s->outcnt % s->window_size) : s->outcnt] = 
+                        s->out[s->window_size ? ((s->outcnt - dist) % s->window_size) : (s->outcnt - dist)];
                     s->outcnt++;
+                    if (s->window_size && (s->outcnt % s->window_size) == 0) {
+                        if (s->write_cb(s->write_ctx, s->out, s->window_size) < 0) return 1;
+                    }
                 }
             }
             else
@@ -299,22 +324,34 @@ local int dynamic(struct state *s)
     return codes(s, &lencode, &distcode);
 }
 
-extern "C" int puff(unsigned char *dest,
-          unsigned long *destlen,
-          const unsigned char *source,
-          unsigned long *sourcelen)
+extern "C" int puff_stream(int (*write_cb)(void*, const unsigned char*, unsigned long),
+                           void* write_ctx,
+                           unsigned long window_size,
+                           int (*read_cb)(void*, unsigned char*, unsigned long),
+                           void* read_ctx,
+                           unsigned long in_buf_size,
+                           unsigned char *dest,
+                           unsigned long *destlen,
+                           const unsigned char *source,
+                           unsigned long *sourcelen)
 {
     struct state s;
     int last, type, err;
 
     s.out = dest;
-    s.outlen = *destlen;
+    s.outlen = destlen ? *destlen : 0;
     s.outcnt = 0;
     s.in = source;
-    s.inlen = *sourcelen;
+    s.inlen = sourcelen ? *sourcelen : 0;
     s.incnt = 0;
     s.bitbuf = 0;
     s.bitcnt = 0;
+    s.write_cb = write_cb;
+    s.write_ctx = write_ctx;
+    s.window_size = window_size;
+    s.read_cb = read_cb;
+    s.read_ctx = read_ctx;
+    s.in_buf_size = in_buf_size;
 
     if (setjmp(s.env) != 0)
         err = 2;
@@ -335,8 +372,19 @@ extern "C" int puff(unsigned char *dest,
     }
 
     if (err <= 0) {
-        *destlen = s.outcnt;
-        *sourcelen = s.incnt;
+        if (s.window_size && s.out != NIL && (s.outcnt % s.window_size) != 0) {
+            s.write_cb(s.write_ctx, s.out, s.outcnt % s.window_size);
+        }
+        if (destlen) *destlen = s.outcnt;
+        if (sourcelen) *sourcelen = s.incnt;
     }
     return err;
+}
+
+extern "C" int puff(unsigned char *dest,
+          unsigned long *destlen,
+          const unsigned char *source,
+          unsigned long *sourcelen)
+{
+    return puff_stream(0, 0, 0, 0, 0, 0, dest, destlen, source, sourcelen);
 }

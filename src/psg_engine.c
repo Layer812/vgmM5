@@ -16,8 +16,12 @@ void psg_engine_init(PSGSoundEngine *engine, uint32_t sample_rate, uint32_t sn_c
     sn->sample_rate = sample_rate;
     
     // ボリュームは初期状態では無音(15)
-    for (int i = 0; i < 3; i++) sn->tone[i].vol = 15;
+    for (int i = 0; i < 3; i++) {
+        sn->tone[i].vol = 15;
+        sn->tone[i].out_state = 1; // 1か-1でトグルするため0以外で初期化
+    }
     sn->noise.vol = 15;
+    sn->noise.out_state = 1;
     sn->noise.shift_reg = 0x8000; // LFSRの初期値
 
     // SN76489はクロックを16分周して動作する
@@ -25,8 +29,8 @@ void psg_engine_init(PSGSoundEngine *engine, uint32_t sample_rate, uint32_t sn_c
     sn->step_size = (uint32_t)(((uint64_t)(sn_clock / 16) << 16) / sample_rate);
 
     // ボリュームテーブルの作成 (2dB step)
-    // 最大音量を適度な値(例: 2000)に設定し、1段ごとに2dB減衰させる
-    const double MAX_VOL = 2000.0;
+    // 最大音量を適度な値(例: 8000)に設定し、1段ごとに2dB減衰させる
+    const double MAX_VOL = 8000.0;
     for (int i = 0; i < 15; i++) {
         sn->vol_table[i] = (int32_t)(MAX_VOL * pow(10.0, -(i * 2.0) / 20.0));
     }

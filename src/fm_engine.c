@@ -121,7 +121,7 @@ static void update_eg_rates(FMSoundEngine *engine, int ch) {
             ks_offset = engine->kc[ch] >> (5 - ks_val);
         } else {
             int kc = engine->kc[ch] >> 2; 
-            ks_offset = (ks_val == 0) ? 0 : (kc >> (3 - ks_val));
+            ks_offset = (ks_val == 0) ? 0 : (kc >> (4 - ks_val));
         }
         
         int r_ar = engine->ops[idx].ar == 0 ? 0 : engine->ops[idx].ar + ks_offset;
@@ -215,7 +215,7 @@ static void update_eg_rates_ym2612(FMSoundEngine *engine, int ch) {
     for (int op = 0; op < 4; op++) {
         int idx = ch * 4 + op;
         int ks_val = engine->ops[idx].ks;
-        int ks_offset = (ks_val == 0) ? 0 : (kc >> (3 - ks_val));
+        int ks_offset = (ks_val == 0) ? 0 : (kc >> (4 - ks_val));
         
         int r_ar = engine->ops[idx].ar == 0 ? 0 : engine->ops[idx].ar + ks_offset;
         if (r_ar > 31) r_ar = 31;
@@ -278,7 +278,7 @@ static void update_eg_rates_opl(FMSoundEngine *engine, int ch) {
     for (int op = 0; op < 2; op++) {
         int idx = ch * 4 + op;
         int ks_val = engine->ops[idx].ks;
-        int ks_offset = (ks_val == 0) ? (ksn >> 2) : ksn;
+        int ks_offset = (ks_val == 0) ? (ksn >> 3) : (ksn >> 1);
         
         int r_ar = engine->ops[idx].ar == 0 ? 0 : engine->ops[idx].ar + ks_offset;
         if (r_ar > 31) r_ar = 31;
@@ -374,7 +374,7 @@ static IRAM_ATTR __attribute__((always_inline)) inline int32_t calc_op_internal(
     current_atten += (am_offset << 1) * engine->ops[op_idx].am_enable; 
     if (current_atten >= 8192) return 0;
 
-    int32_t mod_idx = modulation >> 7; 
+    int32_t mod_idx = modulation; 
     uint32_t phase_12bit = engine->ops[op_idx].phase >> 20;
     uint32_t idx = (phase_12bit + mod_idx) & 0xFFF;
     
@@ -485,8 +485,8 @@ void fm_engine_register_write(FMSoundEngine *engine, uint16_t addr, uint8_t data
     if (addr == 0x08) { 
         int ch = data & 7;
         if ((data >> 3) & 1) { if(engine->ops[ch*4+0].env_state == EG_OFF) engine->ops[ch*4+0].env_level = EG_MAX; engine->ops[ch*4+0].env_state = EG_ATTACK; engine->ops[ch*4+0].phase = 0; } else { if(engine->ops[ch*4+0].env_state != EG_OFF) engine->ops[ch*4+0].env_state = EG_RELEASE; }
-        if ((data >> 4) & 1) { if(engine->ops[ch*4+1].env_state == EG_OFF) engine->ops[ch*4+1].env_level = EG_MAX; engine->ops[ch*4+1].env_state = EG_ATTACK; engine->ops[ch*4+1].phase = 0; } else { if(engine->ops[ch*4+1].env_state != EG_OFF) engine->ops[ch*4+1].env_state = EG_RELEASE; }
-        if ((data >> 5) & 1) { if(engine->ops[ch*4+2].env_state == EG_OFF) engine->ops[ch*4+2].env_level = EG_MAX; engine->ops[ch*4+2].env_state = EG_ATTACK; engine->ops[ch*4+2].phase = 0; } else { if(engine->ops[ch*4+2].env_state != EG_OFF) engine->ops[ch*4+2].env_state = EG_RELEASE; }
+        if ((data >> 5) & 1) { if(engine->ops[ch*4+1].env_state == EG_OFF) engine->ops[ch*4+1].env_level = EG_MAX; engine->ops[ch*4+1].env_state = EG_ATTACK; engine->ops[ch*4+1].phase = 0; } else { if(engine->ops[ch*4+1].env_state != EG_OFF) engine->ops[ch*4+1].env_state = EG_RELEASE; }
+        if ((data >> 4) & 1) { if(engine->ops[ch*4+2].env_state == EG_OFF) engine->ops[ch*4+2].env_level = EG_MAX; engine->ops[ch*4+2].env_state = EG_ATTACK; engine->ops[ch*4+2].phase = 0; } else { if(engine->ops[ch*4+2].env_state != EG_OFF) engine->ops[ch*4+2].env_state = EG_RELEASE; }
         if ((data >> 6) & 1) { if(engine->ops[ch*4+3].env_state == EG_OFF) engine->ops[ch*4+3].env_level = EG_MAX; engine->ops[ch*4+3].env_state = EG_ATTACK; engine->ops[ch*4+3].phase = 0; } else { if(engine->ops[ch*4+3].env_state != EG_OFF) engine->ops[ch*4+3].env_state = EG_RELEASE; }
         return;
     }
@@ -503,7 +503,10 @@ void fm_engine_register_write(FMSoundEngine *engine, uint16_t addr, uint8_t data
     if (addr == 0x18) { float lfo_freq = (float)(data + 1) * 0.15f; engine->lfo_step = (uint32_t)(lfo_freq * engine->phase_step_factor); return; }
     if (addr == 0x19) { if (data & 0x80) engine->amd = data & 0x7F; else engine->pmd = data & 0x7F; return; }
     if (addr == 0x1B) { engine->lfo_wave = data & 3; return; }
-    if (addr >= 0x20 && addr <= 0x27) { int ch = addr & 7; engine->pan_l[ch] = (data >> 7) & 1; engine->pan_r[ch] = (data >> 6) & 1; engine->fb_shift[ch] = (data >> 3) & 7; engine->algo[ch] = data & 7; update_algorithm_routing(engine, ch, engine->algo[ch]); return; }
+    if (addr >= 0x20 && addr <= 0x27) { 
+        int ch = addr & 7; 
+        engine->pan_l[ch] = (data >> 7) & 1; 
+        engine->pan_r[ch] = (data >> 6) & 1; engine->fb_shift[ch] = (data >> 3) & 7; engine->algo[ch] = data & 7; update_algorithm_routing(engine, ch, engine->algo[ch]); return; }
     if (addr >= 0x28 && addr <= 0x2F) { int ch = addr & 7; engine->kc[ch] = data; update_phase_step(engine, ch); update_eg_rates(engine, ch); return; }
     if (addr >= 0x30 && addr <= 0x37) { int ch = addr & 7; engine->kf[ch] = data; update_phase_step(engine, ch); return; }
     if (addr >= 0x38 && addr <= 0x3F) { int ch = addr & 7; engine->pms[ch] = (data >> 4) & 7; engine->ams[ch] = data & 3; return; }
@@ -512,12 +515,12 @@ void fm_engine_register_write(FMSoundEngine *engine, uint16_t addr, uint8_t data
         int op_type = (addr >> 3) & 3; 
         int idx = ch * 4 + YM2151_OP_MAP[op_type]; 
         switch (addr & 0xE0) {
-            case 0x40: engine->ops[idx].mul = data & 0x0F; update_phase_step(engine, ch); break;
+            case 0x40: engine->ops[idx].mul = data & 0x7F; update_phase_step(engine, ch); break;
             case 0x60: engine->ops[idx].tl_atten = (data & 0x7F) * 32; break;
             case 0x80: engine->ops[idx].ks = data >> 6; engine->ops[idx].ar = data & 0x1F; update_eg_rates(engine, ch); break;
             case 0xA0: engine->ops[idx].am_enable = (data >> 7) & 1; engine->ops[idx].dr = data & 0x1F; update_eg_rates(engine, ch); break;
             case 0xC0: engine->ops[idx].dt2 = (data >> 6) & 3; engine->ops[idx].d2r = data & 0x1F; update_phase_step(engine, ch); update_eg_rates(engine, ch); break;
-            case 0xE0: { int rr = data & 0x0F; engine->ops[idx].rr = (rr << 1) + 1; int d1l = (data >> 4) & 0x0F; engine->ops[idx].sl_level = (d1l == 15) ? EG_MAX : ((d1l * 4) * 32 << EG_FRACTION_BITS); update_eg_rates(engine, ch); } break;
+            case 0xE0: { int rr = data & 0x0F; engine->ops[idx].rr = 17 + rr; int d1l = (data >> 4) & 0x0F; engine->ops[idx].sl_level = (d1l == 15) ? EG_MAX : ((d1l * 4) * 32 << EG_FRACTION_BITS); update_eg_rates(engine, ch); } break;
         }
     }
 }
@@ -535,7 +538,7 @@ void fm_engine_write_ym2612(FMSoundEngine *engine, uint8_t port, uint8_t addr, u
         uint8_t m2 = (data >> 6) & 1; // Slot 3
         uint8_t c2 = (data >> 7) & 1; // Slot 4
         
-        uint8_t key_on[4] = { m1, c1, m2, c2 }; // internal 0=Slot 1, 1=Slot 2, 2=Slot 3, 3=Slot 4
+        uint8_t key_on[4] = { m1, m2, c1, c2 }; // internal ops map: 0=M1(Slot1), 1=M2(Slot3), 2=C1(Slot2), 3=C2(Slot4)
         for (int op = 0; op < 4; op++) {
             int idx = b + op;
             if (key_on[op]) {
@@ -605,7 +608,7 @@ void fm_engine_write_ym2612(FMSoundEngine *engine, uint8_t port, uint8_t addr, u
             case 0x50: engine->ops[idx].ar = data & 0x1F; engine->ops[idx].ks = data >> 6; update_eg_rates_ym2612(engine, ch); break;
             case 0x60: engine->ops[idx].dr = data & 0x1F; engine->ops[idx].am_enable = (data >> 7) & 1; update_eg_rates_ym2612(engine, ch); break;
             case 0x70: engine->ops[idx].d2r = data & 0x1F; update_eg_rates_ym2612(engine, ch); break;
-            case 0x80: { int d1l = (data >> 4) & 0x0F; engine->ops[idx].sl_level = (d1l == 15) ? EG_MAX : ((d1l * 4) * 32 << EG_FRACTION_BITS); engine->ops[idx].rr = data & 0x0F; engine->ops[idx].rr = engine->ops[idx].rr ? engine->ops[idx].rr*2+1 : 0; update_eg_rates_ym2612(engine, ch); } break;
+            case 0x80: { int d1l = (data >> 4) & 0x0F; engine->ops[idx].sl_level = (d1l == 15) ? EG_MAX : ((d1l * 4) * 32 << EG_FRACTION_BITS); int rr = data & 0x0F; engine->ops[idx].rr = rr ? 17 + rr : 0; update_eg_rates_ym2612(engine, ch); } break;
             case 0x90: break; // SSG-EG (unsupported)
         }
     }
@@ -750,29 +753,53 @@ static void update_algorithm_routing(FMSoundEngine *engine, int ch, uint8_t algo
     } else {
         // 4 Operator Algorithms
         switch (algo & 7) {
-            case 0: // 直列 (OP1 -> OP2 -> OP3 -> OP4)
-                engine->ops[b+0].src_bus=0; engine->ops[b+0].dst_bus=1;  engine->ops[b+1].src_bus=1; engine->ops[b+1].dst_bus=2;  engine->ops[b+2].src_bus=2; engine->ops[b+2].dst_bus=3;  engine->ops[b+3].src_bus=3; engine->ops[b+3].dst_bus=4;
+            case 0: // M1 -> C1 -> M2 -> C2 -> MIX
+                engine->ops[b+0].src_bus=0; engine->ops[b+0].dst_bus=1;  // M1
+                engine->ops[b+2].src_bus=1; engine->ops[b+2].dst_bus=2;  // C1
+                engine->ops[b+1].src_bus=2; engine->ops[b+1].dst_bus=3;  // M2
+                engine->ops[b+3].src_bus=3; engine->ops[b+3].dst_bus=4;  // C2
                 break;
-            case 1: // (OP1 + OP2) -> OP3 -> OP4
-                engine->ops[b+0].src_bus=0; engine->ops[b+0].dst_bus=2;  engine->ops[b+1].src_bus=0; engine->ops[b+1].dst_bus=2;  engine->ops[b+2].src_bus=2; engine->ops[b+2].dst_bus=3;  engine->ops[b+3].src_bus=3; engine->ops[b+3].dst_bus=4;
+            case 1: // (M1, C1) -> M2 -> C2 -> MIX
+                engine->ops[b+0].src_bus=0; engine->ops[b+0].dst_bus=2;  // M1
+                engine->ops[b+2].src_bus=0; engine->ops[b+2].dst_bus=2;  // C1
+                engine->ops[b+1].src_bus=2; engine->ops[b+1].dst_bus=3;  // M2
+                engine->ops[b+3].src_bus=3; engine->ops[b+3].dst_bus=4;  // C2
                 break;
-            case 2: // OP1 + (OP2 -> OP3) -> OP4
-                engine->ops[b+0].src_bus=0; engine->ops[b+0].dst_bus=3;  engine->ops[b+1].src_bus=0; engine->ops[b+1].dst_bus=2;  engine->ops[b+2].src_bus=2; engine->ops[b+2].dst_bus=3;  engine->ops[b+3].src_bus=3; engine->ops[b+3].dst_bus=4;
+            case 2: // M1 -> C2, C1 -> M2 -> C2 -> MIX
+                engine->ops[b+0].src_bus=0; engine->ops[b+0].dst_bus=3;  // M1
+                engine->ops[b+2].src_bus=0; engine->ops[b+2].dst_bus=2;  // C1
+                engine->ops[b+1].src_bus=2; engine->ops[b+1].dst_bus=3;  // M2
+                engine->ops[b+3].src_bus=3; engine->ops[b+3].dst_bus=4;  // C2
                 break;
-            case 3: // (OP1 -> OP2) + OP3 -> OP4
-                engine->ops[b+0].src_bus=0; engine->ops[b+0].dst_bus=1;  engine->ops[b+1].src_bus=1; engine->ops[b+1].dst_bus=3;  engine->ops[b+2].src_bus=0; engine->ops[b+2].dst_bus=3;  engine->ops[b+3].src_bus=3; engine->ops[b+3].dst_bus=4;
+            case 3: // M1 -> C1 -> C2, M2 -> C2 -> MIX
+                engine->ops[b+0].src_bus=0; engine->ops[b+0].dst_bus=1;  // M1
+                engine->ops[b+2].src_bus=1; engine->ops[b+2].dst_bus=3;  // C1
+                engine->ops[b+1].src_bus=0; engine->ops[b+1].dst_bus=3;  // M2
+                engine->ops[b+3].src_bus=3; engine->ops[b+3].dst_bus=4;  // C2
                 break;
-            case 4: // (OP1 -> OP2), (OP3 -> OP4) -> MIX
-                engine->ops[b+0].src_bus=0; engine->ops[b+0].dst_bus=1;  engine->ops[b+1].src_bus=1; engine->ops[b+1].dst_bus=4;  engine->ops[b+2].src_bus=0; engine->ops[b+2].dst_bus=3;  engine->ops[b+3].src_bus=3; engine->ops[b+3].dst_bus=4;
+            case 4: // (M1 -> C1) -> MIX, (M2 -> C2) -> MIX
+                engine->ops[b+0].src_bus=0; engine->ops[b+0].dst_bus=1;  // M1
+                engine->ops[b+2].src_bus=1; engine->ops[b+2].dst_bus=4;  // C1
+                engine->ops[b+1].src_bus=0; engine->ops[b+1].dst_bus=3;  // M2
+                engine->ops[b+3].src_bus=3; engine->ops[b+3].dst_bus=4;  // C2
                 break;
-            case 5: // OP1 -> (OP2, OP3, OP4) -> MIX
-                engine->ops[b+0].src_bus=0; engine->ops[b+0].dst_bus=1;  engine->ops[b+1].src_bus=1; engine->ops[b+1].dst_bus=4;  engine->ops[b+2].src_bus=1; engine->ops[b+2].dst_bus=4;  engine->ops[b+3].src_bus=1; engine->ops[b+3].dst_bus=4;
+            case 5: // M1 -> (C1, M2, C2) -> MIX
+                engine->ops[b+0].src_bus=0; engine->ops[b+0].dst_bus=1;  // M1
+                engine->ops[b+2].src_bus=1; engine->ops[b+2].dst_bus=4;  // C1
+                engine->ops[b+1].src_bus=1; engine->ops[b+1].dst_bus=4;  // M2
+                engine->ops[b+3].src_bus=1; engine->ops[b+3].dst_bus=4;  // C2
                 break;
-            case 6: // (OP1 -> OP2), OP3, OP4 -> MIX
-                engine->ops[b+0].src_bus=0; engine->ops[b+0].dst_bus=1;  engine->ops[b+1].src_bus=1; engine->ops[b+1].dst_bus=4;  engine->ops[b+2].src_bus=0; engine->ops[b+2].dst_bus=4;  engine->ops[b+3].src_bus=0; engine->ops[b+3].dst_bus=4;
+            case 6: // (M1 -> C1) -> MIX, M2 -> MIX, C2 -> MIX
+                engine->ops[b+0].src_bus=0; engine->ops[b+0].dst_bus=1;  // M1
+                engine->ops[b+2].src_bus=1; engine->ops[b+2].dst_bus=4;  // C1
+                engine->ops[b+1].src_bus=0; engine->ops[b+1].dst_bus=4;  // M2
+                engine->ops[b+3].src_bus=0; engine->ops[b+3].dst_bus=4;  // C2
                 break;
-            case 7: // 並列 (OP1, OP2, OP3, OP4) -> MIX
-                engine->ops[b+0].src_bus=0; engine->ops[b+0].dst_bus=4;  engine->ops[b+1].src_bus=0; engine->ops[b+1].dst_bus=4;  engine->ops[b+2].src_bus=0; engine->ops[b+2].dst_bus=4;  engine->ops[b+3].src_bus=0; engine->ops[b+3].dst_bus=4;
+            case 7: // (M1, C1, M2, C2) -> MIX
+                engine->ops[b+0].src_bus=0; engine->ops[b+0].dst_bus=4;  // M1
+                engine->ops[b+2].src_bus=0; engine->ops[b+2].dst_bus=4;  // C1
+                engine->ops[b+1].src_bus=0; engine->ops[b+1].dst_bus=4;  // M2
+                engine->ops[b+3].src_bus=0; engine->ops[b+3].dst_bus=4;  // C2
                 break;
         }
     }
@@ -858,9 +885,17 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
                 engine->fb_memory[ch][1] = out0;
                 bus[engine->ops[b+0].dst_bus] += out0;
 
+                int32_t mod2 = bus[engine->ops[b+2].src_bus];
+                int32_t out2 = calc_op_internal(engine, b+2, mod2, ch_pm, engine->ops[b+2].am_enable?ch_am:0, 0, 1);
+                bus[engine->ops[b+2].dst_bus] += out2;
+
                 int32_t mod1 = bus[engine->ops[b+1].src_bus];
                 int32_t out1 = calc_op_internal(engine, b+1, mod1, ch_pm, engine->ops[b+1].am_enable?ch_am:0, 0, 1);
                 bus[engine->ops[b+1].dst_bus] += out1;
+
+                int32_t mod3 = bus[engine->ops[b+3].src_bus];
+                int32_t out3 = calc_op_internal(engine, b+3, mod3, ch_pm, engine->ops[b+3].am_enable?ch_am:0, 0, 1);
+                bus[engine->ops[b+3].dst_bus] += out3;
 
                 ch_out = bus[4] << 1;
             }
@@ -889,13 +924,13 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
             engine->fb_memory[ch][1] = out0;
             bus[engine->ops[b+0].dst_bus] += out0;
 
-            int32_t mod1 = bus[engine->ops[b+1].src_bus];
-            int32_t out1 = calc_op_internal(engine, b+1, mod1, ch_pm, ch_am, 0, 0);
-            bus[engine->ops[b+1].dst_bus] += out1;
-
             int32_t mod2 = bus[engine->ops[b+2].src_bus];
             int32_t out2 = calc_op_internal(engine, b+2, mod2, ch_pm, ch_am, 0, 0);
             bus[engine->ops[b+2].dst_bus] += out2;
+
+            int32_t mod1 = bus[engine->ops[b+1].src_bus];
+            int32_t out1 = calc_op_internal(engine, b+1, mod1, ch_pm, ch_am, 0, 0);
+            bus[engine->ops[b+1].dst_bus] += out1;
 
             int32_t mod3 = bus[engine->ops[b+3].src_bus];
             int32_t out3 = calc_op_internal(engine, b+3, mod3, ch_pm, ch_am, is_noise_ch ? 1 : 0, 0);
@@ -911,6 +946,10 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
     mix_r = (mix_r + engine->prev_r) / 2;
     engine->prev_l = mix_l;
     engine->prev_r = mix_r;
+
+    // Reduce overall FM volume by 50% to balance with PCM
+    mix_l = mix_l / 2;
+    mix_r = mix_r / 2;
 
     *out_l += mix_l; 
     *out_r += mix_r; 

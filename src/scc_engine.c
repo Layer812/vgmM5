@@ -23,39 +23,93 @@ static void update_scc_step(SCCSoundEngine *engine, int ch) {
     }
 }
 
-void scc_engine_write(SCCSoundEngine *engine, uint8_t port, uint8_t data) {
-    if (port < 0x80) {
-        // 波形RAMへの書き込み (0x00 - 0x7F)
-        int ch = port / 0x20;        // 32バイトごとにCH1〜CH4
-        int offset = port % 0x20;
-        
-        engine->wave[ch][offset] = (int8_t)data; // 実機は2の補数(符号付き8bit)
-        
-        // SCC(K051649)の仕様：CH4とCH5は波形RAMを共有している
-        if (ch == 3) {
-            engine->wave[4][offset] = (int8_t)data; 
-        }
-    } 
-    else if (port >= 0x80 && port <= 0x89) {
-        // 周波数レジスタ (0x80 - 0x89)
-        int ch = (port - 0x80) / 2;
-        if (port % 2 == 0) {
-            // 下位8bit
+void scc_engine_write(SCCSoundEngine *engine, uint8_t port, uint8_t reg, uint8_t data) {
+    // VGM規格における K051649 (SCC) / K052539 (SCC+) の書き込みフォーマットは、
+    // 基本的にMAMEコアのポートマッピングに準拠しています：
+    // port 0: 波形RAM (SCC: 0x00-0x7F, SCC+: 0x00-0x9F)
+    // port 1: 周波数 (0x00-0x09)
+    // port 2: ボリューム (0x00-0x04)
+    // port 3: チャンネルON/OFF (0x00 または SCC+の場合は 0x00/0xAF など)
+
+    if (port == 1 && reg <= 0x09) {
+        // MAME: 周波数レジスタ
+        int ch = reg / 2;
+        if (reg % 2 == 0) {
             engine->freq[ch] = (engine->freq[ch] & 0x0F00) | data;
         } else {
-            // 上位4bit
             engine->freq[ch] = (engine->freq[ch] & 0x00FF) | ((data & 0x0F) << 8);
         }
         update_scc_step(engine, ch);
-    } 
-    else if (port >= 0x8A && port <= 0x8E) {
-        // ボリューム (0x8A - 0x8E)
-        int ch = port - 0x8A;
-        engine->vol[ch] = data & 0x0F;
-    } 
-    else if (port == 0x8F) {
-        // チャンネルON/OFF (0x8F)
+        return;
+    }
+    else if (port == 2 && reg <= 0x04) {
+        // MAME: ボリュームレジスタ
+        engine->vol[reg] = data & 0x0F;
+        return;
+    }
+    else if (port == 3) {
+        // MAME: チャンネルON/OFF
+        // (レジスタは通常0x00だが、VGMによってはMSXのオフセット0x8Fや0xAFをそのまま送ってくることもある)
         engine->enable = data;
+        return;
+    }
+
+    // 古いVGMやMSXダイレクトマッピングVGMへの救済措置
+    // port=0 に全レジスタが書き込まれるケース
+    if (port == 0) {
+        if (reg < 0x80) {
+            // 波形RAM CH1〜CH4 (0x00 - 0x7F)
+            int ch = reg / 0x20;
+            int offset = reg % 0x20;
+            engine->wave[ch][offset] = (int8_t)data;
+            if (ch == 3) {
+                engine->wave[4][offset] = (int8_t)data; 
+            }
+        }
+        else if (reg >= 0x80 && reg <= 0x9F) {
+            // SCC+ 波形RAM CH5 (0x80 - 0x9F)
+            int ch = reg / 0x20;
+            int offset = reg % 0x20;
+            engine->wave[ch][offset] = (int8_t)data;
+        }
+        else if (reg >= 0x80 && reg <= 0x89) {
+            // MSX: 周波数レジスタ (0x80 - 0x89)
+            int ch = (reg - 0x80) / 2;
+            if (reg % 2 == 0) {
+                engine->freq[ch] = (engine->freq[ch] & 0x0F00) | data;
+            } else {
+                engine->freq[ch] = (engine->freq[ch] & 0x00FF) | ((data & 0x0F) << 8);
+            }
+            update_scc_step(engine, ch);
+        }
+        else if (reg >= 0x8A && reg <= 0x8E) {
+            // MSX: ボリューム (0x8A - 0x8E)
+            int ch = reg - 0x8A;
+            engine->vol[ch] = data & 0x0F;
+        }
+        else if (reg == 0x8F) {
+            // MSX: チャンネルON/OFF (0x8F)
+            engine->enable = data;
+        }
+        else if (reg >= 0xA0 && reg <= 0xA9) {
+            // MSX SCC+: 周波数レジスタ (0xA0 - 0xA9)
+            int ch = (reg - 0xA0) / 2;
+            if (reg % 2 == 0) {
+                engine->freq[ch] = (engine->freq[ch] & 0x0F00) | data;
+            } else {
+                engine->freq[ch] = (engine->freq[ch] & 0x00FF) | ((data & 0x0F) << 8);
+            }
+            update_scc_step(engine, ch);
+        }
+        else if (reg >= 0xAA && reg <= 0xAE) {
+            // MSX SCC+: ボリューム (0xAA - 0xAE)
+            int ch = reg - 0xAA;
+            engine->vol[ch] = data & 0x0F;
+        }
+        else if (reg == 0xAF) {
+            // MSX SCC+: チャンネルON/OFF (0xAF)
+            engine->enable = data;
+        }
     }
 }
 
@@ -79,7 +133,7 @@ void scc_engine_tick(SCCSoundEngine *engine, int32_t *out_l, int32_t *out_r) {
     }
 
     // 全体ボリュームのスケール調整（他の音源と馴染むように適度に下げる）
-    mix = mix * 3; // 音量を調整。大きすぎる場合は下げる
+    mix = mix * 6;
 
     // L/Rにミキシング（基本はモノラル）
     *out_l += mix;

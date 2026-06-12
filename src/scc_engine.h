@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 void scc_engine_init(SCCSoundEngine *engine, uint32_t sample_rate, uint32_t clock);
-void scc_engine_write(SCCSoundEngine *engine, uint8_t port, uint8_t data);
+void scc_engine_write(SCCSoundEngine *engine, uint8_t port, uint8_t reg, uint8_t data);
 void scc_engine_tick(SCCSoundEngine *engine, int32_t *out_l, int32_t *out_r);
 
 #ifdef __cplusplus
