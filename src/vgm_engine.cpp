@@ -797,7 +797,10 @@ void audio_play_task(void *args) {
         }
         if (wav_count > 0 && isPlaying && !prebuffering) {
             if (isPaused) {
-                vTaskDelay(pdMS_TO_TICKS(10));
+                // Pause中もI2Sが途切れないように無音を流し続ける
+                static const int16_t idle_silence[512 * 2] = {0};
+                M5.Speaker.playRaw(idle_silence, 512 * 2, actual_sample_rate, true, 1, 0, false);
+                vTaskDelay(1);
                 continue;
             }
             bool queued = M5.Speaker.playRaw((const int16_t *)wav_buff[rd], wav_buff_size[rd] * 2, actual_sample_rate, true, 1, 0, false);
@@ -850,10 +853,6 @@ void audio_play_task(void *args) {
     
     M5.Speaker.config(spk_cfg);
     M5.Speaker.begin();
-
-    // 起動時のポップノイズ対策（コーデック初期化のための無音流し込み）
-    int16_t zero_buf[1024] = {0};
-    M5.Speaker.playRaw(zero_buf, sizeof(zero_buf)/sizeof(int16_t), 44100, true, 1, 0, false);
     
     if (M5.getBoard() == m5::board_t::board_M5Cardputer) {
         M5.Speaker.setVolume(128);
