@@ -238,12 +238,12 @@ static void update_eg_rates_ym2612(FMSoundEngine *engine, int ch) {
         if (engine->ops[idx].rr_step == 0 && r_rr > 0) engine->ops[idx].rr_step = 1;
     }
 }
-// ── ☁EPL2用 フェーズE周波数E計算E修正牁E──
+
 static void update_phase_step_opl(FMSoundEngine *engine, int ch) {
     uint32_t fn = engine->f_number[ch];
     uint32_t blk = engine->block[ch];
     
-    // 正しいOPL2周波数: Freq = (F-Num * 2^Block * Clock) / (72 * 2^20)
+    // Freq = (F-Num * 2^Block * Clock) / (72 * 2^20)
     float base_step = (float)(fn * (1 << blk)) * engine->opl2_step_factor * engine->phase_step_factor;
     
     static float OPL2_MUL_TABLE[16] = {
@@ -269,7 +269,7 @@ static void update_phase_step_opl(FMSoundEngine *engine, int ch) {
         engine->ops[idx].phase_step = step;
     }
 }
-// ── ☁EPL2用 エンベロープ計箁E(パEカチEブモード対忁E ──
+
 static void update_eg_rates_opl(FMSoundEngine *engine, int ch) {
     uint32_t fn = engine->f_number[ch];
     uint32_t blk = engine->block[ch];
@@ -295,14 +295,11 @@ static void update_eg_rates_opl(FMSoundEngine *engine, int ch) {
         engine->ops[idx].rr_step = RATE_TABLE[r_rr] >> 1;
         if (engine->ops[idx].rr_step == 0 && r_rr > 0) engine->ops[idx].rr_step = 1;
         
-        // ☁EKSL (Key Scale Level) の計算
         int ksl = engine->ops[idx].ksl;
         if (ksl == 0) {
             engine->ops[idx].ksl_atten_val = 0;
         } else {
-            // OPL2のKSL近似計箁E ksn(0-15) に対して、KSL=1(3.0dB), KSL=2(1.5dB), KSL=3(6.0dB) を適用、E            // 1 TLスチEチE0.75dB) = 32冁E単佁Eなので、E.5dB=64, 3.0dB=128, 6.0dB=256
-            // ksn1つにつぁE.5オクターブ、Eオクターブあたりの減衰を計算
-            int base_ksn = (ksn > 4) ? (ksn - 4) : 0; // 低音域は減衰しない近似
+            int base_ksn = (ksn > 4) ? (ksn - 4) : 0; 
             int atten = 0;
             switch(ksl) {
                 case 1: atten = base_ksn * 64; break;  // 3.0dB / oct (1.5dB / ksn)
@@ -312,7 +309,6 @@ static void update_eg_rates_opl(FMSoundEngine *engine, int ch) {
             engine->ops[idx].ksl_atten_val = atten;
         }
         
-        // ☁E修正: EG_TYP (0: パEカチEチE 1: サスチEン) の適用
         int eg_typ = engine->ops[idx].dt2;
         if (eg_typ == 0) {
             engine->ops[idx].d2r_step = engine->ops[idx].rr_step; 
@@ -442,7 +438,6 @@ void fm_engine_init(FMSoundEngine *engine, uint32_t sample_rate, uint32_t clock,
     engine->opl2_lfo_am_step = (uint32_t)((3.7f * 4294967296.0f) / (float)sample_rate);
     engine->opl2_lfo_pm_step = (uint32_t)((6.1f * 4294967296.0f) / (float)sample_rate);
     
-    // ☁E事前計算ファクタ (double撲滁E& 高速化)
     engine->phase_step_factor = 4294967296.0f / (float)sample_rate;
     float prescaler = (chip_type == CHIP_YM2203 || chip_type == CHIP_YM3812) ? 72.0f : ((chip_type == CHIP_YM2151) ? 64.0f : 144.0f);
     engine->ym2612_step_factor = ((float)clock) / (prescaler * 1048576.0f);
@@ -457,7 +452,7 @@ void fm_engine_init(FMSoundEngine *engine, uint32_t sample_rate, uint32_t clock,
           update_algorithm_routing(engine, ch, 0);
       }
     
-    // YM2151 ピッチテーブルの事前計算
+    // YM2151 pre  calc pitch table
     for (int n = 0; n <= 12; n++) {
         for (int k = 0; k < 64; k++) {
             float semi = (float)n + (k / 64.0f);
@@ -466,7 +461,7 @@ void fm_engine_init(FMSoundEngine *engine, uint32_t sample_rate, uint32_t clock,
         }
     }
     
-    // ☁EYM2612 F-Number 事前計算テーブル (float演算E排除)
+    // YM2612 F-Number pre calc table
     float factor = ((float)clock * 4096.0f) / (144.0f * (float)sample_rate);
     for (int i = 0; i < 2048; i++) {
         engine->ym2612_fnum_tab[i] = (uint32_t)((float)i * factor);
@@ -613,9 +608,9 @@ void fm_engine_write_ym2612(FMSoundEngine *engine, uint8_t port, uint8_t addr, u
         }
     }
 }
-// ── ☁EOPL2 レジスタ書き込み (無限アタチE防止) ──
+
 void fm_engine_write_opl(FMSoundEngine *engine, uint8_t addr, uint8_t data) {
-    if (addr == 0x01) return; // 波形選択ON/OFFE常にONとして扱ぁEE
+    if (addr == 0x01) return; 
     // チャンネルレジスタ (0xA0-0xC8)
     if ((addr >= 0xA0 && addr <= 0xA8) || (addr >= 0xB0 && addr <= 0xB8) || (addr >= 0xC0 && addr <= 0xC8)) {
         int ch;
@@ -623,22 +618,19 @@ void fm_engine_write_opl(FMSoundEngine *engine, uint8_t addr, uint8_t data) {
             ch = addr - 0xA0;
             engine->f_number[ch] = (engine->f_number[ch] & 0x0300) | data;
             update_phase_step_opl(engine, ch);
-            update_eg_rates_opl(engine, ch); // ☁E修正: ピッチ変化でエンベロープ速度も更新
+            update_eg_rates_opl(engine, ch); 
         } else if (addr >= 0xB0 && addr <= 0xB8) {
             ch = addr - 0xB0;
             engine->f_number[ch] = (engine->f_number[ch] & 0x00FF) | ((data & 3) << 8);
             engine->block[ch] = (data >> 2) & 7;
             
-            // ☁E修正: 以前EKey-On状態を記Eし、変化した瞬間だけ処理する
             uint8_t prev_key_on = engine->kc[ch] & 0x20;
-            engine->kc[ch] = data; // 生Eレジスタ値を保孁E            
+            engine->kc[ch] = data; 
             if ((data & 0x20) && !prev_key_on) { 
-                // OFF -> ON の瞬間EみアタチE開姁E                engine->ops[ch*4+0].env_level = EG_MAX; engine->ops[ch*4+0].phase = 0;
                 engine->ops[ch*4+1].env_level = EG_MAX; engine->ops[ch*4+1].phase = 0;
                 engine->ops[ch*4+0].env_state = EG_ATTACK;
                 engine->ops[ch*4+1].env_state = EG_ATTACK;
             } else if (!(data & 0x20) && prev_key_on) { 
-                // ON -> OFF の瞬間Eみリリース開姁E                if(engine->ops[ch*4+0].env_state != EG_OFF) engine->ops[ch*4+0].env_state = EG_RELEASE;
                 if(engine->ops[ch*4+1].env_state != EG_OFF) engine->ops[ch*4+1].env_state = EG_RELEASE;
             }
             update_phase_step_opl(engine, ch);
@@ -646,10 +638,10 @@ void fm_engine_write_opl(FMSoundEngine *engine, uint8_t addr, uint8_t data) {
         } else if (addr >= 0xC0 && addr <= 0xC8) {
             ch = addr - 0xC0;
             engine->fb_shift[ch] = (data >> 1) & 7;
-            engine->algo[ch] = data & 1; // 0=直刁E 1=並刁E            update_algorithm_routing(engine, ch, engine->algo[ch]);
+            engine->algo[ch] = data & 1; 
         } else if (addr == 0xBD) {
             uint8_t old_rhy = engine->rhythm_enable;
-            uint8_t old_val = engine->kc[8]; // kc[8] は通常使われなぁEEで0xBDの前回値保存用に流用
+            uint8_t old_val = engine->kc[8];
             engine->kc[8] = data;
             
             engine->rhythm_enable = (data & 0x20) ? 1 : 0;
@@ -663,8 +655,8 @@ void fm_engine_write_opl(FMSoundEngine *engine, uint8_t addr, uint8_t data) {
             }
             
             if (engine->rhythm_enable) {
-                uint8_t trg = (data ^ old_val) & data;   // 0 -> 1 になったビチE
-                uint8_t rel = (data ^ old_val) & ~data;  // 1 -> 0 になったビチE
+                uint8_t trg = (data ^ old_val) & data;
+                uint8_t rel = (data ^ old_val) & ~data;
                 
                 int ops[5] = {24, 29, 32, 33, 28}; // BD(ch6c), SD(ch7c), TOM(ch8m), TC(ch8c), HH(ch7m)
                 int bits[5] = {0x10, 0x08, 0x04, 0x02, 0x01};
@@ -674,7 +666,7 @@ void fm_engine_write_opl(FMSoundEngine *engine, uint8_t addr, uint8_t data) {
                     if (trg & bits[i]) {
                         engine->ops[idx].env_level = EG_MAX; engine->ops[idx].phase = 0;
                         engine->ops[idx].env_state = EG_ATTACK;
-                        if (i == 0) { // BDはモジュレータ(24)とキャリア(25)の両方をトリガー
+                        if (i == 0) {
                             engine->ops[25].env_level = EG_MAX; engine->ops[25].phase = 0;
                             engine->ops[25].env_state = EG_ATTACK;
                         }
@@ -688,12 +680,12 @@ void fm_engine_write_opl(FMSoundEngine *engine, uint8_t addr, uint8_t data) {
         return;
     }
     
-    // オペレータレジスタ (0x20-0x9F, 0xE0-0xFF)
+
     if ((addr >= 0x20 && addr <= 0x9F) || (addr >= 0xE0 && addr <= 0xFF)) {
         int ofs = addr & 0x1F;
-        int group = ofs / 8; // 0, 1, 2
-        int rem = ofs % 8;   // 0-7
-        if (rem >= 6) return; // 無効なオフセチE
+        int group = ofs / 8; 
+        int rem = ofs % 8;   
+        if (rem >= 6) return; 
         
         int is_car = (rem >= 3) ? 1 : 0;
         int ch = group * 3 + (rem % 3);
@@ -704,14 +696,14 @@ void fm_engine_write_opl(FMSoundEngine *engine, uint8_t addr, uint8_t data) {
                 case 0x20: // AM / VIB / EG_TYP / KSR / MULTI
                     engine->ops[idx].mul = data & 0x0F;
                     engine->ops[idx].ks = (data >> 4) & 1; 
-                    engine->ops[idx].dt2 = (data >> 5) & 1; // ☁E修正: EG_TYPを保孁E                    engine->ops[idx].am_enable = (data >> 7) & 1;
+                    engine->ops[idx].dt2 = (data >> 5) & 1; 
                     update_phase_step_opl(engine, ch);
                     update_eg_rates_opl(engine, ch);
                     break;
                 case 0x40: // KSL / TL
-                    engine->ops[idx].ksl = (data >> 6) & 3; // ☁E追加: KSL (Key Scale Level)
-                    engine->ops[idx].tl_atten = (data & 0x3F) * 32; // ☁E修正: YM2612と同じぁEスチEチE.75dB (32単佁E
-                    update_eg_rates_opl(engine, ch); // KSL変更を反映
+                    engine->ops[idx].ksl = (data >> 6) & 3; 
+                    engine->ops[idx].tl_atten = (data & 0x3F) * 32; 
+                    update_eg_rates_opl(engine, ch); 
                     break;
                 case 0x60: // AR / DR
                     engine->ops[idx].ar = (data >> 4) & 0x0F; engine->ops[idx].ar = engine->ops[idx].ar ? engine->ops[idx].ar*2+1 : 0;

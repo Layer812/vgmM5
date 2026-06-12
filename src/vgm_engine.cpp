@@ -523,8 +523,6 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     eq_lpf_l = 0; eq_lpf_r = 0; eq_bass_l = 0; eq_bass_r = 0;
     
 
-
-    // 背景タスク(audio_generate_task)が常に無音を流しているため、アンプ起動用の500ms待機は不要になりました
     prebuffering = true;
     isPlaying = true;
     xSemaphoreGive(xSemaphore); 
@@ -715,7 +713,7 @@ void IRAM_ATTR processAudioBlock() {
         }
 
         // 全チップの合計音量を鳴っているチップ数に応じてスケールダウン
-        // チャンネル数で割ると音が小さくなりすぎてダイナミックレンジが狭まるため、チップ数で割ります
+        // チャンネル数で割ると音が小さくなりすぎてダイナミックレンジが狭まるため、チップ数で割る
         int divisor = (active_chip_count > 0) ? active_chip_count : 1;
         
         mix_l /= divisor;
@@ -852,6 +850,11 @@ void audio_play_task(void *args) {
     
     M5.Speaker.config(spk_cfg);
     M5.Speaker.begin();
+
+    // 起動時のポップノイズ対策（コーデック初期化のための無音流し込み）
+    int16_t zero_buf[1024] = {0};
+    M5.Speaker.playRaw(zero_buf, sizeof(zero_buf)/sizeof(int16_t), 44100, true, 1, 0, false);
+    
     if (M5.getBoard() == m5::board_t::board_M5Cardputer) {
         M5.Speaker.setVolume(128);
     } else if (M5.getBoard() == m5::board_t::board_M5AtomVoiceS3R || M5.getBoard() == m5::board_t::board_M5AtomS3R) {
