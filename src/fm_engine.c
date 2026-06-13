@@ -515,7 +515,7 @@ void fm_engine_register_write(FMSoundEngine *engine, uint16_t addr, uint8_t data
             case 0x80: engine->ops[idx].ks = data >> 6; engine->ops[idx].ar = data & 0x1F; update_eg_rates(engine, ch); break;
             case 0xA0: engine->ops[idx].am_enable = (data >> 7) & 1; engine->ops[idx].dr = data & 0x1F; update_eg_rates(engine, ch); break;
             case 0xC0: engine->ops[idx].dt2 = (data >> 6) & 3; engine->ops[idx].d2r = data & 0x1F; update_phase_step(engine, ch); update_eg_rates(engine, ch); break;
-            case 0xE0: { int rr = data & 0x0F; engine->ops[idx].rr = rr ? 17 + rr : 0; int d1l = (data >> 4) & 0x0F; engine->ops[idx].sl_level = (d1l == 15) ? EG_MAX : ((d1l * 4) * 32 << EG_FRACTION_BITS); update_eg_rates(engine, ch); } break;
+            case 0xE0: { int rr = data & 0x0F; engine->ops[idx].rr = (rr << 1) + 1; int d1l = (data >> 4) & 0x0F; engine->ops[idx].sl_level = (d1l == 15) ? EG_MAX : ((d1l * 4) * 32 << EG_FRACTION_BITS); update_eg_rates(engine, ch); } break;
         }
     }
 }
@@ -603,7 +603,7 @@ void fm_engine_write_ym2612(FMSoundEngine *engine, uint8_t port, uint8_t addr, u
             case 0x50: engine->ops[idx].ar = data & 0x1F; engine->ops[idx].ks = data >> 6; update_eg_rates_ym2612(engine, ch); break;
             case 0x60: engine->ops[idx].dr = data & 0x1F; engine->ops[idx].am_enable = (data >> 7) & 1; update_eg_rates_ym2612(engine, ch); break;
             case 0x70: engine->ops[idx].d2r = data & 0x1F; update_eg_rates_ym2612(engine, ch); break;
-            case 0x80: { int d1l = (data >> 4) & 0x0F; engine->ops[idx].sl_level = (d1l == 15) ? EG_MAX : ((d1l * 4) * 32 << EG_FRACTION_BITS); int rr = data & 0x0F; engine->ops[idx].rr = rr ? 17 + rr : 0; update_eg_rates_ym2612(engine, ch); } break;
+            case 0x80: { int d1l = (data >> 4) & 0x0F; engine->ops[idx].sl_level = (d1l == 15) ? EG_MAX : ((d1l * 4) * 32 << EG_FRACTION_BITS); int rr = data & 0x0F; engine->ops[idx].rr = (rr << 1) + 1; update_eg_rates_ym2612(engine, ch); } break;
             case 0x90: break; // SSG-EG (unsupported)
         }
     }
