@@ -137,6 +137,7 @@ The AtomS3R version runs headlessly and is controlled via the main screen button
 Our original source code, modifications, and the matrix processing sound engine are released under the **MIT License**.
 
 This project utilizes and references the following excellent libraries, code, and assets:
+- [mdxtools](https://github.com/vampirefrog/mdxtools) - GPL3.0
 - [M5Unified](https://github.com/m5stack/M5Unified) - MIT License
 - [MAME](https://www.mamedev.org/) - GPL
 - ESP-IDF (FFat / Wear Levelling) - Apache License 2.0

@@ -284,8 +284,52 @@ void pcm_engine_namco_init(PCMSoundEngine *engine, uint32_t clock, uint8_t type)
     engine->namco.step_scale = (uint32_t)(((uint64_t)native_rate << 16) / engine->sample_rate);
 }
 
+/*
+ * C352 Register Map (MAME c352.cpp):
+ * Each channel has 8 ports, each 16-bit (little-endian):
+ *   Port 0 (byte 0x00): Volume L (only low byte used)
+ *   Port 1 (byte 0x02): Volume R (only low byte used)
+ *   Port 2 (bytes 0x04-0x05): Frequency (16-bit LE)
+ *   Port 3 (bytes 0x06-0x07): Start Address (16-bit LE)
+ *   Port 4 (bytes 0x08-0x09): End Address (16-bit LE)
+ *   Port 5 (bytes 0x0A-0x0B): Loop Address (16-bit LE)
+ *   Port 6 (bytes 0x0C-0x0D): Bank (16-bit LE) - upper bits for 24-bit addresses
+ *   Port 7 (bytes 0x0E-0x0F): Mode/Flags (16-bit LE)
+ *     bit 0: Reverse
+ *     bit 3: muLaw decode
+ *     bit 8: 8-bit PCM
+ *    bit 13: Loop enable
+ *    bit 14: KeyOn trigger
+ *
+ * Global registers (MAME WORD addresses 0x200+):
+ *   Word 0x200 (byte 0x400-0x401): System select / test
+ *   Word 0x202 (byte 0x404-0x405): Batch KeyOn trigger
+ *   Word 0x204 (byte 0x408-0x409): Batch KeyOff trigger
+ *
+ * VGM 0xD5 command sends BYTE addresses, so MAME Word 0x200 = VGM Byte 0x400.
+ */
 void pcm_engine_namco_write(PCMSoundEngine *engine, uint16_t addr, uint16_t data) {
     if (engine->namco.type == 0xC2) { // C352 (VGM 0xE1: 5バイト, addr=16bit LE, data=16bit LE)
+        // VGM sends word addresses in Big Endian format (parsed in vgm_engine.cpp).
+        /*
+         * C352 Word Address Map (VGM sends word addresses):
+         *
+         * Channel registers (word addresses 0x000-0x1FF):
+         *   Each channel = 8 words (word addresses ch*8 + 0..7)
+         *   Word 0: VolL (low 8-bit) + VolR (high 8-bit)
+         *   Word 1: Step/Freq
+         *   Word 2: Start
+         *   Word 3: End
+         *   Word 4: Loop
+         *   Word 5: Bank
+         *   Word 6: Mode (bit14=KeyOn, bit13=Loop, bit0=Reverse, bit3=muLaw, bit8=8bitPCM)
+         *
+         * Global registers (word addresses 0x200+):
+         *   Word 0x200: System select / test
+         *   Word 0x202: Batch KeyOn (bit N = trigger channel N)
+         *   Word 0x204: Batch KeyOff (bit N = stop channel N)
+         */
+
         // Global registers
         if (addr >= 0x200) {
             if (addr == 0x202) {
