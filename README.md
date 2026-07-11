@@ -42,7 +42,7 @@ vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(X68000)ファイ
 | **Namco C352** | ✔️ 対応済 (Supported) |
 
 ### 特徴
-- **オンラインモード (ジュークボックス)**: Wi-Fiに接続することで、VGM/VGZ/MDXファイルをいちいちダウンロードしてSDカードに保存する手間なく、クラウド上から直接ストリーミング再生できます。
+- **オンラインモード (ジュークボックス)**: Wi-Fiに接続することで、VGM/VGZXファイルをダウンロードする手間なく、クラウドのファイルを指定して再生できます。
 - **MDX (X68000) フォーマット対応**: VGM形式に加えて、X68000で広く使われたMDX形式の再生にも対応しました。
 - **VGZ(GZIP圧縮)対応**: 解凍せずにそのまま再生可能。
 - **軽量・高速**: M5Stackの限られたリソースに最適化。
@@ -96,7 +96,7 @@ vgmM5 is a VGM/VGZ and MDX (X68000) file player designed specifically for the M5
 *(Please refer to the Supported Sound Chips table in the Japanese section above)*
 
 ### Features
-- **Online Mode (Jukebox)**: Connect via Wi-Fi to stream VGM/VGZ/MDX files directly from the cloud without the need to download and save them to a MicroSD card.
+- **Online Mode (Jukebox)**: Connect via Wi-Fi to play VGM/VGZ files directly from the cloud without the need to download and save them to a MicroSD card.
 - **MDX (X68000) Support**: Added playback support for the MDX format, popular on the Sharp X68000.
 - **VGZ (GZIP) Support**: Plays directly without decompression.
 - **Lightweight & Fast**: Highly optimized for M5Stack's limited hardware resources.
