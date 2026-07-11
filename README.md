@@ -12,14 +12,14 @@ vgm and mdx player for M5Stack
 ## 日本語版 (Japanese)
 
 ### 概要
-vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(X68000)ファイルプレイヤーです。
+vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(MXDRV)ファイルプレイヤーです。
 🎥 **動作風景 (Demonstration):** [https://x.com/layer812/status/2065461081305489671](https://x.com/layer812/status/2065461081305489671)
 
 #### 対応デバイス (Supported Devices)
 | デバイス (Device) | ステータス (Status) | 備考 (Notes) |
 | :--- | :--- | :--- |
 | **M5Stack AtomS3R (Echo)** | ✔️ 対応済 (Supported) | 内蔵フラッシュUSBドライブ対応 |
-| **M5Stack Cardputer** | ✔️ 対応済 (Supported) | MicroSDカード・オンラインモード・キーボード操作対応 |
+| **M5Stack Cardputer** | ✔️ 対応済 (Supported) | MicroSD & Onine & MDX & Keyboard対応|
 | **M5Stack CoreS3** | 🔮 将来対応予定 (Future) | |
 
 #### 対応音源チップ (Supported Sound Chips)
@@ -42,8 +42,8 @@ vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(X68000)ファイ
 | **Namco C352** | ✔️ 対応済 (Supported) |
 
 ### 特徴
-- **オンラインモード (ジュークボックス)**: Wi-Fiに接続することで、VGM/VGZXファイルをダウンロードする手間なく、クラウドのファイルを指定して再生できます。
-- **MDX (X68000) フォーマット対応**: VGM形式に加えて、X68000で広く使われたMDX形式の再生にも対応しました。
+- **オンラインモード : Wi-Fiに接続することで、VGM/VGZXファイルをダウンロードする手間なく、クラウドのファイルを指定して再生できます。
+- **MDX (MXDRV) フォーマット対応**: VGM形式に加えて、X68000で広く使われたMDX形式の再生にも対応しました。
 - **VGZ(GZIP圧縮)対応**: 解凍せずにそのまま再生可能。
 - **軽量・高速**: M5Stackの限られたリソースに最適化。
 
@@ -89,7 +89,7 @@ vgmM5 is a VGM/VGZ and MDX (X68000) file player designed specifically for the M5
 | Device | Status | Notes |
 | :--- | :--- | :--- |
 | **M5Stack AtomS3R (Echo)** | ✔️ Supported | Supports built-in Flash USB Drive |
-| **M5Stack Cardputer** | ✔️ Supported | Reads from MicroSD, Online Mode & Keyboard control |
+| **M5Stack Cardputer** | ✔️ Supported | MicroSD & Online & Keyboard & MDX Support |
 | **M5Stack CoreS3** | 🔮 Future | |
 
 #### Supported Sound Chips
@@ -138,6 +138,7 @@ Our original source code, modifications, and the matrix processing sound engine 
 
 This project utilizes and references the following excellent libraries, code, and assets:
 - [M5Unified](https://github.com/m5stack/M5Unified) - MIT License
+- [MAME](https://www.mamedev.org/) - GPL
 - ESP-IDF (FFat / Wear Levelling) - Apache License 2.0
 - Puff (zlib decompressor) by Mark Adler - zlib License
 - [Misaki Font](https://littlelimit.net/misaki.htm) / Little Limit - Free Font License
