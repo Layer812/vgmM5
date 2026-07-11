@@ -13,7 +13,7 @@ void ssg_engine_init(SSGSoundEngine *engine, uint32_t sample_rate, uint32_t cloc
     engine->rng = 1; // ノイズ用LFSR初期値
 
     // ボリュームテーブル作成 (対数カーブ)
-    const double MAX_VOL = 24000.0;
+    const double MAX_VOL = 12000.0; // Halved to account for +/- swing
     for (int i = 0; i < 16; i++) {
         if (i == 0) engine->vol_table[i] = 0;
         else engine->vol_table[i] = (int32_t)(MAX_VOL * pow(10.0, -(15 - i) * 2.0 / 20.0));
@@ -111,10 +111,12 @@ void ssg_engine_update(SSGSoundEngine *engine, int32_t *out_l, int32_t *out_r) {
         else if (noise_en)       out = engine->noise_out;
         else                     out = true; // 両方OFFの場合は常にHIGH
 
+        uint8_t vol_reg = engine->regs[8 + i];
+        uint8_t vol = (vol_reg & 0x10) ? engine->env_vol : (vol_reg & 0x0F);
         if (out) {
-            uint8_t vol_reg = engine->regs[8 + i];
-            uint8_t vol = (vol_reg & 0x10) ? engine->env_vol : (vol_reg & 0x0F);
             mix += engine->vol_table[vol];
+        } else {
+            mix -= engine->vol_table[vol];
         }
     }
 

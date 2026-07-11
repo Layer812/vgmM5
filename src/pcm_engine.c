@@ -6,6 +6,35 @@
 PCMSoundEngine g_pcm_engine;
 
 // ─────────────────────────────────────────
+// Namco C140 / C352 LUT
+// ─────────────────────────────────────────
+static int16_t c352_mulaw_table[256];
+static int16_t c140_pcmtbl[8];
+
+static void init_namco_tables() {
+    static bool initialized = false;
+    if (initialized) return;
+    initialized = true;
+    int32_t segbase = 0;
+    for(int i = 0; i < 8; i++) {
+        c140_pcmtbl[i] = segbase;
+        segbase += 16 << i;
+    }
+    int j = 0;
+    for(int i = 0; i < 128; i++) {
+        c352_mulaw_table[i] = j << 5;
+        if (i < 16) j += 1;
+        else if (i < 24) j += 2;
+        else if (i < 48) j += 4;
+        else if (i < 100) j += 8;
+        else j += 16;
+    }
+    for(int i = 128; i < 256; i++) {
+        c352_mulaw_table[i] = (~c352_mulaw_table[i - 128]) & 0xffe0;
+    }
+}
+
+// ─────────────────────────────────────────
 // OKI/MSM6258 共通 ADPCMテーブル
 // ─────────────────────────────────────────
 static int oki_step_table[49] = {
@@ -42,139 +71,84 @@ static void msm6258_decode_nibble(MSM6258 *c, int nibble) {
 void pcm_engine_init(PCMSoundEngine *engine, uint32_t sample_rate) {
     memset(engine, 0, sizeof(PCMSoundEngine));
     engine->sample_rate = sample_rate;
-    engine->ym2612_dac.dac_data = 128; // DACの初期値は中点(128)
+    engine->ym2612_dac.dac_data = 128;
+    engine->c140_enabled = false;
+    engine->c352_enabled = false;
+    engine->namco.is_mmap = false;
+    engine->namco.block_count = 0;
+    init_namco_tables();
 }
 
 void pcm_engine_free(PCMSoundEngine *engine) {
-    if (engine->oki.rom_data) {
-        free(engine->oki.rom_data);
-        engine->oki.rom_data = NULL;
-        engine->oki.rom_size = 0;
-    }
-    if (engine->msm6258.rom_data) {
-        free(engine->msm6258.rom_data);
-        engine->msm6258.rom_data = NULL;
-        engine->msm6258.rom_size = 0;
-    }
-    
-    if (engine->ym2612_pcm_block) {
-        free(engine->ym2612_pcm_block);
-        engine->ym2612_pcm_block = NULL;
-        engine->ym2612_pcm_size  = 0;
-    }
-    for (int b = 0; b < engine->segapcm.block_count; b++) {
-        if (engine->segapcm.blocks[b].is_allocated && engine->segapcm.blocks[b].data) {
-            free(engine->segapcm.blocks[b].data);
-        }
-        engine->segapcm.blocks[b].data = NULL;
-        engine->segapcm.blocks[b].is_allocated = false;
-    }
+    engine->ym2612_pcm_block_count = 0;
+    engine->oki.block_count = 0;
+    engine->msm6258.block_count = 0;
     engine->segapcm.block_count = 0;
-
+    for (int b = 0; b < engine->namco.block_count; b++) {
+        if (engine->namco.blocks[b].is_allocated && engine->namco.blocks[b].data) {
+            free((void*)engine->namco.blocks[b].data);
+        }
+    }
+    engine->namco.block_count = 0;
 }
 
 // ─────────────────────────────────────────
 // データブロック追加 (0x67コマンド)
 // ─────────────────────────────────────────
-void pcm_engine_add_data_block(PCMSoundEngine *engine, uint8_t type,
-                               uint8_t *data, uint32_t size) {
+void pcm_engine_add_data_block(PCMSoundEngine *engine, uint8_t type, const uint8_t *data, uint32_t size) {
+    if (size > 0x1000000) return;
     if (type == 0x00) {
-        // YM2612 PCM（連結）
-        if (!engine->ym2612_pcm_block) {
-            engine->ym2612_pcm_block = (uint8_t*)malloc(size);
-            engine->ym2612_pcm_size  = 0;
-        } else {
-            uint8_t *nb = (uint8_t*)realloc(engine->ym2612_pcm_block,
-                                             engine->ym2612_pcm_size + size);
-            if (nb) engine->ym2612_pcm_block = nb;
-        }
-        if (engine->ym2612_pcm_block) {
-            memcpy(engine->ym2612_pcm_block + engine->ym2612_pcm_size, data, size);
-            engine->ym2612_pcm_size += size;
+        if (engine->ym2612_pcm_block_count < 64) {
+            int c = engine->ym2612_pcm_block_count;
+            engine->ym2612_pcm_offsets[c] = (c == 0) ? 0 : engine->ym2612_pcm_offsets[c-1] + engine->ym2612_pcm_sizes[c-1];
+            engine->ym2612_pcm_sizes[c] = size;
+            engine->ym2612_pcm_blocks[c] = data;
+            engine->ym2612_pcm_block_count++;
         }
     } else if (type == 0x04) {
-        // MSM6258 ADPCMシンプルストリーム（連結）
-        // 複数の0x67ブロックが来る場合はreallocで追加する
-        if (!engine->msm6258.rom_data) {
-            engine->msm6258.rom_data = (uint8_t*)malloc(size);
-            engine->msm6258.rom_size = 0;
-        } else {
-            uint8_t *nb = (uint8_t*)realloc(engine->msm6258.rom_data,
-                                             engine->msm6258.rom_size + size);
-            if (nb) engine->msm6258.rom_data = nb;
-        }
-        if (engine->msm6258.rom_data) {
-            if (engine->msm6258.block_count < 64) {
-                engine->msm6258.block_offsets[engine->msm6258.block_count] = engine->msm6258.rom_size;
-                engine->msm6258.block_sizes[engine->msm6258.block_count] = size;
-                engine->msm6258.block_count++;
-            }
-            memcpy(engine->msm6258.rom_data + engine->msm6258.rom_size, data, size);
-            engine->msm6258.rom_size += size;
-        }
-    } else if (type == 0x88) {
-        // MSM6258 ROM形式（先頭8バイトが総サイズ+オフセット）
-        if (size < 8) return;
-        uint32_t rom_total = data[0]|(data[1]<<8)|(data[2]<<16)|(data[3]<<24);
-        uint32_t start_ofs = data[4]|(data[5]<<8)|(data[6]<<16)|(data[7]<<24);
-        uint32_t actual    = size - 8;
-        if (!engine->msm6258.rom_data) {
-            engine->msm6258.rom_data = (uint8_t*)malloc(rom_total);
-            if (engine->msm6258.rom_data) {
-                memset(engine->msm6258.rom_data, 0, rom_total);
-                engine->msm6258.rom_size = rom_total;
-            }
-        }
-        if (engine->msm6258.rom_data && start_ofs + actual <= engine->msm6258.rom_size) {
-            memcpy(engine->msm6258.rom_data + start_ofs, data + 8, actual);
+        if (engine->msm6258.block_count < 64) {
+            int c = engine->msm6258.block_count;
+            engine->msm6258.block_offsets[c] = (c == 0) ? 0 : engine->msm6258.block_offsets[c-1] + engine->msm6258.block_sizes[c-1];
+            engine->msm6258.block_sizes[c] = size;
+            engine->msm6258.blocks[c] = data;
+            engine->msm6258.block_count++;
         }
     } else if (type == 0x8B) {
-        // OKI MSM6295 ROM（先頭8バイトが総サイズ+オフセット）
-        if (size < 8) return;
-        uint32_t rom_total = data[0]|(data[1]<<8)|(data[2]<<16)|(data[3]<<24);
-        uint32_t start_ofs = data[4]|(data[5]<<8)|(data[6]<<16)|(data[7]<<24);
-        uint32_t actual    = size - 8;
-        if (!engine->oki.rom_data) {
-            engine->oki.rom_data = (uint8_t*)malloc(rom_total);
-            if (engine->oki.rom_data) {
-                memset(engine->oki.rom_data, 0, rom_total);
-                engine->oki.rom_size = rom_total;
-            }
-        }
-        if (engine->oki.rom_data && start_ofs + actual <= engine->oki.rom_size) {
-            memcpy(engine->oki.rom_data + start_ofs, data + 8, actual);
+        if (engine->oki.block_count < 64) {
+            int c = engine->oki.block_count;
+            engine->oki.block_offsets[c] = (c == 0) ? 0 : engine->oki.block_offsets[c-1] + engine->oki.block_sizes[c-1];
+            engine->oki.block_sizes[c] = size;
+            engine->oki.blocks[c] = data;
+            engine->oki.block_count++;
         }
     } else if (type == 0x80) {
-        // SegaPCM
-        if (size <= 8) return;
+        if (size < 8) return;
         uint32_t start_addr = data[4] | (data[5] << 8) | (data[6] << 16) | (data[7] << 24);
-        
-        // ★ ループ時に同じブロックが重複追加されるのを防ぐ（処理落ち対策）
         for (int i = 0; i < engine->segapcm.block_count; i++) {
-            if (engine->segapcm.blocks[i].start_addr == start_addr) {
-                return; 
-            }
+            if (engine->segapcm.blocks[i].start_addr == start_addr) return;
         }
-        
         if (engine->segapcm.block_count >= SEGAPCM_MAX_BLOCKS) return;
         uint32_t actual = size - 8;
         engine->segapcm.blocks[engine->segapcm.block_count].start_addr = start_addr;
         engine->segapcm.blocks[engine->segapcm.block_count].size = actual;
-        
-        uint8_t* sram_data = (uint8_t*)heap_caps_malloc(actual, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (sram_data) {
-            memcpy(sram_data, data + 8, actual);
-            engine->segapcm.blocks[engine->segapcm.block_count].data = sram_data;
-            engine->segapcm.blocks[engine->segapcm.block_count].is_allocated = true;
-        } else {
-            engine->segapcm.blocks[engine->segapcm.block_count].data = data + 8;
-            engine->segapcm.blocks[engine->segapcm.block_count].is_allocated = false;
-        }
-        
-        // print details directly via uart if printf fails, but printf is usually fine
-        printf("SegaPCM Block %d: start=0x%08X size=%d\\n", engine->segapcm.block_count, start_addr, actual);
+        engine->segapcm.blocks[engine->segapcm.block_count].data = data + 8;
+        engine->segapcm.blocks[engine->segapcm.block_count].is_allocated = false;
         engine->segapcm.block_count++;
+    } else if (type == 0x8D || type == 0x8E || type == 0x92 || type == 0x93) {
+        if (size < 8) return;
+        uint32_t start_addr = data[4] | (data[5] << 8) | (data[6] << 16) | (data[7] << 24);
+        uint32_t actual = size - 8;
+        pcm_engine_namco_mmap(engine, start_addr, data + 8, actual);
     }
+}
+
+uint8_t pcm_engine_get_ym2612_byte(PCMSoundEngine *engine, uint32_t offset) {
+    for (int i = 0; i < engine->ym2612_pcm_block_count; i++) {
+        if (offset >= engine->ym2612_pcm_offsets[i] && offset < engine->ym2612_pcm_offsets[i] + engine->ym2612_pcm_sizes[i]) {
+            return engine->ym2612_pcm_blocks[i][offset - engine->ym2612_pcm_offsets[i]];
+        }
+    }
+    return 0x80;
 }
 
 // ─────────────────────────────────────────
@@ -182,7 +156,6 @@ void pcm_engine_add_data_block(PCMSoundEngine *engine, uint8_t type,
 // ─────────────────────────────────────────
 void pcm_engine_set_msm6258_clock(PCMSoundEngine *engine, uint32_t clock) {
     engine->msm6258.clock = clock;
-    // デフォルト分周 /512
     uint32_t sr = (clock > 0) ? (clock / 512) : 15625;
     engine->msm6258.step_size = ((uint64_t)sr * 65536) / engine->sample_rate;
 }
@@ -192,7 +165,6 @@ void pcm_engine_set_msm6258_clock(PCMSoundEngine *engine, uint32_t clock) {
 // ─────────────────────────────────────────
 void pcm_engine_write_msm6258(PCMSoundEngine *engine, uint8_t reg, uint8_t data) {
     if (reg == 0) {
-        // コントロールレジスタ: bit1=STOP
         if (data & 0x02) {
             engine->msm6258.playing = 0;
         } else {
@@ -203,8 +175,6 @@ void pcm_engine_write_msm6258(PCMSoundEngine *engine, uint8_t reg, uint8_t data)
             engine->msm6258.playing        = 1;
         }
     } else if (reg == 1) {
-        // データレジスタ: プレディクタ初期化用の直接ニブル書き込み
-        // X68000 4bitモード: 下位4bitがADPCMニブル
         msm6258_decode_nibble(&engine->msm6258, data & 0x0F);
         engine->msm6258.playing = 1;
     }
@@ -215,11 +185,8 @@ void pcm_engine_write_msm6258(PCMSoundEngine *engine, uint8_t reg, uint8_t data)
 // ─────────────────────────────────────────
 void pcm_engine_msm6258_start_stream(PCMSoundEngine *engine,
                                      uint32_t offset, uint32_t length) {
-    if (!engine->msm6258.rom_data) return;
     engine->msm6258.data_pos       = offset;
     engine->msm6258.data_end       = offset + length;
-    if (engine->msm6258.data_end > engine->msm6258.rom_size)
-        engine->msm6258.data_end = engine->msm6258.rom_size;
     engine->msm6258.adpcm_val      = 0;
     engine->msm6258.adpcm_step_idx = 0;
     engine->msm6258.nibble_sel     = 0;
@@ -230,7 +197,7 @@ void pcm_engine_msm6258_start_stream(PCMSoundEngine *engine,
 }
 
 // ─────────────────────────────────────────
-// OKI MSM6295 (未使用/スタブ)
+// OKI MSM6295 (スタブ)
 // ─────────────────────────────────────────
 void pcm_engine_set_oki_clock(PCMSoundEngine *engine, uint32_t clock) {
     (void)engine; (void)clock;
@@ -248,7 +215,6 @@ void pcm_engine_segapcm_init(PCMSoundEngine *engine, uint32_t clock, uint32_t in
     uint8_t mask  = (interface_reg >> 8) & 0xFF;
     engine->segapcm.bank_shift = (shift == 0) ? 12 : shift;
     engine->segapcm.bank_mask  = (mask  == 0) ? 0x70 : mask;
-    // MAMEと同じく 0xFF で初期化（bit0=1 = ch disable）
     for (int i = 0; i < 256; i++) engine->segapcm.regs[i] = 0xFF;
     for (int i = 0; i < 16; i++) {
         engine->segapcm.low[i]          = 0;
@@ -256,20 +222,16 @@ void pcm_engine_segapcm_init(PCMSoundEngine *engine, uint32_t clock, uint32_t in
         engine->segapcm.last_block[i]   = 0;
         engine->segapcm.unmapped_page[i] = 0xFFFFFFFF;
     }
-    // step_scale = (clock/128 << 16) / sample_rate
-    // tick内で delta * step_scale >> 16 でアドレス進行量を計算（除算不要）
     uint32_t chip_rate = engine->segapcm.clock / 128;
     engine->segapcm.step_scale = (uint32_t)(((uint64_t)chip_rate << 16) / engine->sample_rate);
     engine->segapcm.block_count = 0;
 }
 
-// SegaPCM レジスタ書き込み（MAMEはRAMに直書きするだけ）
 void pcm_engine_segapcm_write(PCMSoundEngine *engine, uint8_t reg, uint8_t data) {
     engine->segapcm.regs[reg] = data;
     int ch = (reg & 0x7F) / 8;
     if (ch < 16) {
         uint8_t *regs = &engine->segapcm.regs[8 * ch];
-        // 修正: MAMEに倣い、offset 5がHiバイト、offset 4がLoバイト
         engine->segapcm.loop[ch] = ((uint32_t)regs[5] << 16) | ((uint32_t)regs[4] << 8);
         engine->segapcm.end[ch] = regs[6] + 1;
         engine->segapcm.delta[ch] = regs[7];
@@ -280,7 +242,6 @@ void pcm_engine_segapcm_write(PCMSoundEngine *engine, uint8_t reg, uint8_t data)
         engine->segapcm.bank[ch] = (uint32_t)(flags & engine->segapcm.bank_mask) << engine->segapcm.bank_shift;
         engine->segapcm.flags[ch] = flags;
         
-        // 修正: offset 5がHiバイト、offset 4がLoバイト
         uint8_t cur_hi = engine->segapcm.regs[0x80 + 8*ch + 5];
         uint8_t cur_lo = engine->segapcm.regs[0x80 + 8*ch + 4];
         engine->segapcm.addr[ch] = ((uint32_t)cur_hi << 16) | ((uint32_t)cur_lo << 8) | engine->segapcm.low[ch];
@@ -293,6 +254,198 @@ void pcm_engine_segapcm_write(PCMSoundEngine *engine, uint8_t reg, uint8_t data)
 void pcm_engine_write_ym2612(PCMSoundEngine *engine, uint16_t addr, uint8_t data) {
     if      (addr == 0x2B) engine->ym2612_dac.dac_enable = (data & 0x80) ? 1 : 0;
     else if (addr == 0x2A) engine->ym2612_dac.dac_data   = data;
+}
+
+// ─────────────────────────────────────────
+// Namco C140 / C352
+// ─────────────────────────────────────────
+void pcm_engine_namco_init(PCMSoundEngine *engine, uint32_t clock, uint8_t type) {
+    engine->namco.clock = clock;
+    engine->namco.type = type;
+    engine->namco.sample_rate = engine->sample_rate;
+    if (type == 0xC1) {
+        engine->c140_enabled = true;
+        engine->c352_enabled = false;
+        engine->namco.channels = 24;
+        engine->namco.c140_type = 1;
+    } else {
+        engine->c352_enabled = true;
+        engine->c140_enabled = false;
+        engine->namco.channels = 32;
+    }
+    memset(engine->namco.ch, 0, sizeof(engine->namco.ch));
+
+    uint32_t native_rate;
+    if (type == 0xC1) {
+        native_rate = (clock > 0) ? (clock / 64) : 250000;
+    } else {
+        native_rate = (clock > 0) ? (clock / 288) : 83333;
+    }
+    engine->namco.step_scale = (uint32_t)(((uint64_t)native_rate << 16) / engine->sample_rate);
+}
+
+/*
+ * C352 Register Map (MAME c352.cpp):
+ * Each channel has 8 ports, each 16-bit (little-endian):
+ *   Port 0 (byte 0x00): Volume L (only low byte used)
+ *   Port 1 (byte 0x02): Volume R (only low byte used)
+ *   Port 2 (bytes 0x04-0x05): Frequency (16-bit LE)
+ *   Port 3 (bytes 0x06-0x07): Start Address (16-bit LE)
+ *   Port 4 (bytes 0x08-0x09): End Address (16-bit LE)
+ *   Port 5 (bytes 0x0A-0x0B): Loop Address (16-bit LE)
+ *   Port 6 (bytes 0x0C-0x0D): Bank (16-bit LE) - upper bits for 24-bit addresses
+ *   Port 7 (bytes 0x0E-0x0F): Mode/Flags (16-bit LE)
+ *     bit 0: Reverse
+ *     bit 3: muLaw decode
+ *     bit 8: 8-bit PCM
+ *    bit 13: Loop enable
+ *    bit 14: KeyOn trigger
+ *
+ * Global registers (MAME WORD addresses 0x200+):
+ *   Word 0x200 (byte 0x400-0x401): System select / test
+ *   Word 0x202 (byte 0x404-0x405): Batch KeyOn trigger
+ *   Word 0x204 (byte 0x408-0x409): Batch KeyOff trigger
+ *
+ * VGM 0xD5 command sends BYTE addresses, so MAME Word 0x200 = VGM Byte 0x400.
+ */
+void pcm_engine_namco_write(PCMSoundEngine *engine, uint16_t addr, uint16_t data) {
+    if (engine->namco.type == 0xC2) { // C352 (VGM 0xE1: 5バイト, addr=16bit LE, data=16bit LE)
+        // VGM sends word addresses in Big Endian format (parsed in vgm_engine.cpp).
+        /*
+         * C352 Word Address Map (VGM sends word addresses):
+         *
+         * Channel registers (word addresses 0x000-0x1FF):
+         *   Each channel = 8 words (word addresses ch*8 + 0..7)
+         *   Word 0: VolL (low 8-bit) + VolR (high 8-bit)
+         *   Word 1: Step/Freq
+         *   Word 2: Start
+         *   Word 3: End
+         *   Word 4: Loop
+         *   Word 5: Bank
+         *   Word 6: Mode (bit14=KeyOn, bit13=Loop, bit0=Reverse, bit3=muLaw, bit8=8bitPCM)
+         *
+         * Global registers (word addresses 0x200+):
+         *   Word 0x200: System select / test
+         *   Word 0x202: Batch KeyOn (bit N = trigger channel N)
+         *   Word 0x204: Batch KeyOff (bit N = stop channel N)
+         */
+
+        // Global registers
+        if (addr >= 0x200) {
+            if (addr == 0x202) {
+                /* Execute KeyOn/KeyOff for channels with flags set */
+                for (int i = 0; i < engine->namco.channels; i++) {
+                    NamcoPCMChannel *ch = &engine->namco.ch[i];
+                    if (ch->flags & 0x4000) { // C352_FLG_KEYON
+                        ch->playing = true;
+                        ch->latched_bank = ch->bank;
+                        ch->latched_start = ch->start;
+                        ch->latched_end = ch->end;
+                        ch->latched_loop = ch->loop;
+                        ch->pos = ((uint32_t)ch->latched_bank << 16) | (ch->latched_start & 0xFFFF);
+                        ch->counter = 0xFFFF;
+                        ch->prev_sample = 0;
+                        ch->last_sample = 0;
+                        ch->flags &= ~0x4800; // Clear KEYON and LOOPHIST
+                        ch->mode = ch->flags;
+                    }
+                    if (ch->flags & 0x2000) { // C352_FLG_KEYOFF
+                        ch->playing = false;
+                        ch->flags &= ~0x2000;
+                        ch->mode = ch->flags;
+                    }
+                }
+            }
+            return;
+        }
+
+        // Channel registers: addr is word address
+        int ch_idx = addr / 8;
+        int word_reg = addr % 8;
+        if (ch_idx >= engine->namco.channels) return;
+
+        NamcoPCMChannel *ch = &engine->namco.ch[ch_idx];
+
+        switch (word_reg) {
+            case 0:
+                ch->vol_l = data & 0xFF;
+                ch->vol_r = (data >> 8) & 0xFF;
+                break;
+            case 1:
+                ch->vol_rear_l = data & 0xFF;
+                ch->vol_rear_r = (data >> 8) & 0xFF;
+                break;
+            case 2:
+                ch->freq = data;
+                ch->step = data;
+                break;
+            case 3:
+                ch->flags = data;
+                ch->mode = data;
+                break;
+            case 4:
+                ch->bank = data;
+                break;
+            case 5:
+                ch->start = data;
+                break;
+            case 6:
+                ch->end = data;
+                break;
+            case 7:
+                ch->loop = data;
+                break;
+        }
+    } else if (engine->namco.type == 0xC1) { // C140
+        uint8_t data8 = data & 0xFF;
+        int ch_idx = addr / 16;
+        int offset = addr % 16;
+        if (ch_idx >= 24) return;
+        NamcoPCMChannel *ch = &engine->namco.ch[ch_idx];
+
+        // MAME仕様に基づくC140のレジスタデコード (16bit値は上位バイトが先)
+        switch (offset) {
+            case 0x00: ch->vol_r = data8; break;
+            case 0x01: ch->vol_l = data8; break;
+            case 0x02: ch->step = (ch->step & 0x00FF) | (data8 << 8); break; // Freq MSB
+            case 0x03: ch->step = (ch->step & 0xFF00) | data8; break;        // Freq LSB
+            case 0x04: ch->start = (ch->start & 0x00FF) | (data8 << 8); break; // Start MSB
+            case 0x05: ch->start = (ch->start & 0xFF00) | data8; break;        // Start LSB
+            case 0x06: ch->end = (ch->end & 0x00FF) | (data8 << 8); break;     // End MSB
+            case 0x07: ch->end = (ch->end & 0xFF00) | data8; break;            // End LSB
+            case 0x08: ch->loop = (ch->loop & 0x00FF) | (data8 << 8); break;   // Loop MSB
+            case 0x09: ch->loop = (ch->loop & 0xFF00) | data8; break;          // Loop LSB
+            case 0x0A: ch->bank = data8; break;                                // Bank
+            case 0x0B: 
+                ch->mode = data8; // Mode
+                if (data8 & 0x80) { // ★ C140は 0x0B レジスタの bit7 が KeyOn！
+                    ch->playing = true;
+                    ch->pos = ((uint32_t)ch->bank << 16) | ch->start;
+                    ch->pos_frac = 0;
+                    ch->counter = 0;
+                    ch->prev_sample = 0;
+                    ch->last_sample = 0;
+                } else {
+                    ch->playing = false;
+                }
+                break;
+            case 0x0C:
+            case 0x0D:
+            case 0x0E:
+            case 0x0F:
+                break; // 未使用
+        }
+    }
+}
+
+void pcm_engine_namco_mmap(PCMSoundEngine *engine, uint32_t start_addr, const uint8_t *data, uint32_t size) {
+    if (engine->namco.block_count >= 64) return;
+    engine->namco.blocks[engine->namco.block_count].start_addr = start_addr;
+    engine->namco.blocks[engine->namco.block_count].size = size;
+    engine->namco.blocks[engine->namco.block_count].data = data;
+    engine->namco.blocks[engine->namco.block_count].is_allocated = false;
+    engine->namco.is_mmap = true;
+    engine->namco.block_count++;
 }
 
 // ─────────────────────────────────────────
@@ -309,7 +462,7 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
 
     // ── MSM6258 ADPCM ────────────────────────
     if (engine->msm6258.playing &&
-        engine->msm6258.rom_data &&
+        engine->msm6258.block_count > 0 &&
         engine->msm6258.data_end > engine->msm6258.data_pos) {
 
         engine->msm6258.step_accum += engine->msm6258.step_size;
@@ -321,33 +474,40 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
                 engine->msm6258.playing = 0;
                 break;
             }
-            // 上位ニブル→下位ニブルの順にデコード（OKI ADPCM標準）
-            uint8_t byte = engine->msm6258.rom_data[engine->msm6258.data_pos];
+            uint8_t byte = 0;
+            bool byte_found = false;
+            for (int b = 0; b < engine->msm6258.block_count; b++) {
+                if (engine->msm6258.blocks[b] != NULL &&
+                    engine->msm6258.data_pos >= engine->msm6258.block_offsets[b] &&
+                    engine->msm6258.data_pos < engine->msm6258.block_offsets[b] + engine->msm6258.block_sizes[b]) {
+                    byte = engine->msm6258.blocks[b][engine->msm6258.data_pos - engine->msm6258.block_offsets[b]];
+                    byte_found = true;
+                    break;
+                }
+            }
+            if (!byte_found) {
+                engine->msm6258.playing = 0;
+                break;
+            }
             int nibble = (engine->msm6258.nibble_sel == 0)
-                         ? ((byte >> 4) & 0x0F)   // 上位ニブル先
-                         : (byte & 0x0F);          // 下位ニブル後
+                         ? ((byte >> 4) & 0x0F)
+                         : (byte & 0x0F);
             engine->msm6258.nibble_sel ^= 1;
             if (engine->msm6258.nibble_sel == 0) {
-                engine->msm6258.data_pos++;        // 1バイト消費
+                engine->msm6258.data_pos++;
             }
             msm6258_decode_nibble(&engine->msm6258, nibble);
         }
 
-        // adpcm_val (-2048〜2047) → 16bit相当にスケール
-        // 「気持ち音を抑える」ため、<<4 (16倍) ではなく *10 (約62%の音量) に調整します
         int32_t out = engine->msm6258.adpcm_val * 10;
         mix_l += out;
         mix_r += out;
     }
 
-    // ── SegaPCM (MAME/VGMPlay完全準拠) ────────────────────────
-    
+    // ── SegaPCM ──────────────────────────────
     if (engine->segapcm.block_count > 0) {
         int32_t spcm_l = 0;
         int32_t spcm_r = 0;
-        // VGMPlay/MAME: regs = ram + 8*ch
-        // ram[0x00+8*ch .. 0x07+8*ch]: パラメータ (vol, loop, end, delta)
-        // ram[0x80+8*ch .. 0x87+8*ch]: ステータス (current addr, bank/flags)
         for (int ch = 0; ch < 16; ch++) {
             uint8_t flags = engine->segapcm.flags[ch];
             if (flags & 1) continue;
@@ -365,10 +525,9 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
             uint8_t  end  = engine->segapcm.end[ch];
             uint8_t  delta = engine->segapcm.delta[ch];
 
-            // 終端チェック
             if ((addr >> 16) == end) {
                 if (flags & 2) {
-                    engine->segapcm.flags[ch] |= 1; // 停止
+                    engine->segapcm.flags[ch] |= 1;
                     engine->segapcm.regs[0x80 + 8*ch + 6] |= 1;
                     continue;
                 } else {
@@ -376,19 +535,17 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
                 }
             }
 
-            // ROMアドレス = (bank >> 8) + (addr >> 8)
             uint32_t rom_addr = bank + (addr >> 8);
             int32_t sample = 0;
             int b = engine->segapcm.last_block[ch];
             
-            // ★ 修正: ブロックデータがロードされている場合のみ 128 の減算を行う
             if (b < engine->segapcm.block_count && engine->segapcm.blocks[b].data != NULL &&
                 rom_addr >= engine->segapcm.blocks[b].start_addr &&
                 rom_addr <  engine->segapcm.blocks[b].start_addr + engine->segapcm.blocks[b].size) {
                 sample = (int32_t)engine->segapcm.blocks[b].data[rom_addr - engine->segapcm.blocks[b].start_addr] - 128;
             } else {
                 if (engine->segapcm.unmapped_page[ch] == (rom_addr & ~0xFFF)) {
-                    sample = 0; // ★ 未配置セクタは一律0(完全無音)
+                    sample = 0;
                 } else {
                     int found = 0;
                     for (b = 0; b < engine->segapcm.block_count; b++) {
@@ -404,7 +561,7 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
                     if (!found) {
                         engine->segapcm.unmapped_page[ch] = (rom_addr & ~0xFFF);
                         engine->segapcm.last_block[ch] = 255;
-                        sample = 0; // ★ 探索失敗時も0に固定
+                        sample = 0;
                     }
                 }
             }
@@ -412,20 +569,130 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
             spcm_l += sample * engine->segapcm.vol_l[ch];
             spcm_r += sample * engine->segapcm.vol_r[ch];
 
-            // アドレス更新：16.16固定小数点アキュムレータ（除算ゼロ）
-            // step_scale = (chip_rate << 16) / sample_rate（init時に事前計算済み）
             engine->segapcm.step_acc[ch] += (uint32_t)delta * engine->segapcm.step_scale;
-            uint32_t whole_steps = engine->segapcm.step_acc[ch] >> 16;   // 整数部: シフトで取得
-            engine->segapcm.step_acc[ch] &= 0xFFFF;                       // 小数部: マスクで保持
-            // removed whole_steps force to 1
+            uint32_t whole_steps = engine->segapcm.step_acc[ch] >> 16;
+            engine->segapcm.step_acc[ch] &= 0xFFFF;
             addr = (addr + whole_steps) & 0xFFFFFF;
             engine->segapcm.addr[ch] = addr;
         }
-        // FM音源とのバランスを調整（さらに音量を上げて >>1 に）
         mix_l += spcm_l >> 1;
         mix_r += spcm_r >> 1;
     }
 
+    // ── Namco C140/C352 ──────────────────────
+    if (engine->c140_enabled || engine->c352_enabled) {
+        int32_t namco_mix_l = 0;
+        int32_t namco_mix_r = 0;
+        uint8_t max_ch = engine->c352_enabled ? 32 : 24;
+        
+        for (int ch = 0; ch < max_ch; ch++) {
+            NamcoPCMChannel *v = &engine->namco.ch[ch];
+            if (!v->playing) continue;
+
+            // Counter-based interpolation
+            v->counter += (uint32_t)(((uint64_t)v->step * engine->namco.step_scale) >> 16);
+            
+            uint32_t step_amount = v->counter >> 16;
+            if (step_amount > 0) {
+                v->counter &= 0xFFFF;
+
+                for (uint32_t i = 0; i < step_amount; i++) {
+                    v->prev_sample = v->last_sample;
+
+                    bool hit_end = false;
+                    if (engine->c352_enabled) {
+                        if (v->mode & 0x0001) v->pos--;
+                        else v->pos++;
+                        if ((v->pos & 0xFFFF) == v->latched_end) hit_end = true;
+                    } else {
+                        v->pos++;
+                        if ((v->pos & 0xFFFF) == v->latched_end) hit_end = true;
+                    }
+
+                    if (hit_end) {
+                        if (engine->c352_enabled && (v->mode & 0x0010) && (v->mode & 0x0002)) { // LINK && LOOP
+                            v->pos = ((uint32_t)v->latched_start << 16) | v->latched_loop;
+                            v->mode |= 0x0800;
+                        } else if (engine->c352_enabled && (v->mode & 0x0002)) { // LOOP only
+                            v->pos = (v->pos & 0xFF0000) | v->latched_loop;
+                            v->mode |= 0x0800;
+                        } else if (engine->c140_enabled && (v->mode & 0x10)) {
+                            v->pos = (v->pos & 0xFF0000) | v->latched_loop;
+                        } else {
+                            v->playing = false;
+                            break;
+                        }
+                    }
+
+                    uint32_t addr;
+                    if (engine->c352_enabled) {
+                        addr = v->pos;
+                    } else {
+                        uint32_t base_addr = ((uint32_t)v->latched_bank << 16) + (v->pos & 0xFFFF);
+                        if (engine->namco.c140_type == 0) {
+                            addr = ((base_addr & 0x200000) >> 2) | (base_addr & 0x7FFFF);
+                        } else {
+                            addr = ((base_addr & 0x300000) >> 1) | (base_addr & 0x7FFFF);
+                        }
+                    }
+
+                    uint8_t dt = 0x00;
+                    if (engine->c140_enabled) dt = 0x80;
+
+                    int b = v->current_block;
+                    if (b < engine->namco.block_count && 
+                        addr >= engine->namco.blocks[b].start_addr && 
+                        addr < engine->namco.blocks[b].start_addr + engine->namco.blocks[b].size) {
+                        dt = engine->namco.blocks[b].data[addr - engine->namco.blocks[b].start_addr];
+                    } else {
+                        for (int j = 0; j < engine->namco.block_count; j++) {
+                            if (addr >= engine->namco.blocks[j].start_addr && 
+                                addr < engine->namco.blocks[j].start_addr + engine->namco.blocks[j].size) {
+                                dt = engine->namco.blocks[j].data[addr - engine->namco.blocks[j].start_addr];
+                                v->current_block = j;
+                                break;
+                            }
+                        }
+                    }
+
+                    int16_t new_sample = 0;
+                    if (engine->c352_enabled) {
+                        if (v->mode & 0x0004) { // 0x0004 is MuLaw
+                            new_sample = c352_mulaw_table[dt];
+                        } else {
+                            new_sample = (int16_t)((int8_t)dt) << 8;
+                        }
+                    } else {
+                        if (v->mode & 0x08) {
+                            int16_t sdt = ((int8_t)dt) >> 3;
+                            if (sdt < 0) new_sample = (sdt << (dt & 7)) - c140_pcmtbl[dt & 7];
+                            else         new_sample = (sdt << (dt & 7)) + c140_pcmtbl[dt & 7];
+                        } else {
+                            int16_t sdt = (int8_t)dt;
+                            new_sample = sdt << 5;
+                        }
+                    }
+                    v->last_sample = new_sample;
+                }
+            }
+
+            if (!v->playing) continue;
+
+            int32_t dltdt = v->last_sample - v->prev_sample;
+            int16_t sample = ((dltdt * v->counter) >> 16) + v->prev_sample;
+
+            int16_t s_fl = (v->mode & 0x0100) ? -sample : sample;
+            int16_t s_rl = (v->mode & 0x0200) ? -sample : sample;
+            int16_t s_fr = (v->mode & 0x0080) ? -sample : sample;
+            int16_t s_rr = (v->mode & 0x0080) ? -sample : sample; // MAME maps FR phase to RR as well
+            
+            namco_mix_l += (s_fl * v->vol_l + s_rl * v->vol_rear_l) >> 8;
+            namco_mix_r += (s_fr * v->vol_r + s_rr * v->vol_rear_r) >> 8;
+        }
+        // Scale down to prevent clipping when many channels and rear speakers are active
+        mix_l += (namco_mix_l * 3) >> 3; // roughly 0.375x
+        mix_r += (namco_mix_r * 3) >> 3;
+    }
 
     *out_l += mix_l;
     *out_r += mix_r;

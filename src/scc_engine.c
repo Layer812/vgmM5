@@ -79,6 +79,8 @@ void scc_engine_write(SCCSoundEngine *engine, uint8_t port, uint8_t reg, uint8_t
                 engine->freq[ch] = (engine->freq[ch] & 0x0F00) | data;
             } else {
                 engine->freq[ch] = (engine->freq[ch] & 0x00FF) | ((data & 0x0F) << 8);
+                // 周波数が更新されたタイミングで位相をリセットして音の途切れを防止
+                engine->phase[ch] = 0;
             }
             update_scc_step(engine, ch);
         }
@@ -89,7 +91,14 @@ void scc_engine_write(SCCSoundEngine *engine, uint8_t port, uint8_t reg, uint8_t
         }
         else if (reg == 0x8F) {
             // MSX: チャンネルON/OFF (0x8F)
+            uint8_t changed = engine->enable ^ data;
             engine->enable = data;
+            // チャンネルのONになったものは位相をリセットして音の途切れを防止
+            for (int ch = 0; ch < 5; ch++) {
+            if ((changed & (1 << ch)) && (data & (1 << ch))) {
+                engine->phase[ch] = 0;
+            }
+        }
         }
         else if (reg >= 0xA0 && reg <= 0xA9) {
             // MSX SCC+: 周波数レジスタ (0xA0 - 0xA9)

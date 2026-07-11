@@ -11,6 +11,9 @@
 #include <M5Unified.h>
 #include <atomic> // ★ C++11標準のロックフリー同期
 
+// ★ MDXエンジンとのバッファ共有：MDX再生中もaudio_play_taskが動作するようにする
+extern "C" bool mdx_engine_is_playing(void);
+
 extern "C" int puff_stream(int (*write_cb)(void*, const unsigned char*, unsigned long),
                            void* write_ctx,
                            unsigned long window_size,
@@ -26,6 +29,7 @@ extern "C" {
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_partition.h"
+#include <esp_spi_flash.h>
 #include "fm_engine.h"
 #include "pcm_engine.h"
 #include "psg_engine.h"
@@ -69,6 +73,9 @@ uint8_t chip_type = 0;
 bool prebuffering = false;
 int currentSong = 0;
 
+// ★ ミキサー用の除数（チップ数）をグローバルに一度だけ事前計算
+static int global_chip_count = 1;
+
 #define MAX_SONGS 100
 String songs[MAX_SONGS];
 int numSongs = 0;
@@ -94,6 +101,33 @@ const char* vgm_engine_get_title(void) { return current_vgm_title; }
 
 char vgm_last_error[128] = {0};
 const char* vgm_engine_get_error(void) { return vgm_last_error; }
+
+// VGMコマンドのバイト長を取得 (VGMフォーマット仕様に準拠)
+static int get_cmd_length(uint8_t cmd) {
+    if (cmd >= 0x30 && cmd <= 0x3F) return 2;
+    if (cmd >= 0x40 && cmd <= 0x4E) return 3;
+    if (cmd == 0x4F) return 2;
+    if (cmd == 0x50) return 2;                     // SN76489
+    if (cmd >= 0x51 && cmd <= 0x5F) return 3;
+    if (cmd == 0x61) return 3;                     // Wait 16-bit
+    if (cmd == 0x64) return 4;                     // Wait override (3-byte arg)
+    if (cmd >= 0x62 && cmd <= 0x65) return 1;
+    if (cmd == 0x66) return 1;                     // EOF
+    if (cmd == 0x67) return 7;                     // PCM Data block header
+    if (cmd == 0x68) return 12;                    // PCM RAM write
+    if (cmd >= 0x70 && cmd <= 0x7F) return 1;
+    if (cmd >= 0x80 && cmd <= 0x8F) return 1;
+    if (cmd == 0x90 || cmd == 0x91) return 5;
+    if (cmd == 0x92) return 6;
+    if (cmd == 0x93) return 11;                    // X68000 (OKIM6258) Stream
+    if (cmd == 0x94) return 2;
+    if (cmd == 0x95) return 5;
+    if (cmd >= 0x96 && cmd <= 0x9F) return 1;
+    if (cmd >= 0xA0 && cmd <= 0xBF) return 3;
+    if (cmd >= 0xC0 && cmd <= 0xDF) return 4;
+    if (cmd >= 0xE0 && cmd <= 0xFF) return 5;
+    return 1; // 未知のコマンドは進行不能を防ぐため最低1を進める
+}
 
 void vgm_engine_toggle_pause(void) {
     isPaused = !isPaused;
@@ -193,6 +227,7 @@ int sn76489_writes = 0;
 const esp_partition_t* vgm_swap_partition = nullptr;
 uint32_t vgm_swap_offset = 0;
 uint32_t vgm_swap_erased_limit = 0;
+spi_flash_mmap_handle_t vgm_mmap_handle = 0;
 
 int puff_write_cb(void* ctx, const unsigned char* buf, unsigned long len) {
     if (!vgm_swap_partition) return -1;
@@ -246,9 +281,16 @@ int puff_read_cb(void* ctx, unsigned char* buf, unsigned long len) {
     return bytes_read;
 }
 
+static int vgm_cmd_debug_count = 0;
+	
 bool vgm_engine_play(const char* filepath, bool use_sd) {
-    if (isPlaying) {
-        vgm_engine_stop();
+    // Always stop and clean up before starting a new song, regardless of current state
+    vgm_engine_stop();
+    
+    // Additionally, free vgm_data if it was heap-allocated (not MMAPed)
+    if (vgm_mmap_handle == 0 && vgm_data != nullptr) {
+        free(vgm_data);
+        vgm_data = nullptr;
     }
     
     isPaused = false;
@@ -288,9 +330,8 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
         f.seek(0);
     }
     
-    vgm_data = (uint8_t*) heap_caps_malloc(uncompressed_size, MALLOC_CAP_SPIRAM);
-    if (!vgm_data) vgm_data = (uint8_t*) malloc(uncompressed_size);
-    if (!vgm_data) { 
+    vgm_data = nullptr;
+    if (true) {
         vgm_is_streaming = true;
         vgm_swap_partition = nullptr;
         if (isVgz) {
@@ -328,22 +369,78 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
             f.close();
             
             if (ret != 0) {
-                if (vgm_last_error[0] == '\0') {
+                if (vgm_last_error[0] == ' ') {
                     snprintf(vgm_last_error, sizeof(vgm_last_error), "Decomp. Failed: %d", ret);
                 }
                 isPlaying = false; return false;
             }
             vgm_file_size = destlen;
-        } else {
-            if (use_sd) {
-                vgm_stream_file = SD.open(filepath, "r");
+            
+            const void* mapped_ptr;
+            esp_err_t mmap_err = esp_partition_mmap(vgm_swap_partition, 0, (vgm_file_size + 0xFFFF) & ~0xFFFF, SPI_FLASH_MMAP_DATA, &mapped_ptr, &vgm_mmap_handle);
+            if (mmap_err == ESP_OK) {
+                vgm_data = (uint8_t*)mapped_ptr;
+                vgm_is_streaming = false;
             } else {
-                vgm_stream_file = FFat.open(filepath, "r");
-            }
-            f.close();
-            if (!vgm_stream_file) {
-                snprintf(vgm_last_error, sizeof(vgm_last_error), "Failed to open stream file");
+                snprintf(vgm_last_error, sizeof(vgm_last_error), "MMAP Failed: %d", mmap_err);
                 isPlaying = false; return false;
+            }
+        } else {
+            // .vgm ファイルも Swap パーティションにコピーして MMAP で高速アクセス
+            vgm_swap_partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "vgm_swap");
+            if (vgm_swap_partition) {
+                Serial.printf("[VGM] Copying .vgm to Swap: %lu bytes\n", vgm_file_size);
+                vgm_swap_offset = 0;
+                vgm_swap_erased_limit = 0;
+                
+                // 全体を Swap にコピー
+                uint32_t to_copy = vgm_file_size;
+                uint8_t buf[1024];
+                f.seek(0);
+                while (to_copy > 0) {
+                    uint32_t chunk = to_copy > sizeof(buf) ? sizeof(buf) : to_copy;
+                    int n = f.read(buf, chunk);
+                    if (n <= 0) break;
+                    
+                    uint32_t needed_erase = (vgm_swap_offset + chunk + 4095) & ~4095;
+                    if (needed_erase > vgm_swap_erased_limit) {
+                        esp_partition_erase_range(vgm_swap_partition, vgm_swap_erased_limit, needed_erase - vgm_swap_erased_limit);
+                        vgm_swap_erased_limit = needed_erase;
+                    }
+                    
+                    esp_partition_write(vgm_swap_partition, vgm_swap_offset, buf, chunk);
+                    vgm_swap_offset += chunk;
+                    to_copy -= chunk;
+                }
+                
+                Serial.printf("[VGM] Copied to Swap, now MMAPing...\n");
+                
+                // MMAP
+                const void* mapped_ptr;
+                esp_err_t mmap_err = esp_partition_mmap(vgm_swap_partition, 0, (vgm_file_size + 0xFFFF) & ~0xFFFF, SPI_FLASH_MMAP_DATA, &mapped_ptr, &vgm_mmap_handle);
+                if (mmap_err == ESP_OK) {
+                    vgm_data = (uint8_t*)mapped_ptr;
+                    vgm_is_streaming = false;
+                    Serial.printf("[VGM] .vgm MMAP success!\n");
+                } else {
+                    Serial.printf("[VGM] .vgm MMAP failed: %d\n", mmap_err);
+                }
+            }
+            
+            f.close();
+            
+            // Swap が使えない場合はストリーミングフォールバック
+            if (vgm_is_streaming) {
+                if (use_sd) {
+                    vgm_stream_file = SD.open(filepath, "r");
+                } else {
+                    vgm_stream_file = FFat.open(filepath, "r");
+                }
+                if (!vgm_stream_file) {
+                    snprintf(vgm_last_error, sizeof(vgm_last_error), "Failed to open stream file");
+                    isPlaying = false; return false;
+                }
+                Serial.printf("[VGM] .vgm fallback to SD streaming\n");
             }
         }
         
@@ -461,6 +558,9 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     uint32_t vgm_msm6258_clock = (vgm_version >= 0x151 && vgmDataStart > 0x93) ? (header[0x90] | (header[0x91] << 8) | (header[0x92] << 16) | (header[0x93] << 24)) : 0;
     uint32_t vgm_oki_clock     = (vgm_version >= 0x151 && vgmDataStart > 0x9B) ? (header[0x98] | (header[0x99] << 8) | (header[0x9A] << 16) | (header[0x9B] << 24)) : 0;
     uint32_t vgm_scc_clock     = (vgm_version >= 0x151 && vgmDataStart > 0x9F) ? (header[0x9C] | (header[0x9D] << 8) | (header[0x9E] << 16) | (header[0x9F] << 24)) : 0;
+    // Namco C140 clock at offset 0xA8-0xAB, C352 clock at 0xDC-0xDF (VGM 1.51+)
+    uint32_t vgm_c140_clock    = (vgm_version >= 0x151 && vgmDataStart > 0xAB) ? (header[0xA8] | (header[0xA9] << 8) | (header[0xAA] << 16) | (header[0xAB] << 24)) : 0;
+    uint32_t vgm_c352_clock    = (vgm_version >= 0x151 && vgmDataStart > 0xDF) ? (header[0xDC] | (header[0xDD] << 8) | (header[0xDE] << 16) | (header[0xDF] << 24)) : 0;
 
     if (vgm_ym2612_clock != 0 || vgm_ym2151_clock != 0 || vgm_ym2610_clock != 0 || vgm_ym2203_clock != 0 || vgm_ym2608_clock != 0 || vgm_ym3812_clock != 0 || vgm_ym2413_clock != 0) {
         uint32_t fm_clock = 0;
@@ -479,13 +579,6 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
         else active_channel_count += 9; // OPL系等は9音
     }
 
-    if (vgm_msm6258_clock != 0 || vgm_oki_clock != 0 || vgm_segapcm_clock != 0 || vgm_ym2612_clock != 0) {
-        pcm_engine_init(&g_pcm_engine, actual_sample_rate); active_chips[active_chip_count++] = &pcm_wrapper;
-        active_channel_count += 1;
-        if (vgm_msm6258_clock != 0) pcm_engine_set_msm6258_clock(&g_pcm_engine, vgm_msm6258_clock);
-        if (vgm_oki_clock != 0)     pcm_engine_set_oki_clock(&g_pcm_engine, vgm_oki_clock);
-        if (vgm_segapcm_clock != 0) pcm_engine_segapcm_init(&g_pcm_engine, vgm_segapcm_clock & 0x3FFFFFFF, vgm_spcm_intf);
-    }
 
     is_dual_sn76489 = false;
     Serial.printf("[VGM] SN76489 Clock: %lu, Dual: %d\n", vgm_sn_clock & 0x3FFFFFFF, (vgm_sn_clock & 0x40000000) != 0);
@@ -513,15 +606,216 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
         active_channel_count += 5;
     }
 
+    // ========================================================
+    // PCM engine init: add pcm_wrapper when any PCM chip present
+    // ========================================================
+    pcm_engine_init(&g_pcm_engine, actual_sample_rate);
+    if (vgm_msm6258_clock != 0 || vgm_oki_clock != 0 || vgm_segapcm_clock != 0 || vgm_ym2612_clock != 0 || vgm_c140_clock != 0 || vgm_c352_clock != 0) {
+        active_chips[active_chip_count++] = &pcm_wrapper;
+        active_channel_count += 1;
+        if (vgm_msm6258_clock != 0) pcm_engine_set_msm6258_clock(&g_pcm_engine, vgm_msm6258_clock);
+        if (vgm_oki_clock != 0)     pcm_engine_set_oki_clock(&g_pcm_engine, vgm_oki_clock);
+        if (vgm_segapcm_clock != 0) pcm_engine_segapcm_init(&g_pcm_engine, vgm_segapcm_clock & 0x3FFFFFFF, vgm_spcm_intf);
+        if (vgm_c140_clock != 0) {
+            Serial.printf("[VGM] C140 Clock: %lu\n", vgm_c140_clock);
+            pcm_engine_namco_init(&g_pcm_engine, vgm_c140_clock & 0x3FFFFFFF, 0xC1);
+        }
+        if (vgm_c352_clock != 0) {
+            uint8_t clkdiv = (vgmDataStart > 0xD6) ? header[0xD6] : 0;
+            Serial.printf("[VGM] C352 Clock: %lu (Div: %d)\n", vgm_c352_clock & 0x3FFFFFFF, clkdiv);
+            pcm_engine_namco_init(&g_pcm_engine, vgm_c352_clock & 0x3FFFFFFF, 0xC2);
+        }
+    }
+
+    // ========================================================
+    // ★ ミキサー用の除数（チップ数）をグローバルに一度だけ事前計算
+    // ========================================================
+    global_chip_count = (active_chip_count > 0) ? active_chip_count : 1;
+    Serial.printf("[VGM] Mixer: chip_count=%d\n", global_chip_count);
+
     waitSamples = 0; vgm_time_acc = 0; ym2612_pcm_offset = 0;
-    
     sn76489_writes = 0;
     rd = 0; wd = 0; wav_count = 0;
+    
+    // ==========================================
+    // Pre-scan for 0x67 PCM blocks
+    // ==========================================
+    Serial.printf("[VGM] Pre-scan: vgm_is_streaming=%d, vgm_data=%p\n", vgm_is_streaming, (void*)vgm_data);
+    if (vgm_is_streaming) {
+        Serial.printf("[VGM] Pre-scan: Streaming mode (SD card)\n");
+        if (!vgm_swap_partition) {
+            vgm_swap_partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "vgm_swap");
+            if (vgm_swap_partition) {
+                vgm_swap_offset = 0;
+                vgm_swap_erased_limit = 0;
+            }
+        }
+        if (vgm_swap_partition) {
+            Serial.printf("[VGM] Pre-scan: Scanning for 0x67 blocks (streaming)...\n");
+            uint32_t scan_ptr = vgmDataStart;
+            vgm_stream_file.seek(scan_ptr);
+            while (scan_ptr < vgm_file_size) {
+                uint8_t cmd = vgm_stream_file.read(); scan_ptr++;
+                if (cmd == 0x67) {
+                    uint8_t marker = vgm_stream_file.read(); scan_ptr++;
+                    if (marker != 0x66) {
+                        Serial.printf("[VGM] WARN: 0x67 without 0x66 marker (Streaming), skipping\n");
+                        vgm_stream_file.seek(scan_ptr - 1);
+                        scan_ptr--;
+                        continue;
+                    }
+                    uint8_t type = vgm_stream_file.read(); scan_ptr++;
+                    uint8_t b1 = vgm_stream_file.read();
+                    uint8_t b2 = vgm_stream_file.read();
+                    uint8_t b3 = vgm_stream_file.read();
+                    uint8_t b4 = vgm_stream_file.read();
+                    uint32_t size = b1 | (b2 << 8) | (b3 << 16) | (b4 << 24);
+                    size &= 0x7FFFFFFF; // ★ これを追加！(VGM 1.71+ の巨大サイズ化を防ぐ)
+                    
+                    scan_ptr += 4;
+                    
+                    uint32_t needed_erase_limit = (vgm_swap_offset + size + 4095) & ~4095;
+                    if (needed_erase_limit > vgm_swap_erased_limit) {
+                        esp_partition_erase_range(vgm_swap_partition, vgm_swap_erased_limit, needed_erase_limit - vgm_swap_erased_limit);
+                        vgm_swap_erased_limit = needed_erase_limit;
+                    }
+                    
+                    uint32_t remain = size;
+                    uint8_t copy_buf[1024];
+                    vgm_stream_file.seek(scan_ptr);
+                    while (remain > 0) {
+                        uint32_t rl = remain > sizeof(copy_buf) ? sizeof(copy_buf) : remain;
+                        vgm_stream_file.read(copy_buf, rl);
+                        esp_partition_write(vgm_swap_partition, vgm_swap_offset + (size - remain), copy_buf, rl);
+                        remain -= rl;
+                    }
+                    vgm_swap_offset += size;
+                    scan_ptr += size;
+                    vgm_stream_file.seek(scan_ptr);
+                } else {
+                    int len = get_cmd_length(cmd);
+                    if (len > 0) { scan_ptr += len - 1; vgm_stream_file.seek(scan_ptr); }
+                    else if (cmd == 0x66) break;
+                }
+            }
+            
+            // Now mmap the partition
+            if (vgm_swap_offset > 0) {
+                // ★ 修正: 二重 MMAP 防止。VGZ展開時などに既にハンドルが設定されている可能性があるため、
+                // 再マッピング前に既存ハンドルを確実に解放し、リソースリーク・クラッシュを回避する
+                if (vgm_mmap_handle) {
+                    spi_flash_munmap(vgm_mmap_handle);
+                    vgm_mmap_handle = 0;
+                }
+                const void* mapped_ptr;
+                esp_err_t mmap_err = esp_partition_mmap(vgm_swap_partition, 0, (vgm_swap_offset + 0xFFFF) & ~0xFFFF, SPI_FLASH_MMAP_DATA, &mapped_ptr, &vgm_mmap_handle);
+                if (mmap_err == ESP_OK) {
+                    uint8_t* mmap_base = (uint8_t*)mapped_ptr;
+                    uint32_t current_swap_offset = 0;
+                    // Re-scan to register pointers
+                    scan_ptr = vgmDataStart;
+                    vgm_stream_file.seek(scan_ptr);
+                    while (scan_ptr < vgm_file_size) {
+                        uint8_t cmd = vgm_stream_file.read(); scan_ptr++;
+                        if (cmd == 0x67) {
+                            uint8_t marker = vgm_stream_file.read(); scan_ptr++;
+                            if (marker != 0x66) {
+                                // Invalid 0x67, skip it (same as first pass)
+                                vgm_stream_file.seek(scan_ptr - 1);
+                                scan_ptr--;
+                                continue;
+                            }
+                            uint8_t type = vgm_stream_file.read(); scan_ptr++;
+                            uint32_t size = vgm_stream_file.read() | (vgm_stream_file.read() << 8) | (vgm_stream_file.read() << 16) | (vgm_stream_file.read() << 24);
+                            size &= 0x7FFFFFFF; // ★ これを追加！(VGM 1.71+ の巨大サイズ化を防ぐ)
+                            
+                            scan_ptr += 4;
+                            if (current_swap_offset + size <= vgm_swap_offset) {
+                                pcm_engine_add_data_block(&g_pcm_engine, type, mmap_base + current_swap_offset, size);
+                                current_swap_offset += size;
+                            }
+                            scan_ptr += size;
+                            vgm_stream_file.seek(scan_ptr);
+                        } else {
+                            int len = get_cmd_length(cmd);
+                            if (len > 0) { scan_ptr += len - 1; vgm_stream_file.seek(scan_ptr); }
+                            else if (cmd == 0x66) break;
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // MMAP mode (.vgz decompressed or .vgm copied to Swap)
+        // Register PCM pointers directly from vgm_data (MMAPed Flash)
+        Serial.printf("[VGM] Pre-scan: MMAP mode (Flash) - scanning for 0x67 blocks...\n");
+        uint32_t scan_ptr = vgmDataStart;
+        int pcm_block_count = 0;
+        while (scan_ptr < vgm_file_size) {
+            uint8_t cmd = vgm_data[scan_ptr++];
+            if (cmd == 0x67) {
+                // Validate: 0x67 must be followed by 0x66 (VGM spec)
+                if (scan_ptr >= vgm_file_size) break;
+                uint8_t marker = vgm_data[scan_ptr];
+                if (marker != 0x66) {
+                    Serial.printf("[VGM] WARN: 0x67 without 0x66 marker at offset %lu, skipping\n", scan_ptr - 1);
+                    continue;
+                }
+                scan_ptr++; // skip 0x66
+                if (scan_ptr + 4 > vgm_file_size) break;
+                uint8_t type = vgm_data[scan_ptr++];
+                uint32_t size = vgm_data[scan_ptr] | (vgm_data[scan_ptr+1] << 8) | (vgm_data[scan_ptr+2] << 16) | (vgm_data[scan_ptr+3] << 24);
+                size &= 0x7FFFFFFF; // ★ これを追加！(VGM 1.71+ の巨大サイズ化を防ぐ)
+                scan_ptr += 4;
+                // Bounds check: ensure data doesn't extend beyond file
+                if (scan_ptr + size > vgm_file_size) {
+                    uint32_t clipped = vgm_file_size - scan_ptr;
+                    Serial.printf("[VGM] PCM Block #%d: type=0x%02X, size=%lu (CLIPPED to %lu, exceeds file by %lu)\n",
+                                  pcm_block_count, type, size, clipped, (scan_ptr + size) - vgm_file_size);
+                    size = clipped;
+                }
+                // Sanity check: reject blocks larger than 16MB (reasonable VGM PCM limit)
+                if (size > 0x1000000) {
+                    Serial.printf("[VGM] PCM Block #%d: type=0x%02X, size=%lu exceeds 16MB limit, skipping\n",
+                                  pcm_block_count, type, size);
+                    continue;
+                }
+                Serial.printf("[VGM] PCM Block #%d: type=0x%02X, size=%lu, ptr=%p\n", pcm_block_count, type, size, (void*)(vgm_data + scan_ptr));
+                pcm_engine_add_data_block(&g_pcm_engine, type, vgm_data + scan_ptr, size);
+                pcm_block_count++;
+                scan_ptr += size;
+            } else {
+                int len = get_cmd_length(cmd);
+                if (len > 0) scan_ptr += len - 1;
+                else if (cmd == 0x66) break;
+            }
+        }
+        Serial.printf("[VGM] Pre-scan complete: %d PCM blocks registered\n", pcm_block_count);
+    }
+
+
     
     // 曲の開始時にDCブロッカーの状態を完全にクリアする
     dc_state_l = 0; dc_state_r = 0; dc_prev_l = 0; dc_prev_r = 0;
     eq_lpf_l = 0; eq_lpf_r = 0; eq_bass_l = 0; eq_bass_r = 0;
     
+
+    // ==========================================
+    // DEBUG: VGM ポインタの最終位置を確認
+    // ==========================================
+    Serial.printf("[VGM] PLAY INIT: vgm_ptr=%lu, vgmDataStart=%lu, vgm_file_size=%lu\n", vgm_ptr, vgmDataStart, vgm_file_size);
+    if (!vgm_is_streaming && vgm_data != nullptr) {
+        Serial.printf("[VGM] Header Magic: %c%c%c%c\n", vgm_data[0], vgm_data[1], vgm_data[2], vgm_data[3]);
+        // データ開始位置の最初の数バイトをダンプ
+        if (vgmDataStart < vgm_file_size) {
+            Serial.printf("[VGM] DataStart Dump: ");
+            for (int i = 0; i < 16 && (vgmDataStart + i) < vgm_file_size; i++) {
+                Serial.printf("%02X ", vgm_data[vgmDataStart + i]);
+            }
+            Serial.println();
+        }
+    }
+    vgm_cmd_debug_count = 0; // ★この1行を追加！曲の開始時に必ずログカウンタをリセットする
 
     prebuffering = true;
     isPlaying = true;
@@ -533,6 +827,11 @@ void vgm_engine_stop() {
     isPlaying = false; 
     delay(50); 
     pcm_engine_free(&g_pcm_engine); 
+    if (vgm_mmap_handle) {
+        spi_flash_munmap(vgm_mmap_handle);
+        vgm_mmap_handle = 0;
+        vgm_data = nullptr;
+    }
 }
 
 static inline uint8_t readByte() {
@@ -541,13 +840,11 @@ static inline uint8_t readByte() {
         if (vgm_ptr < vgm_stream_buf_start || vgm_ptr >= vgm_stream_buf_start + vgm_stream_buf_len) {
             uint32_t read_len = sizeof(vgm_stream_buf);
             if (vgm_ptr + read_len > vgm_file_size) read_len = vgm_file_size - vgm_ptr;
-            if (vgm_swap_partition) {
-                esp_partition_read(vgm_swap_partition, vgm_ptr, vgm_stream_buf, read_len);
-                vgm_stream_buf_len = read_len;
-            } else {
-                vgm_stream_file.seek(vgm_ptr);
-                vgm_stream_buf_len = vgm_stream_file.read(vgm_stream_buf, sizeof(vgm_stream_buf));
-            }
+            
+            // ★修正: vgm_swap_partitionからの読み込みを完全削除
+            // ストリーミング時は必ずSDカード(vgm_stream_file)からコマンドを読む
+            vgm_stream_file.seek(vgm_ptr);
+            vgm_stream_buf_len = vgm_stream_file.read(vgm_stream_buf, read_len);
             vgm_stream_buf_start = vgm_ptr;
         }
         return vgm_stream_buf[vgm_ptr++ - vgm_stream_buf_start];
@@ -555,26 +852,46 @@ static inline uint8_t readByte() {
     return vgm_data[vgm_ptr++];
 }
 
+
+
 void processVGM() {
     if (!isPlaying || (!vgm_is_streaming && vgm_data == nullptr)) return;
 
     while (vgm_ptr < vgm_file_size && waitSamples == 0) {
-        uint8_t cmd = readByte(); 
+        uint8_t cmd = readByte();
+        
+        // DEBUG: 最初の20コマンドをダンプ
+        if (vgm_cmd_debug_count < 20) {
+            Serial.printf("[VGM] CMD #%d: ptr=%lu, cmd=0x%02X\n", vgm_cmd_debug_count, vgm_ptr - 1, cmd);
+            vgm_cmd_debug_count++;
+        }
         switch (cmd) {
             case 0x30: { uint8_t val = readByte(); if (is_dual_sn76489) psg_wrapper2.write(0, 0, val); break; }
             case 0x50: { 
                 uint8_t val = readByte(); 
-                if (sn76489_writes < 5) {
-                    Serial.printf("[VGM] SN76489 Write: %02X\n", val);
-                    sn76489_writes++;
-                }
                 psg_wrapper.write(0, 0, val); 
                 break; 
             }
             case 0x4F: { uint8_t val = readByte(); /* Game Gear Stereo - not supported yet */ break; }
-            case 0x51: 
+            case 0x51: { 
+                uint8_t reg = readByte(); uint8_t val = readByte(); 
+                fm_engine_register_write(&g_fm_engine, reg, val);
+                break; 
+            }
             case 0x5A: { uint8_t reg = readByte(); uint8_t val = readByte(); fm_wrapper.write(0, reg, val); break; }
-            case 0x52: case 0x53: 
+            case 0x52: case 0x53: {
+                uint8_t port = cmd & 1;
+                uint8_t reg = readByte(); uint8_t val = readByte();
+                uint16_t addr = (port << 8) | reg;
+                fm_engine_register_write(&g_fm_engine, addr, val);
+                if (port == 0 && (reg == 0x2A || reg == 0x2B)) pcm_engine_write_ym2612(&g_pcm_engine, reg, val);
+                break;
+            }
+            case 0xA0: {
+                uint8_t reg = readByte(); uint8_t val = readByte();
+                psg_engine_write(&g_fm_engine.psg, reg, val);
+                break;
+            }
             case 0x56: case 0x57: 
             case 0x58: case 0x59: {
                 uint8_t port = cmd & 1;
@@ -584,8 +901,6 @@ void processVGM() {
                 } else {
                     fm_wrapper.write(port, reg, val);
                 }
-                // 直接 YM2612 PCM関数を呼ぶ
-                if (port == 0 && (reg == 0x2A || reg == 0x2B)) pcm_engine_write_ym2612(&g_pcm_engine, reg, val);
                 break;
             }
             case 0x54: { uint8_t reg = readByte(); uint8_t val = readByte(); fm_wrapper.write(0, reg, val); break; }
@@ -593,16 +908,11 @@ void processVGM() {
             case 0x61: { uint16_t n = readByte(); n |= (readByte() << 8); waitSamples = n; break; }
             case 0x62: waitSamples = 735; break;
             case 0x63: waitSamples = 882; break;
+            case 0x64: vgm_ptr += 3; break;        // Wait override: skip 3-byte argument
             case 0x66: {
                 if (!vgm_has_loop) { isPlaying = false; }
                 else { 
-                    // ループ時の処理：
-                    // シンバルなどの余韻（RR > 0）は自然に減衰（EG_RELEASE）させることで不自然な切れ方を防ぐ。
-                    // 一方で、オルガンやビープ音などの持続音（RR == 0）はリリース状態にしても永遠に鳴り続けるため、
-                    // 強制的に無音（EG_OFF）にして高周波の残り（ピーー音）を完全に防ぐ。
                     for (int i = 0; i < TOTAL_OPS; i++) {
-                        // エンジン内部では register_rr に (rr<<1)+1 を入れているため、
-                        // 元のレジスタ値が 0 や 1 の極端に遅いリリース（無限持続）は rr <= 3 となる。
                         if (g_fm_engine.ops[i].rr <= 3) {
                             g_fm_engine.ops[i].env_state = EG_OFF;
                             g_fm_engine.ops[i].env_level = (0x3FF << 11);
@@ -615,43 +925,56 @@ void processVGM() {
                 break;
             }
             case 0x67: { 
-                readByte(); 
+                uint8_t marker = readByte(); 
+                if (marker != 0x66) {
+                    // Sync with pre-scan: invalid 0x67 without 0x66 marker.
+                    // This indicates garbage data at the end of the VGM stream.
+                    // Stop playback immediately to avoid infinite loop or emitting invalid commands.
+                    Serial.printf("[VGM] Invalid 0x67 (no 0x66 marker) at offset %lu, stopping playback\n", vgm_ptr - 1);
+                    isPlaying = false;
+                    break; 
+                }
                 uint8_t type = readByte(); 
                 uint32_t size = readByte(); 
                 size |= (readByte() << 8); 
                 size |= (readByte() << 16); 
                 size |= (readByte() << 24); 
-                if (vgm_ptr + size > vgm_file_size) {
-                    size = (vgm_file_size > vgm_ptr) ? (vgm_file_size - vgm_ptr) : 0;
-                }
-                if (vgm_is_streaming) {
-                    uint8_t* temp_block = (uint8_t*)malloc(size);
-                    if (temp_block) {
-                        if (vgm_swap_partition) {
-                            esp_partition_read(vgm_swap_partition, vgm_ptr, temp_block, size);
-                        } else {
-                            vgm_stream_file.seek(vgm_ptr);
-                            vgm_stream_file.read(temp_block, size);
-                        }
-                        pcm_engine_add_data_block(&g_pcm_engine, type, temp_block, size);
-                        free(temp_block);
-                    }
-                } else {
-                    pcm_engine_add_data_block(&g_pcm_engine, type, vgm_data + vgm_ptr, size); 
-                }
-                vgm_ptr += size; 
+                size &= 0x7FFFFFFF; // Mask VGM 1.71 flag bits
+                vgm_ptr += size; // SKIP data, since it's already mapped!
                 break; 
             }
             case 0x68: { vgm_ptr += 11; break; }
-            case 0xA0: { 
-                uint8_t reg = readByte(); uint8_t val = readByte(); 
-                ssg_wrapper.write(0, reg, val); 
-                break; 
-            }
-            // ★ 修正：各PCMチップの専用関数を直接呼ぶ
             case 0xB7: { uint8_t reg = readByte(); uint8_t val = readByte(); pcm_engine_write_msm6258(&g_pcm_engine, reg, val); break; }
             case 0xB8: { uint8_t val = readByte(); pcm_engine_write_oki(&g_pcm_engine, val); break; }
             case 0xC0: { uint16_t offset = readByte(); offset |= (readByte() << 8); uint8_t val = readByte(); pcm_engine_segapcm_write(&g_pcm_engine, offset & 0xFF, val); break; }
+            case 0xC4: { // Namco C140 (alternative command, same layout as 0xD4)
+                uint8_t port = readByte();
+                uint8_t reg  = readByte();
+                uint8_t val  = readByte();
+                pcm_engine_namco_write(&g_pcm_engine, (port << 8) | reg, val);
+                break;
+            }
+            case 0xD4: { // Namco C140
+                uint8_t port = readByte(); 
+                uint8_t reg = readByte(); 
+                uint8_t val = readByte(); 
+                pcm_engine_namco_write(&g_pcm_engine, (port << 8) | reg, val); 
+                break; 
+            }
+	case 0xE1: { // Namco C352 Write
+	    // VGM 0xE1 format is Big Endian for both address and data!
+            uint16_t addr = (readByte() << 8);
+            addr |= readByte();
+            uint16_t val = (readByte() << 8);
+            val |= readByte();
+            if (vgm_cmd_debug_count < 100) {
+                Serial.printf("[VGM] C352 Write: addr=0x%04X, data=0x%04X\n", addr, val);
+                vgm_cmd_debug_count++;
+            }
+            pcm_engine_namco_write(&g_pcm_engine, addr, val);
+            break;
+        }
+            
             case 0xD2: { 
                 uint8_t port = readByte(); uint8_t reg = readByte(); uint8_t val = readByte(); 
                 scc_engine_write(&g_scc_engine, port, reg, val); 
@@ -662,8 +985,8 @@ void processVGM() {
                 if (cmd >= 0x70 && cmd <= 0x7F) waitSamples = (cmd & 0x0F) + 1;
                 else if (cmd >= 0x80 && cmd <= 0x8F) { 
                     waitSamples = (cmd & 0x0F); 
-                    if (g_pcm_engine.ym2612_pcm_block != nullptr && ym2612_pcm_offset < g_pcm_engine.ym2612_pcm_size) {
-                        pcm_engine_write_ym2612(&g_pcm_engine, 0x2A, g_pcm_engine.ym2612_pcm_block[ym2612_pcm_offset++]);
+                    if (g_pcm_engine.ym2612_pcm_block_count > 0 && ym2612_pcm_offset < g_pcm_engine.ym2612_pcm_offsets[g_pcm_engine.ym2612_pcm_block_count-1] + g_pcm_engine.ym2612_pcm_sizes[g_pcm_engine.ym2612_pcm_block_count-1]) {
+                        pcm_engine_write_ym2612(&g_pcm_engine, 0x2A, pcm_engine_get_ym2612_byte(&g_pcm_engine, ym2612_pcm_offset++));
                     }
                 }
                 else if (cmd >= 0x90 && cmd <= 0x95) { 
@@ -679,9 +1002,12 @@ void processVGM() {
                 else if (cmd >= 0x50 && cmd <= 0x5F) vgm_ptr += 2;
                 else if (cmd >= 0xA1 && cmd <= 0xBF) vgm_ptr += 2;
                 else if (cmd >= 0xC0 && cmd <= 0xDF) vgm_ptr += 3;
-                else if (cmd == 0xE0) { uint32_t offset = readByte(); offset |= (readByte() << 8); offset |= (readByte() << 16); offset |= (readByte() << 24); ym2612_pcm_offset = offset; }
-                else if (cmd >= 0xE1 && cmd <= 0xFF) vgm_ptr += 4;
-                break;
+		else if (cmd == 0xE0) { uint32_t offset = readByte(); offset |= (readByte() << 8); offset |= (readByte() << 16); offset |= (readByte() << 24); ym2612_pcm_offset = offset; }
+		else if (cmd >= 0xE2 && cmd <= 0xFF) {
+		                // 未知のE2〜FFコマンドは引数4バイトを読み飛ばす
+		                readByte(); readByte(); readByte(); readByte();
+		}
+                 break;
         }
     }
 }
@@ -706,18 +1032,23 @@ void IRAM_ATTR processAudioBlock() {
             }
         }
 
-        int32_t mix_l = 0, mix_r = 0;
-        
-        for (int c = 0; c < active_chip_count; c++) { 
-            active_chips[c]->tick(&mix_l, &mix_r); 
+        // =====================================
+        // ミキサー処理（各チップの出力を合計し、チップ数で割る）
+        // =====================================
+        int32_t mix_l = 0;
+        int32_t mix_r = 0;
+
+        for (int c = 0; c < active_chip_count; c++) {
+            int32_t ch_l = 0, ch_r = 0;
+            active_chips[c]->tick(&ch_l, &ch_r);
+            mix_l += ch_l;
+            mix_r += ch_r;
         }
 
-        // 全チップの合計音量を鳴っているチップ数に応じてスケールダウン
-        // チャンネル数で割ると音が小さくなりすぎてダイナミックレンジが狭まるため、チップ数で割る
-        int divisor = (active_chip_count > 0) ? active_chip_count : 1;
-        
-        mix_l /= divisor;
-        mix_r /= divisor;
+        // グローバルに計算済みのチップ数で割る
+        // （各音源の出力が非常に大きく合算でクリップするため、さらに3で割ってヘッドルームを確保し音割れを防ぐ）
+        mix_l /= (global_chip_count * 3);
+        mix_r /= (global_chip_count * 3);
 
         int32_t in_l = mix_l;
         int32_t in_r = mix_r;
@@ -771,15 +1102,19 @@ if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t
 // ────────────────────────────────────────────────────────────────────────
 void audio_generate_task(void *args) {
     while (true) {
+        // 再生開始のシグナルを待つ
         xSemaphoreTake(xSemaphore, portMAX_DELAY); 
 
         while (isPlaying) {
+            // バッファに空きがある場合は音声を生成
             if (wav_count < (WAV_BUFF_COUNT - 4)) {
                 processAudioBlock(); 
-                // ★ 追加：Core 1の独占を防ぎ、PSRAMやDMAバスの渋滞（ノイズ）を解消する
-                taskYIELD(); 
+                // タスク独占防止のための1ms休止
+                vTaskDelay(pdMS_TO_TICKS(1)); 
             } else {
-                break; // 満杯になったらスリープに戻る
+                // ★修正点：バッファが満杯の場合は break でループを抜けるのではなく、
+                // I2S（スピーカー）が音声を消費してバッファが空くまで待機する
+                vTaskDelay(pdMS_TO_TICKS(5)); 
             }
         }
     }
@@ -788,40 +1123,27 @@ void audio_generate_task(void *args) {
 // ────────────────────────────────────────────────────────────────────────
 // Core 0：I2S（DMA）転送 ＆ 減衰検知時のセマフォ発行
 // ────────────────────────────────────────────────────────────────────────
-
-
 void audio_play_task(void *args) {
     while (true) {
+        bool any_playing = (isPlaying && !isPaused) || mdx_engine_is_playing();
         if (prebuffering && wav_count >= (WAV_BUFF_COUNT - 4)) {
             prebuffering = false;
         }
-        if (wav_count > 0 && isPlaying && !prebuffering) {
-            if (isPaused) {
-                vTaskDelay(pdMS_TO_TICKS(10));
-                continue;
-            }
+        if (any_playing && wav_count > 0 && !prebuffering) {
+            // VGM / MDX どちらのデータでもバッファを消費して再生する
             bool queued = M5.Speaker.playRaw((const int16_t *)wav_buff[rd], wav_buff_size[rd] * 2, actual_sample_rate, true, 1, 0, false);
-            
             if (queued) {
-                // エンキュー成功
                 rd = (rd + 1) % WAV_BUFF_COUNT;
-                wav_count--; 
-                
+                wav_count--;
                 if (wav_count <= (WAV_BUFF_COUNT / 2)) {
-                    xSemaphoreGive(xSemaphore); 
+                    xSemaphoreGive(xSemaphore);
                 }
-                
-                // ★ M5.Speaker内部のキュー枯渇を防ぐため、物理的な再生時間（11.6ms）に対して
-                // WDT回避用の8msだけ休み、残りはスピンロックで即座に次のデータを叩き込む
-                vTaskDelay(pdMS_TO_TICKS(8)); 
+                vTaskDelay(pdMS_TO_TICKS(8));
             } else {
-                // taskYIELD() は絶対に使用しないでください！Priority 5の無限スピンロックとなり、
-                // Core 0を占有してM5.Speakerのバックグラウンドタスク(Priority 2)をCore 1に追い出し、
-                // 波形生成タスク(Priority 1)を意図せずプリエンプト（横取り）して処理落ちクリック音を生みます。
-                vTaskDelay(1); 
+                vTaskDelay(1);
             }
         } else {
-            // データがない・またはプリバッファリング・停止中も常に無音を流してアンプの電源ON/OFF（プツ音）を防ぐ
+            // 無音を流してアンプの電源ON/OFF（プツ音）を防ぐ
             static const int16_t idle_silence[512 * 2] = {0};
             M5.Speaker.playRaw(idle_silence, 512 * 2, actual_sample_rate, true, 1, 0, false);
             vTaskDelay(1);
@@ -829,10 +1151,7 @@ void audio_play_task(void *args) {
     }
 }
 
-
-    
-    void vgm_engine_init() {
-    
+void vgm_engine_init() {
     auto spk_cfg = M5.Speaker.config();
     spk_cfg.sample_rate = 44100;
     spk_cfg.dma_buf_len = 512; 
@@ -863,7 +1182,6 @@ void audio_play_task(void *args) {
     
     
     xSemaphore = xSemaphoreCreateBinary(); 
-    
 
     // DSP生成タスクをCore 0に移動し、メインループ(Core 1)のM5.update()による遅延から完全に切り離す
     // 優先度は2に設定

@@ -19,7 +19,8 @@ int pcmvol = 0;
 int pcmskip = 0;
 
 
-struct fl filelist[LISTMAX];
+struct fl *filelist = nullptr;
+
 int filenum = 0;
 uint8_t cdir[PATHMAX] = "/";
 uint8_t dirs[DIRMAX][PATHMAX] = {"/"};
@@ -63,13 +64,14 @@ void drawJPChar(byte x, byte y, char *data) {
   }
 }
 
-void disptitle(int stat, char *title){
+/* void disptitle(int stat, char *title){
+  M5Cardputer.Display.setTextSize(2.0f);
   M5Cardputer.Display.setCursor(0, 0);
   M5Cardputer.Display.fillRect(0, 0, 240, 34, BLACK);
   M5Cardputer.Display.setTextColor(OLIVE);
   M5Cardputer.Display.printf("vgmM5 %.1f ", VERSION);
-  M5Cardputer.Display.setTextColor(GREEN);
-  M5Cardputer.Display.printf("%s", statstr[stat % STATNUM]);
+  // M5Cardputer.Display.setTextColor(GREEN);
+    // M5Cardputer.Display.printf("%s", statstr[stat % STATNUM]);
   M5Cardputer.Display.drawLine(0,33,240,33,OLIVE);
   if(title){
     M5Cardputer.Display.setCursor(0, 18);
@@ -78,7 +80,7 @@ void disptitle(int stat, char *title){
     M5Cardputer.Display.printf("%.*s", 26, title);
     M5Cardputer.Display.setTextSize(2);
   }
-}
+} */
 
 void dispmenu(){
   M5Cardputer.Lcd.fillRect(20,36,200,100,BLUE);
@@ -160,8 +162,23 @@ bool isvgmfile(const char *fileName) {
   return (strcmp(".vgm", exttmp) == 0 || strcmp(".vgz", exttmp) == 0);
 }
 
+bool ismdxfile(const char *fileName) {
+  int i; char exttmp[5];
+  exttmp[4] = 0;
+  const char *ext = strrchr(fileName, '.');
+  if(ext == NULL)
+    return false;
+  for(i = 0; i < 4; i++)
+    exttmp[i] = tolower(ext[i]);
+  return (strcmp(".mdx", exttmp) == 0);
+}
+
 int makevgmlist(fs::FS &fs) {
   int i = 0;
+  if (filelist == nullptr) {
+      filelist = (struct fl *)malloc(sizeof(struct fl) * LISTMAX);
+  }
+  if (filelist == nullptr) return 0;
  // printf("ck1\n");
    //printf("ck6 %s\n", cdir);
   File root = fs.open((const char *)cdir);
@@ -186,8 +203,11 @@ int makevgmlist(fs::FS &fs) {
       memcpy(filelist[i].filename, file.name(), PATHMAX);
       filelist[i].type = TYPE_VGM;
       i++;
-    }
-    if(file.isDirectory()){
+    } else if (ismdxfile((const char *)file.name())){
+      memcpy(filelist[i].filename, file.name(), PATHMAX);
+      filelist[i].type = TYPE_MDX;
+      i++;
+    } else if(file.isDirectory()){
       memcpy(filelist[i].filename, file.name(), PATHMAX);
       filelist[i].type = TYPE_SDIR;
       i++;
@@ -208,10 +228,16 @@ void dispfiles(int disp, int sel, bool start){
 //  M5Cardputer.Display.fillScreen(BLACK);
   for (i = 0; i < DISPMAX; i++){
     if(filelist[i + disp].type == TYPE_SDIR || filelist[i + disp].type == TYPE_UDIR)
-      M5Cardputer.Display.setTextColor(LIGHTGREY);  
+      M5Cardputer.Display.setTextColor(LIGHTGREY);
     if((i + disp)== sel)
       M5Cardputer.Display.setTextColor(BLACK, start? YELLOW: GREEN);
-    M5Cardputer.Display.printf("%.*s\n", 20, filelist[i + disp].filename);
+
+    const char* fname = (const char*)filelist[i + disp].filename;
+    const char* basename = strrchr(fname, '/');
+    if (basename) fname = basename + 1;
+    if (fname[0] == '\0') fname = (const char*)filelist[i + disp].filename;
+
+    M5Cardputer.Display.printf("%.*s\n", 20, fname);
     M5Cardputer.Display.setTextColor(WHITE);
   }
 }
@@ -243,7 +269,7 @@ int selectfile(){
             dispfiles(disp, sel, false);
           }
           if (M5Cardputer.Keyboard.isKeyPressed('.')){
-            if(sel < (DISPMAX - 1)){
+            if((sel - disp) < (DISPMAX - 1)){
               sel++;
             }else{
               if(sel < (filenum - 1)){
@@ -273,6 +299,10 @@ int selectfile(){
             dispfiles(disp, sel, true);
             return sel;
           }
+          if (M5Cardputer.Keyboard.isKeyPressed('') || M5Cardputer.Keyboard.isKeyPressed('`')){
+            // Exit local mode
+            return -1;
+          }
           if (M5Cardputer.Keyboard.isKeyPressed('=')){
             int v = M5.Speaker.getVolume() + 20;
             if(v > 255) v = 255;
@@ -288,7 +318,7 @@ int selectfile(){
             //printf("m pressed \n");
           }
           if (M5Cardputer.Keyboard.isKeyPressed('a')){
-            if(filelist[sel].type != TYPE_VGM)
+            if(filelist[sel].type != TYPE_VGM && filelist[sel].type != TYPE_MDX)
               continue;
             playall = true;
             loopflag = false;
@@ -304,6 +334,7 @@ bool cnvfile(fs::FS &fs, struct fl *srct, uint8_t *dst){
   //printf("ck4 %d\n", srct->type);
   switch(srct->type){
     case TYPE_VGM:
+    case TYPE_MDX:
       if (srct->filename[0] == '/') {
           strcpy((char *)dst, (char *)srct->filename);
       } else {

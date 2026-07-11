@@ -1,0 +1,137 @@
+// db_installer.cpp — SDカードからFFatへDBファイルをコピーする一時スケッチ
+// 使い終わったら元のfirmwareに書き戻してください
+//
+// ■ 使い方
+// 1. PCで build_db.py を実行して生成した6つの.binファイルをSDカードのルートに置く
+//    albums.bin / tracks.bin / strings.bin / systems.bin / companies.bin / composers.bin
+// 2. SDカードをCardputerに挿入
+// 3. このスケッチをビルド&書き込み
+// 4. 画面に "All Done!" が出たら完了 → 元のfirmwareを書き戻す
+
+#include <M5Cardputer.h>
+#include <SD.h>
+#include <FFat.h>
+
+const char* FILES_TO_COPY[] = {
+    "/albums.bin",
+    "/tracks.bin",
+    "/strings.bin",
+    "/systems.bin",
+    "/companies.bin",
+    "/composers.bin"
+};
+const int NUM_FILES = 6;
+
+void copySDtoFFat(const char* filename) {
+    M5Cardputer.Display.printf("%-14s", filename + 1); // 先頭の/を除く
+
+    if (!SD.exists(filename)) {
+        M5Cardputer.Display.setTextColor(RED);
+        M5Cardputer.Display.println("MISSING");
+        M5Cardputer.Display.setTextColor(WHITE);
+        Serial.printf("[Skip] %s not found on SD\n", filename);
+        return;
+    }
+
+    File src = SD.open(filename, FILE_READ);
+    if (!src) {
+        M5Cardputer.Display.setTextColor(RED);
+        M5Cardputer.Display.println("OPEN ERR");
+        M5Cardputer.Display.setTextColor(WHITE);
+        return;
+    }
+
+    // FFat側は上書き
+    File dst = FFat.open(filename, FILE_WRITE);
+    if (!dst) {
+        src.close();
+        M5Cardputer.Display.setTextColor(RED);
+        M5Cardputer.Display.println("WRITE ERR");
+        M5Cardputer.Display.setTextColor(WHITE);
+        return;
+    }
+
+    uint8_t buf[4096];
+    size_t total = 0;
+    while (src.available()) {
+        size_t len = src.read(buf, sizeof(buf));
+        dst.write(buf, len);
+        total += len;
+    }
+    src.close();
+    dst.close();
+
+    M5Cardputer.Display.setTextColor(GREEN);
+    M5Cardputer.Display.printf("%6u KB\n", (unsigned)(total / 1024));
+    M5Cardputer.Display.setTextColor(WHITE);
+    Serial.printf("[Done] %s (%u bytes)\n", filename, (unsigned)total);
+}
+
+void setup() {
+    auto cfg = M5.config();
+    M5Cardputer.begin(cfg, true);
+    M5Cardputer.Display.setBrightness(128);
+    M5Cardputer.Display.setTextSize(1.5f);
+    M5Cardputer.Display.setTextColor(WHITE);
+    Serial.begin(115200);
+
+    M5Cardputer.Display.fillScreen(BLACK);
+    M5Cardputer.Display.setTextColor(CYAN);
+    M5Cardputer.Display.println("=== DB Installer ===");
+    M5Cardputer.Display.setTextColor(WHITE);
+
+    // SD初期化
+    SPI.begin(40, 39, 14, 12);
+    if (!SD.begin(12, SPI, 40000000)) {
+        M5Cardputer.Display.setTextColor(RED);
+        M5Cardputer.Display.println("SD Mount FAILED!");
+        while(1) delay(100);
+    }
+    M5Cardputer.Display.setTextColor(GREEN);
+    M5Cardputer.Display.println("SD OK");
+    M5Cardputer.Display.setTextColor(WHITE);
+
+    // FFat初期化（フォーマットせずマウント）
+    if (!FFat.begin(false)) {
+        M5Cardputer.Display.setTextColor(YELLOW);
+        M5Cardputer.Display.println("FFat: Formatting...");
+        M5Cardputer.Display.setTextColor(WHITE);
+        if (!FFat.begin(true)) {  // フォーマットしてマウント
+            M5Cardputer.Display.setTextColor(RED);
+            M5Cardputer.Display.println("FFat Mount FAILED!");
+            while(1) delay(100);
+        }
+    }// インストーラの初期化部分
+
+
+
+
+    // FFatの空き容量チェック
+    size_t total_bytes = FFat.totalBytes();
+    size_t used_bytes  = FFat.usedBytes();
+    M5Cardputer.Display.printf("FFat: %uKB free\n",
+        (unsigned)((total_bytes - used_bytes) / 1024));
+    M5Cardputer.Display.drawLine(0, M5Cardputer.Display.getCursorY(),
+        240, M5Cardputer.Display.getCursorY(), OLIVE);
+
+    // コピー実行
+    for (int i = 0; i < NUM_FILES; i++) {
+        copySDtoFFat(FILES_TO_COPY[i]);
+    }
+
+    // 結果表示
+    M5Cardputer.Display.drawLine(0, M5Cardputer.Display.getCursorY(),
+        240, M5Cardputer.Display.getCursorY(), OLIVE);
+    used_bytes = FFat.usedBytes();
+    M5Cardputer.Display.printf("Used: %uKB / %uKB\n",
+        (unsigned)(used_bytes / 1024),
+        (unsigned)(total_bytes / 1024));
+
+    M5Cardputer.Display.setTextColor(CYAN);
+    M5Cardputer.Display.println("All Done! Flash firmware.");
+    M5Cardputer.Display.setTextColor(WHITE);
+}
+
+void loop() {
+    delay(100);
+}
