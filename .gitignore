@@ -11,7 +11,7 @@ data/
 *.bin
 *.exe
 *.gz
-
+*.BAK
 # Scripts and test files
 *.py
 test*.c
