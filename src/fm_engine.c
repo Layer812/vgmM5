@@ -149,20 +149,31 @@ static void update_eg_rates(FMSoundEngine *engine, int ch) {
     }
 }
 
+
+static void apply_fnumber_routing(FMSoundEngine *engine, int ch) {
+    if (ch == 2 && engine->kc[8] != 0) {
+        engine->ops[2*4 + 0].f_number = engine->ch3_f_number[2]; // S1 (Op1) gets AA
+        engine->ops[2*4 + 0].block    = engine->ch3_block[2];
+        engine->ops[2*4 + 1].f_number = engine->ch3_f_number[1]; // S2 (Op3) gets A9
+        engine->ops[2*4 + 1].block    = engine->ch3_block[1];
+        engine->ops[2*4 + 2].f_number = engine->ch3_f_number[0]; // S3 (Op2) gets A8
+        engine->ops[2*4 + 2].block    = engine->ch3_block[0];
+        engine->ops[2*4 + 3].f_number = engine->f_number[2];     // S4 (Op4) gets A2
+        engine->ops[2*4 + 3].block    = engine->block[2];
+    } else {
+        for (int op = 0; op < 4; op++) {
+            engine->ops[ch*4 + op].f_number = engine->f_number[ch];
+            engine->ops[ch*4 + op].block    = engine->block[ch];
+        }
+    }
+}
 static void update_phase_step_ym2612(FMSoundEngine *engine, int ch) {
     static uint8_t fn_note_table[16] = {0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 2, 3, 3, 3, 3, 3};
     
     for(int op = 0; op < 4; op++) {
-        uint32_t op_fn = engine->f_number[ch];
-        uint32_t op_blk = engine->block[ch];
-        
-        // CH3 Special Mode handling
-        if (ch == 2 && engine->kc[8] != 0) {
-            if (op == 0) { op_fn = engine->ch3_f_number[2]; op_blk = engine->ch3_block[2]; }      // Op1
-            else if (op == 1) { op_fn = engine->ch3_f_number[0]; op_blk = engine->ch3_block[0]; } // Op2
-            else if (op == 2) { op_fn = engine->ch3_f_number[1]; op_blk = engine->ch3_block[1]; } // Op3
-            // Op4 uses normal CH3 freq
-        }
+        int idx = ch * 4 + op;
+        uint32_t op_fn = engine->ops[idx].f_number;
+        uint32_t op_blk = engine->ops[idx].block;
         
         uint32_t base_step;
         if (engine->chip_type == CHIP_YM2612) {
@@ -176,7 +187,6 @@ static void update_phase_step_ym2612(FMSoundEngine *engine, int ch) {
         int kc = (op_blk << 2) | note;
         if (kc > 31) kc = 31;
         
-        int idx = ch * 4 + op;
         int mul_val = engine->ops[idx].mul & 0x0F;
         uint64_t step_64 = (mul_val == 0) ? (base_step >> 1) : ((uint64_t)base_step * mul_val);
         
@@ -208,15 +218,16 @@ static void update_phase_step_ym2612(FMSoundEngine *engine, int ch) {
 }
 
 static void update_eg_rates_ym2612(FMSoundEngine *engine, int ch) {
-    uint32_t fn = engine->f_number[ch];
-    uint32_t blk = engine->block[ch];
     static uint8_t fn_note_table[16] = {0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 2, 3, 3, 3, 3, 3};
-    int note = fn_note_table[(fn >> 7) & 0x0F];
-    int kc = (blk << 2) | note;
-    if (kc > 31) kc = 31;
     
     for (int op = 0; op < 4; op++) {
         int idx = ch * 4 + op;
+        uint32_t fn = engine->ops[idx].f_number;
+        uint32_t blk = engine->ops[idx].block;
+        int note = fn_note_table[(fn >> 7) & 0x0F];
+        int kc = (blk << 2) | note;
+        if (kc > 31) kc = 31;
+
         int ks_val = engine->ops[idx].ks;
         int ks_offset = (ks_val == 0) ? 0 : (kc >> (4 - ks_val));
         
@@ -243,8 +254,8 @@ static void update_eg_rates_ym2612(FMSoundEngine *engine, int ch) {
 }
 
 static void update_phase_step_opl(FMSoundEngine *engine, int ch) {
-    uint32_t fn = engine->f_number[ch];
-    uint32_t blk = engine->block[ch];
+    uint32_t fn = engine->ops[ch * 4].f_number;
+    uint32_t blk = engine->ops[ch * 4].block;
     
     // Freq = (F-Num * 2^Block * Clock) / (72 * 2^20)
     float base_step = (float)(fn * (1 << blk)) * engine->opl2_step_factor * engine->phase_step_factor;
@@ -274,8 +285,8 @@ static void update_phase_step_opl(FMSoundEngine *engine, int ch) {
 }
 
 static void update_eg_rates_opl(FMSoundEngine *engine, int ch) {
-    uint32_t fn = engine->f_number[ch];
-    uint32_t blk = engine->block[ch];
+    uint32_t fn = engine->ops[ch * 4].f_number;
+    uint32_t blk = engine->ops[ch * 4].block;
     int ksn = (blk << 1) | ((fn >> 9) & 1); 
     
     for (int op = 0; op < 2; op++) {
@@ -283,17 +294,22 @@ static void update_eg_rates_opl(FMSoundEngine *engine, int ch) {
         int ks_val = engine->ops[idx].ks;
         int ks_offset = (ks_val == 0) ? (ksn >> 3) : (ksn >> 1);
         
-        int r_ar = engine->ops[idx].ar == 0 ? 0 : (engine->ops[idx].ar * 4) + ks_offset;
+        int r_ar = engine->ops[idx].ar == 0 ? 0 : (engine->ops[idx].ar * 2) + ks_offset;
         if (r_ar > 127) r_ar = 127;
         engine->ops[idx].ar_step = RATE_TABLE[r_ar] * 8;
         if (engine->ops[idx].ar_step == 0 && r_ar > 0) engine->ops[idx].ar_step = 1;
 
-        int r_dr = (engine->ops[idx].dr * 4) + ks_offset;
+        int r_dr = (engine->ops[idx].dr * 2) + ks_offset;
         if (r_dr > 127) r_dr = 127;
         engine->ops[idx].dr_step = RATE_TABLE[r_dr];
         if (engine->ops[idx].dr_step == 0 && r_dr > 0) engine->ops[idx].dr_step = 1;
 
-        int r_rr = (engine->ops[idx].rr * 4) + ks_offset;
+        int r_d2r = (engine->ops[idx].dt2 == 0) ? ((engine->ops[idx].rr * 2) + ks_offset) : 0;
+        if (r_d2r > 127) r_d2r = 127;
+        engine->ops[idx].d2r_step = RATE_TABLE[r_d2r];
+        if (engine->ops[idx].d2r_step == 0 && r_d2r > 0) engine->ops[idx].d2r_step = 1;
+
+        int r_rr = (engine->ops[idx].rr * 2) + ks_offset;
         if (r_rr > 127) r_rr = 127;
         engine->ops[idx].rr_step = RATE_TABLE[r_rr];
         if (engine->ops[idx].rr_step == 0 && r_rr > 0) engine->ops[idx].rr_step = 1;
@@ -331,12 +347,22 @@ static IRAM_ATTR void update_envelopes(FMSoundEngine *engine, int active_channel
             if (engine->ops[op_idx].env_state == EG_OFF) continue;
             switch (engine->ops[op_idx].env_state) {
                 case EG_ATTACK:
-                      engine->ops[op_idx].env_level -= engine->ops[op_idx].ar_step;
+                {
+                      int32_t delta = engine->ops[op_idx].ar_step;
+                      // To simulate exponential attack in linear amplitude domain, 
+                      // we must drop the log-domain env_level faster when it's high (silent) 
+                      // and slower when it's low (loud).
+                      // Use int64_t to prevent overflow when delta is very large.
+                      int32_t drop = (int32_t)(((int64_t)delta * (engine->ops[op_idx].env_level + 1024)) >> 11);
+                      if (drop <= 0 && delta > 0) drop = 1;
+                      engine->ops[op_idx].env_level -= drop;
+                      
                       if (engine->ops[op_idx].env_level <= 0) {
                           engine->ops[op_idx].env_level = 0;
                           engine->ops[op_idx].env_state = EG_DECAY;
                       }
                       break;
+                }
                 case EG_DECAY:
                     engine->ops[op_idx].env_level += engine->ops[op_idx].dr_step;
                     if (engine->ops[op_idx].env_level >= engine->ops[op_idx].sl_level) {
@@ -364,7 +390,14 @@ static IRAM_ATTR __attribute__((always_inline)) inline int32_t calc_op_internal(
     if (engine->ops[op_idx].env_state == EG_OFF) return 0;
     
     uint32_t active_phase_step = engine->ops[op_idx].phase_step;
-    if (pm_amount != 0) {
+    if (is_opl2) {
+        modulation >>= 1; // OPL2 FM modulation depth is roughly half of YM2612
+        if (pm_amount) {
+            // OPL2 vibrato (7 cents or 14 cents)
+            int32_t pm_mod = (int32_t)((active_phase_step * pm_amount) >> 8); 
+            active_phase_step += pm_mod;
+        }
+    } else if (pm_amount != 0) {
         active_phase_step += (int32_t)(((active_phase_step >> 10) * pm_amount) >> 3);
     }
     engine->ops[op_idx].phase += active_phase_step;
@@ -380,33 +413,40 @@ static IRAM_ATTR __attribute__((always_inline)) inline int32_t calc_op_internal(
     int32_t out;
     if (is_noise) {
         int32_t noise_val;
+        // Advance RNG state locally to guarantee high-frequency noise
+        engine->noise_rng ^= engine->noise_rng << 13;
+        engine->noise_rng ^= engine->noise_rng >> 17;
+        engine->noise_rng ^= engine->noise_rng << 5;
+        
         if (is_noise == 2) {
-            uint32_t metallic = ((phase_12bit * 17) ^ (engine->noise_rng)) & 0x7FFF;
-            noise_val = (int32_t)metallic - 16384;
-            noise_val >>= 1; 
+            // Metallic/Hi-Hat: High pass the noise (simple approximation)
+            static int32_t last_noise = 0;
+            int32_t raw_noise = (int32_t)(engine->noise_rng & 0x7FFF) - 16384;
+            noise_val = (raw_noise - last_noise) >> 1;
+            last_noise = raw_noise;
         } else {
+            // Snare: Standard white noise
             noise_val = (int32_t)(engine->noise_rng & 0x7FFF) - 16384; 
             noise_val >>= 1; 
         }
         noise_val = (noise_val * 3) >> 2; 
         uint32_t exp_shift = current_atten >> 8;
         uint32_t exp_idx = current_atten & 0xFF;
-        int32_t env_linear = EXP_TAB[exp_idx] >> exp_shift;
-        out = (noise_val * env_linear) >> 14;
+        uint32_t e = EXP_TAB[exp_idx] >> exp_shift;
+        out = (noise_val * (int32_t)e) >> 14;
     } else {
         uint32_t sin_idx = idx & 0x3FF;          
         if (idx & 0x400) sin_idx = 1023 - sin_idx; 
-        
         int is_negative = (idx & 0x800); 
         int output_enable = 1;
         
         if (is_opl2) {
-            uint8_t ws = engine->ops[op_idx].wave_sel;
-            if (ws == 1) {       
+            int wave = engine->opl_wave_enable ? engine->ops[op_idx].wave_sel : 0;
+            if (wave == 1) {       
                 if (is_negative) output_enable = 0;
-            } else if (ws == 2) { 
+            } else if (wave == 2) { 
                 is_negative = 0;
-            } else if (ws == 3) { 
+            } else if (wave == 3) { 
                 if (idx & 0x400) output_enable = 0;
                 is_negative = 0;
             }
@@ -527,7 +567,8 @@ void fm_engine_init(FMSoundEngine *engine, uint32_t sample_rate, uint32_t clock,
     engine->phase_step_factor = 4294967296.0f / (float)sample_rate;
     float prescaler = (chip_type == CHIP_YM2203 || chip_type == CHIP_YM3812) ? 72.0f : ((chip_type == CHIP_YM2151) ? 64.0f : 144.0f);
     engine->ym2612_step_factor = ((float)clock) / (prescaler * 1048576.0f);
-    engine->opl2_step_factor = ((float)clock) / (72.0f * 1048576.0f);
+    engine->opl2_step_factor = ((float)clock) / (72.0f * 2097152.0f);
+    //engine->opl2_step_factor = ((float)clock) / (72.0f * 1048576.0f);
     
     engine->fchip_step = ((uint64_t)clock * 4294967296ULL) / (uint64_t)(prescaler * engine->sample_rate);
     
@@ -640,7 +681,7 @@ void fm_engine_write_ym2612(FMSoundEngine *engine, uint8_t port, uint8_t addr, u
         uint8_t m2 = (data >> 6) & 1; // Slot 3
         uint8_t c2 = (data >> 7) & 1; // Slot 4
         
-        uint8_t key_on[4] = { m1, m2, c1, c2 }; // internal ops map: 0=M1(Slot1), 1=M2(Slot3), 2=C1(Slot2), 3=C2(Slot4)
+        uint8_t key_on[4] = { m1, c1, m2, c2 }; // internal ops map: 0=Slot1, 1=Slot2, 2=Slot3, 3=Slot4
         for (int op = 0; op < 4; op++) {
             int idx = b + op;
             if (key_on[op]) {
@@ -654,10 +695,6 @@ void fm_engine_write_ym2612(FMSoundEngine *engine, uint8_t port, uint8_t addr, u
         return;
     }
     
-    int ch = addr & 3;
-    if (ch == 3) return;
-    if (port == 1) ch += 3;
-    
     if (addr == 0x22) {
         if (data & 8) {
             static float lfo_freqs[8] = { 3.98f, 5.56f, 6.02f, 6.37f, 6.88f, 9.63f, 48.1f, 72.2f };
@@ -670,26 +707,42 @@ void fm_engine_write_ym2612(FMSoundEngine *engine, uint8_t port, uint8_t addr, u
     }
     if (addr == 0x27) {
         engine->kc[8] = data >> 6; // CH3 mode stored in kc[8]
+        apply_fnumber_routing(engine, 2);
+        update_phase_step_ym2612(engine, 2);
+        update_eg_rates_ym2612(engine, 2);
         return;
     }
+
+    int ch = addr & 3;
+    if (ch == 3) return;
+    if (port == 1) ch += 3;
+    
     
     if (addr >= 0xA0 && addr <= 0xA2) {
         engine->f_number[ch] = (engine->f_number[ch] & 0x0700) | data;
+        apply_fnumber_routing(engine, ch);
         update_phase_step_ym2612(engine, ch);
+        update_eg_rates_ym2612(engine, ch);
     } else if (addr >= 0xA4 && addr <= 0xA6) {
         ch = (addr - 0xA4); if (port == 1) ch += 3;
         engine->f_number[ch] = (engine->f_number[ch] & 0x00FF) | ((data & 7) << 8);
         engine->block[ch] = (data >> 3) & 7;
+        apply_fnumber_routing(engine, ch);
         update_phase_step_ym2612(engine, ch);
+        update_eg_rates_ym2612(engine, ch);
     } else if (addr >= 0xA8 && addr <= 0xAA && port == 0) {
-        int idx = addr - 0xA8; // 0=Op2, 1=Op3, 2=Op1 (Op4 is normal CH3)
+        int idx = addr - 0xA8; // 0=A8, 1=A9, 2=AA
         engine->ch3_f_number[idx] = (engine->ch3_f_number[idx] & 0x0700) | data;
-        update_phase_step_ym2612(engine, 2); // CH3 is 2
+        apply_fnumber_routing(engine, 2);
+        update_phase_step_ym2612(engine, 2);
+        update_eg_rates_ym2612(engine, 2);
     } else if (addr >= 0xAC && addr <= 0xAE && port == 0) {
-        int idx = addr - 0xAC; // 0=Op2, 1=Op3, 2=Op1
+        int idx = addr - 0xAC; // 0=AC, 1=AD, 2=AE
         engine->ch3_f_number[idx] = (engine->ch3_f_number[idx] & 0x00FF) | ((data & 7) << 8);
         engine->ch3_block[idx] = (data >> 3) & 7;
-        update_phase_step_ym2612(engine, 2); // CH3 is 2
+        apply_fnumber_routing(engine, 2);
+        update_phase_step_ym2612(engine, 2);
+        update_eg_rates_ym2612(engine, 2);
     } else if (addr >= 0xB0 && addr <= 0xB2) {
         ch = (addr - 0xB0); if (port == 1) ch += 3;
         engine->fb_shift[ch] = (data >> 3) & 7;
@@ -717,27 +770,38 @@ void fm_engine_write_ym2612(FMSoundEngine *engine, uint8_t port, uint8_t addr, u
 }
 
 void fm_engine_write_opl(FMSoundEngine *engine, uint8_t addr, uint8_t data) {
-    if (addr == 0x01) return; 
+    if (addr == 0x01) {
+        engine->opl_wave_enable = (data & 0x20) ? 1 : 0;
+        return; 
+    }
     // チャンネルレジスタ (0xA0-0xC8)
     if ((addr >= 0xA0 && addr <= 0xA8) || (addr >= 0xB0 && addr <= 0xB8) || (addr >= 0xC0 && addr <= 0xC8)) {
         int ch;
         if (addr >= 0xA0 && addr <= 0xA8) {
-            ch = addr - 0xA0;
+	    ch = addr - 0xA0;
             engine->f_number[ch] = (engine->f_number[ch] & 0x0300) | data;
+            engine->ops[ch*4].f_number = engine->f_number[ch];
+            engine->ops[ch*4+1].f_number = engine->f_number[ch]; // ★ 修正: この行を追加 (OP2の周波数も更新する)
             update_phase_step_opl(engine, ch);
-            update_eg_rates_opl(engine, ch); 
+            update_eg_rates_opl(engine, ch);
         } else if (addr >= 0xB0 && addr <= 0xB8) {
             ch = addr - 0xB0;
             engine->f_number[ch] = (engine->f_number[ch] & 0x00FF) | ((data & 3) << 8);
             engine->block[ch] = (data >> 2) & 7;
+            engine->ops[ch*4].f_number = engine->f_number[ch];
+            engine->ops[ch*4].block = engine->block[ch];
+            engine->ops[ch*4+1].f_number = engine->f_number[ch];
+            engine->ops[ch*4+1].block = engine->block[ch];
             
             uint8_t prev_key_on = engine->kc[ch] & 0x20;
             engine->kc[ch] = data; 
             if ((data & 0x20) && !prev_key_on) { 
+                engine->ops[ch*4+0].env_level = EG_MAX; engine->ops[ch*4+0].phase = 0;
                 engine->ops[ch*4+1].env_level = EG_MAX; engine->ops[ch*4+1].phase = 0;
                 engine->ops[ch*4+0].env_state = EG_ATTACK;
                 engine->ops[ch*4+1].env_state = EG_ATTACK;
             } else if (!(data & 0x20) && prev_key_on) { 
+                if(engine->ops[ch*4+0].env_state != EG_OFF) engine->ops[ch*4+0].env_state = EG_RELEASE;
                 if(engine->ops[ch*4+1].env_state != EG_OFF) engine->ops[ch*4+1].env_state = EG_RELEASE;
             }
             update_phase_step_opl(engine, ch);
@@ -746,6 +810,7 @@ void fm_engine_write_opl(FMSoundEngine *engine, uint8_t addr, uint8_t data) {
             ch = addr - 0xC0;
             engine->fb_shift[ch] = (data >> 1) & 7;
             engine->algo[ch] = data & 1; 
+            update_algorithm_routing(engine, ch, engine->algo[ch]);
         } else if (addr == 0xBD) {
             uint8_t old_rhy = engine->rhythm_enable;
             uint8_t old_val = engine->kc[8];
@@ -801,6 +866,8 @@ void fm_engine_write_opl(FMSoundEngine *engine, uint8_t addr, uint8_t data) {
             int idx = ch * 4 + is_car;
             switch (addr & 0xE0) {
                 case 0x20: // AM / VIB / EG_TYP / KSR / MULTI
+                    engine->ops[idx].am_enable = (data >> 7) & 1;
+                    engine->ops[idx].pm_enable = (data >> 6) & 1;
                     engine->ops[idx].mul = data & 0x0F;
                     engine->ops[idx].ks = (data >> 4) & 1; 
                     engine->ops[idx].dt2 = (data >> 5) & 1; 
@@ -979,39 +1046,39 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
             if (engine->rhythm_enable && ch >= 6) {
                 if (ch == 6) {
                     int32_t b0 = fb_mod;
-                    int32_t o0 = calc_op_internal(engine, b+0, b0, ch_pm, engine->ops[b+0].am_enable?ch_am:0, 0, 1);
+                    int32_t o0 = calc_op_internal(engine, b+0, b0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 0, 1);
                     engine->fb_memory[ch][0] = engine->fb_memory[ch][1]; engine->fb_memory[ch][1] = o0;
                     int32_t bd_mod = (engine->algo[ch] == 0) ? o0 : 0;
-                    int32_t bd_out = calc_op_internal(engine, b+1, bd_mod, ch_pm, engine->ops[b+1].am_enable?ch_am:0, 0, 1);
-                    ch_out = (engine->algo[ch] == 0) ? bd_out : (o0 + bd_out);
+                    int32_t o1 = calc_op_internal(engine, b+1, bd_mod, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 0, 1);
+                    ch_out = (engine->algo[ch] == 0) ? o1 : (o0 + o1);
                     ch_out <<= 1;
                 } else if (ch == 7) {
-                    int32_t sd_out = calc_op_internal(engine, b+1, 0, ch_pm, engine->ops[b+1].am_enable?ch_am:0, 1, 1);
-                    int32_t hh_out = calc_op_internal(engine, b+0, 0, ch_pm, engine->ops[b+0].am_enable?ch_am:0, 2, 1);
+                    int32_t sd_out = calc_op_internal(engine, b+1, 0, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 1, 1);
+                    int32_t hh_out = calc_op_internal(engine, b+0, 0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 2, 1);
                     ch_out = (sd_out + hh_out) << 1;
                 } else if (ch == 8) {
-                    int32_t tom_out = calc_op_internal(engine, b+0, 0, ch_pm, engine->ops[b+0].am_enable?ch_am:0, 0, 1);
-                    int32_t tc_out = calc_op_internal(engine, b+1, 0, ch_pm, engine->ops[b+1].am_enable?ch_am:0, 2, 1);
+                    int32_t tom_out = calc_op_internal(engine, b+0, 0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 0, 1);
+                    int32_t tc_out = calc_op_internal(engine, b+1, 0, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 2, 1);
                     ch_out = (tom_out + tc_out) << 1;
                 }
             } else {
                 int32_t bus[5] = {0};
                 int32_t mod0 = bus[engine->ops[b+0].src_bus] + fb_mod;
-                int32_t out0 = calc_op_internal(engine, b+0, mod0, ch_pm, engine->ops[b+0].am_enable?ch_am:0, 0, 1);
+                int32_t out0 = calc_op_internal(engine, b+0, mod0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 0, 1);
                 engine->fb_memory[ch][0] = engine->fb_memory[ch][1];
                 engine->fb_memory[ch][1] = out0;
                 bus[engine->ops[b+0].dst_bus] += out0;
 
                 int32_t mod2 = bus[engine->ops[b+2].src_bus];
-                int32_t out2 = calc_op_internal(engine, b+2, mod2, ch_pm, engine->ops[b+2].am_enable?ch_am:0, 0, 1);
+                int32_t out2 = calc_op_internal(engine, b+2, mod2, engine->ops[b+2].pm_enable?ch_pm:0, engine->ops[b+2].am_enable?ch_am:0, 0, 1);
                 bus[engine->ops[b+2].dst_bus] += out2;
 
                 int32_t mod1 = bus[engine->ops[b+1].src_bus];
-                int32_t out1 = calc_op_internal(engine, b+1, mod1, ch_pm, engine->ops[b+1].am_enable?ch_am:0, 0, 1);
+                int32_t out1 = calc_op_internal(engine, b+1, mod1, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 0, 1);
                 bus[engine->ops[b+1].dst_bus] += out1;
 
                 int32_t mod3 = bus[engine->ops[b+3].src_bus];
-                int32_t out3 = calc_op_internal(engine, b+3, mod3, ch_pm, engine->ops[b+3].am_enable?ch_am:0, 0, 1);
+                int32_t out3 = calc_op_internal(engine, b+3, mod3, engine->ops[b+3].pm_enable?ch_pm:0, engine->ops[b+3].am_enable?ch_am:0, 0, 1);
                 bus[engine->ops[b+3].dst_bus] += out3;
 
                 ch_out = bus[4] << 1;

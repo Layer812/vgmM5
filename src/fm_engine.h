@@ -15,6 +15,8 @@
 #define CHIP_YM3812 3 // OPL2
 #define CHIP_YM2413 4 // OPLL
 #define CHIP_YM2203 5 // OPN
+#define CHIP_YM2608 6 // OPNA
+#define CHIP_YM2610 7 // OPNB
 
 typedef enum {
     EG_OFF = 0, EG_ATTACK, EG_DECAY, EG_SUSTAIN, EG_RELEASE
@@ -36,6 +38,7 @@ typedef struct {
     
     uint8_t  mul; 
     uint8_t  am_enable;
+    uint8_t  pm_enable;
     uint8_t  ar;
     uint8_t  dr;
     uint8_t  d2r;
@@ -55,6 +58,10 @@ typedef struct {
     // SSG-EG Support
     uint8_t  ssg_eg_mode;
     uint8_t  ssg_inverted;
+
+    // F-Number and Block (moved from FMSoundEngine for CH3 abstraction)
+    uint16_t f_number;
+    uint8_t  block;
 
 } OperatorState;
 
@@ -124,14 +131,20 @@ typedef struct {
     uint32_t clock;
     uint8_t  chip_type; 
 
-    // YM2612 / OPL specific
+    // Hardware Latches (used for routing to OperatorState)
     uint16_t f_number[FM_CHANNELS];
     uint8_t  block[FM_CHANNELS];
-    uint16_t ch3_f_number[3]; // For YM2612/YM2203 CH3 Special Mode (Op2, Op3, Op1)
+    uint16_t ch3_f_number[3]; // For YM2612/YM2203 CH3 Special Mode
     uint8_t  ch3_block[3];
-    
+
+    // OPL specific
     uint32_t opl2_lfo_am_step;
     uint32_t opl2_lfo_pm_step;
+    uint8_t  opl_wave_enable;
+    
+    // Global parameters
+    uint32_t opl_drum_phase[6];
+    uint32_t opl_drum_step[6];
     uint64_t fchip_step; // ★ Hardware frequency wrap-around step for anti-aliasing
     
     // ★ 事前計算ファクタ (double撲滅 & 高速化)

@@ -25,12 +25,15 @@ extern "C" {
 #include "pdx.h"
 #include "adpcm.h"
 #include "lzx.h"
-#include "pcm_timer_driver.h"
-#include "fm_opm_voice_driver.h"
-#include "adpcm_voice_driver.h"
+#include "mdx_timer.h"
+#include "mdx_fm.h"
+#include "mdx_adpcm.h"
 #include "fm_engine.h"
 #include "esp_partition.h"
 }
+
+// 共有オーディオバッファ（vgm_engine.cpp側で定義）
+extern int32_t *vgm_mix_buf;
 
 // ============================================================
 // 内部バッファ（int32 ミックス用のみ — 共有バッファへの変換に使用）
@@ -41,13 +44,12 @@ static int32_t s_mix_buf[VGM_BUFF_SIZE];
 // ============================================================
 // MDX/PDXドライバー
 // ============================================================
+static struct mdx_file            s_mdx_file;
+static struct pdx_file            s_pdx_file;
 static struct mdx_driver          s_mdx_driver;
-static struct pcm_timer_driver    s_timer_driver;
-static struct fm_opm_voice_driver s_fm_driver;
-static struct adpcm_voice_driver  s_adpcm_driver;
-
-static struct mdx_file  s_mdx_file;
-static struct pdx_file  s_pdx_file;
+static struct mdx_timer           s_timer_driver;
+static struct mdx_fm              s_fm_driver;
+static struct mdx_adpcm           s_adpcm_driver;
 
 static uint8_t *s_mdx_buffer = NULL;   // MDXファイルデータ（ヒープ）
 
@@ -333,23 +335,23 @@ static void mdx_gen_task(void *args) {
             int remaining = VGM_BUFF_SIZE;
             int pos       = 0;
             while (remaining > 0) {
-                int timer_est = pcm_timer_driver_estimate(&s_timer_driver, remaining);
-                int fm_est    = fm_opm_voice_driver_estimate(&s_fm_driver, remaining);
-                int samples   = (timer_est < fm_est) ? timer_est : fm_est;
-                if (samples <= 0) samples = 1;
+            int timer_est = mdx_timer_estimate(&s_timer_driver, remaining);
+            int samples   = timer_est;
+            if (samples <= 0) samples = 1;
 
-                // Advance timer FIRST: this triggers mdx_driver_tick which schedules
-                // ADPCM samples via adpcm_driver_play. If we read before advancing,
-                // we get stale/empty data from the previous block.
-                pcm_timer_driver_advance(&s_timer_driver, samples);
+            // Generate ADPCM and FM mixed buffer
+            mdx_adpcm_run(&s_adpcm_driver, &s_mix_buf[pos], samples);
+            mdx_fm_run(&s_fm_driver, &s_mix_buf[pos], samples);
 
-                // Now read the samples that were just scheduled
-                adpcm_voice_driver_run(&s_adpcm_driver, &s_mix_buf[pos], samples);
-                fm_opm_voice_driver_run(&s_fm_driver,   &s_mix_buf[pos], samples);
+            remaining -= samples;
+            pos += samples;
 
-                remaining -= samples;
-                pos       += samples;
+            if (mdx_timer_advance(&s_timer_driver, samples)) {
+                if (s_mdx_driver.ended) {
+                    break;
+                }
             }
+        }
 
 	    static int64_t dc_state = 0;
             static int32_t dc_prev = 0;
@@ -443,15 +445,15 @@ bool mdx_engine_play(const char *mdx_path) {
     s_title[0] = '\0';
 
     Serial.printf("[MDX::PLAY] Init drivers (sample_rate=%d)\n", actual_sample_rate);
-    pcm_timer_driver_init(&s_timer_driver, actual_sample_rate);
-    adpcm_voice_driver_init(&s_adpcm_driver, actual_sample_rate);
-    fm_opm_voice_driver_init(&s_fm_driver, actual_sample_rate);
+    mdx_timer_init(&s_timer_driver, actual_sample_rate);
+    mdx_adpcm_init(&s_adpcm_driver, actual_sample_rate);
+    mdx_fm_init(&s_fm_driver, actual_sample_rate);
 
     mdx_driver_init(
         &s_mdx_driver,
-        (struct timer_driver *)&s_timer_driver,
-        (struct fm_driver    *)&s_fm_driver.opm_driver,
-        (struct adpcm_driver *)&s_adpcm_driver
+        &s_timer_driver,
+        &s_fm_driver,
+        &s_adpcm_driver
     );
     s_mdx_driver.max_loops = 2;
 

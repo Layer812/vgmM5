@@ -72,8 +72,15 @@ struct MasterRecord {
 #define CHIP_HUC6280    (1 << 8)
 #define CHIP_NES        (1 << 9)
 #define CHIP_GB         (1 << 10)
+#define CHIP_YM3812     (1 << 11)
+#define CHIP_YM2608     (1 << 12)
+#define CHIP_YM2610     (1 << 13)
+#define CHIP_YM2413     (1 << 14)
+#define CHIP_SEGAPCM    (1 << 15)
+#define CHIP_K051649    (1 << 16)
+#define CHIP_MSM6258    (1 << 17)
 
-#define VGMM5_SUPPORTED_MASK (CHIP_YM2151 | CHIP_YM2612 | CHIP_SN76489 | CHIP_C140 | CHIP_C352 | CHIP_AY38910 | CHIP_YM2203 | CHIP_OKIM6295 | CHIP_HUC6280)
+#define VGMM5_SUPPORTED_MASK (CHIP_YM2151 | CHIP_YM2612 | CHIP_SN76489 | CHIP_C140 | CHIP_C352 | CHIP_AY38910 | CHIP_YM2203 | CHIP_OKIM6295 | CHIP_HUC6280 | CHIP_YM3812 | CHIP_YM2608 | CHIP_YM2610 | CHIP_YM2413 | CHIP_SEGAPCM | CHIP_K051649 | CHIP_MSM6258)
 
 // ============================================================
 // State

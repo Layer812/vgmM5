@@ -178,42 +178,8 @@ String cache_ensure_vgm(const String& vgz_path) {
 // ============================================================
 // UIサムネイル キャッシュ機構
 // ============================================================
-static M5Canvas thumb_sprite(&M5Cardputer.Display);
-static bool thumb_sprite_ready = false;
-static String current_loaded_thumb = "";
-
-void cache_free_thumb_sprite() {
-    if (thumb_sprite_ready) {
-        thumb_sprite.deleteSprite();
-        thumb_sprite_ready = false;
-        current_loaded_thumb = "";
-    }
-}
-
-void cache_prepare_thumb(const String& thumb_path_str) {
-    if (!thumb_sprite_ready) {
-        thumb_sprite.setColorDepth(16);
-        thumb_sprite.createSprite(64, 64); 
-        thumb_sprite_ready = true;
-    }
-    if (current_loaded_thumb == thumb_path_str) return;
-
-    thumb_sprite.fillSprite(BLACK);
-    String path = cache_get_thumb_path(thumb_path_str);
-    if (SD.exists(path)) {
-        File img_file = SD.open(path.c_str(), "r");
-        if (img_file) {
-            if (path.endsWith(".png")) thumb_sprite.drawPng(static_cast<Stream*>(&img_file), 0, 0, 64, 64);
-            else thumb_sprite.drawJpg(static_cast<Stream*>(&img_file), 0, 0, 64, 64);
-            img_file.close();
-        }
-    }
-    current_loaded_thumb = thumb_path_str;
-}
-
-void cache_draw_prepared_thumb(int x, int y) {
-    if (thumb_sprite_ready) thumb_sprite.pushSprite(x, y);
-}
+// Thumbnails logic completely removed to save flash memory
+// ============================================================
 void cache_draw_thumb(const String& thumb_path_str, const String& thumb_url, int x, int y, int w, int h, const char* t1 = "Now", const char* t2 = "printing") {
     uint16_t grey = M5Cardputer.Display.color565(100, 100, 100);
     M5Cardputer.Display.fillRect(x, y, w, h, grey);

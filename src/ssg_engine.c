@@ -16,7 +16,7 @@ void ssg_engine_init(SSGSoundEngine *engine, uint32_t sample_rate, uint32_t cloc
     const double MAX_VOL = 12000.0; // Halved to account for +/- swing
     for (int i = 0; i < 16; i++) {
         if (i == 0) engine->vol_table[i] = 0;
-        else engine->vol_table[i] = (int32_t)(MAX_VOL * pow(10.0, -(15 - i) * 2.0 / 20.0));
+        else engine->vol_table[i] = (int32_t)(MAX_VOL * pow(10.0, (i - 15) * 3.0 / 20.0)); // 3dB per step
     }
 }
 
@@ -33,7 +33,6 @@ void ssg_engine_write(SSGSoundEngine *engine, uint8_t reg, uint8_t val) {
         case 13: 
             // エンベロープ形状のリセットとフラグ設定
             engine->env_cnt = 0;
-            engine->env_step = 0;
             engine->env_attack  = (val & 0x04) ? true : false;
             engine->env_alt     = (val & 0x02) ? true : false;
             engine->env_hold    = (val & 0x01) ? true : false;
@@ -45,6 +44,7 @@ void ssg_engine_write(SSGSoundEngine *engine, uint8_t reg, uint8_t val) {
                 engine->env_attack = false;
                 engine->env_hold = true;
                 engine->env_alt = false;
+                engine->env_vol = 15;
             }
             break;
     }

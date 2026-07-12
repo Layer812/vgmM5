@@ -23,7 +23,6 @@ typedef struct {
     int32_t  env_cnt;
     int32_t  env_period;
     int8_t   env_vol;       // 現在のエンベロープ音量 (0-15)
-    uint8_t  env_step;      // エンベロープのステップ状態
     bool     env_hold;
     bool     env_alt;
     bool     env_attack;

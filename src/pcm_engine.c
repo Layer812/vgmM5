@@ -113,6 +113,22 @@ void pcm_engine_add_data_block(PCMSoundEngine *engine, uint8_t type, const uint8
             engine->msm6258.blocks[c] = data;
             engine->msm6258.block_count++;
         }
+    } else if (type == 0x82) { // YM2610 ADPCM-A
+        if (engine->opn.adpcma_block_count < 64) {
+            int c = engine->opn.adpcma_block_count;
+            engine->opn.adpcma_block_offsets[c] = (c == 0) ? 0 : engine->opn.adpcma_block_offsets[c-1] + engine->opn.adpcma_block_sizes[c-1];
+            engine->opn.adpcma_block_sizes[c] = size;
+            engine->opn.adpcma_blocks[c] = data;
+            engine->opn.adpcma_block_count++;
+        }
+    } else if (type == 0x81 || type == 0x83) { // YM2608 / YM2610 Delta-T
+        if (engine->opn.adpcmb_block_count < 64) {
+            int c = engine->opn.adpcmb_block_count;
+            engine->opn.adpcmb_block_offsets[c] = (c == 0) ? 0 : engine->opn.adpcmb_block_offsets[c-1] + engine->opn.adpcmb_block_sizes[c-1];
+            engine->opn.adpcmb_block_sizes[c] = size;
+            engine->opn.adpcmb_blocks[c] = data;
+            engine->opn.adpcmb_block_count++;
+        }
     } else if (type == 0x8B) {
         if (engine->oki.block_count < 64) {
             int c = engine->oki.block_count;
@@ -531,8 +547,8 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
             addr = (addr + whole_steps) & 0xFFFFFF;
             engine->segapcm.addr[ch] = addr;
         }
-        mix_l += spcm_l >> 1;
-        mix_r += spcm_r >> 1;
+        mix_l += spcm_l << 3;
+        mix_r += spcm_r << 3;
     }
 
     // ── Namco C140/C352 ──────────────────────
@@ -650,6 +666,194 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
         mix_r += (namco_mix_r * 3) >> 3;
     }
 
+    pcm_engine_opn_tick(engine, &mix_l, &mix_r);
+
+    *out_l += mix_l;
+    *out_r += mix_r;
+}
+// ────────────────────────────────────────────────────────────────────────────
+// YM2608 / YM2610 OPN PCM (Rhythm / ADPCM-A / ADPCM-B)
+// ────────────────────────────────────────────────────────────────────────────
+static void opn_adpcm_decode_nibble(int nibble, int32_t *adpcm_val, int32_t *adpcm_step_idx) {
+    int step  = oki_step_table[*adpcm_step_idx];
+    int delta = step >> 3;
+    if (nibble & 1) delta += (step >> 2);
+    if (nibble & 2) delta += (step >> 1);
+    if (nibble & 4) delta += step;
+    if (nibble & 8) delta = -delta;
+    *adpcm_val += delta;
+    if (*adpcm_val >  2047) *adpcm_val =  2047;
+    if (*adpcm_val < -2048) *adpcm_val = -2048;
+    *adpcm_step_idx += oki_index_table[nibble & 0x0F];
+    if (*adpcm_step_idx < 0)  *adpcm_step_idx = 0;
+    if (*adpcm_step_idx > 48) *adpcm_step_idx = 48;
+}
+
+static uint8_t opn_read_rom(const uint8_t** blocks, uint32_t* offsets, uint32_t* sizes, uint32_t count, uint32_t addr) {
+    for (uint32_t i = 0; i < count; i++) {
+        if (addr >= offsets[i] && addr < offsets[i] + sizes[i]) {
+            return blocks[i][addr - offsets[i]];
+        }
+    }
+    return 0;
+}
+
+void pcm_engine_opn_init(PCMSoundEngine *engine, uint32_t clock) {
+    memset(&engine->opn, 0, sizeof(OPN_PCM_Matrix));
+    engine->opn.clock = clock;
+}
+
+void pcm_engine_write_opn_rhythm(PCMSoundEngine *engine, uint8_t reg, uint8_t data) {
+    engine->opn.regs[reg] = data;
+    // YM2608 Rhythm Registers (0x10 - 0x1D)
+    if (reg == 0x10) {
+        // Dump / KeyOn
+        if (data & 0x80) { // Dump (stop all?)
+             for(int i=0; i<6; i++) engine->opn.ch_a[i].playing = false;
+        } else {
+             // bit0-5: KeyOn for ch0-5
+             for(int i=0; i<6; i++) {
+                 if (data & (1<<i)) {
+                     engine->opn.ch_a[i].playing = true;
+                     engine->opn.ch_a[i].pos_frac = 0;
+                     engine->opn.ch_a[i].adpcm_val = 0;
+                     engine->opn.ch_a[i].adpcm_step_idx = 0;
+                     engine->opn.ch_a[i].pos = engine->opn.ch_a[i].start_addr;
+                 }
+             }
+        }
+    } else if (reg >= 0x18 && reg <= 0x1D) {
+        int ch = reg - 0x18;
+        engine->opn.ch_a[ch].vol_l = (data & 0x80) ? (data & 0x1F) : 0;
+        engine->opn.ch_a[ch].vol_r = (data & 0x40) ? (data & 0x1F) : 0;
+        // YM2608 rhythm freq is fixed. We assume 44.1kHz sample rate, 
+        // YM2608 rhythm sample rate is clock / 144 / 6? Wait, it's clock / 72.
+        // Let's use a fixed step. YM2610 ADPCM-A sets step via 0x100.
+        engine->opn.ch_a[ch].step = (engine->opn.clock / 72) * 65536 / engine->sample_rate;
+    }
+}
+
+void pcm_engine_write_opn_adpcma(PCMSoundEngine *engine, uint8_t reg, uint8_t data) {
+    engine->opn.regs[reg] = data;
+    // YM2610 ADPCM-A Registers (0x100 - 0x12F)
+    // Actually in VGM it's Port 1, reg 0x10-0x2F
+    if (reg == 0x100 || reg == 0x10) {
+        // KeyOn
+        if (data & 0x80) { // Dump
+             for(int i=0; i<6; i++) engine->opn.ch_a[i].playing = false;
+        } else {
+             for(int i=0; i<6; i++) {
+                 if (data & (1<<i)) {
+                     engine->opn.ch_a[i].playing = true;
+                     engine->opn.ch_a[i].pos_frac = 0;
+                     engine->opn.ch_a[i].adpcm_val = 0;
+                     engine->opn.ch_a[i].adpcm_step_idx = 0;
+                     engine->opn.ch_a[i].pos = engine->opn.ch_a[i].start_addr;
+                 }
+             }
+        }
+    } else if (reg >= 0x108 && reg <= 0x10D) {
+        int ch = reg - 0x108;
+        engine->opn.ch_a[ch].vol_l = (data & 0x80) ? (data & 0x1F) : 0;
+        engine->opn.ch_a[ch].vol_r = (data & 0x40) ? (data & 0x1F) : 0;
+    } else if (reg >= 0x110 && reg <= 0x115) { // Start address LSB
+        // start = (start_msb << 16) | (start_lsb << 8)
+    } else if (reg >= 0x118 && reg <= 0x11D) { // Start address MSB
+        int ch = reg - 0x118;
+        uint16_t start = (data << 8) | engine->opn.regs[0x110 + ch];
+        engine->opn.ch_a[ch].start_addr = start << 8;
+    } else if (reg >= 0x120 && reg <= 0x125) { // End address LSB
+    } else if (reg >= 0x128 && reg <= 0x12D) { // End address MSB
+        int ch = reg - 0x128;
+        uint16_t end = (data << 8) | engine->opn.regs[0x120 + ch];
+        engine->opn.ch_a[ch].end_addr = (end << 8) + 0xFF;
+    }
+}
+
+void pcm_engine_write_opn_adpcmb(PCMSoundEngine *engine, uint8_t reg, uint8_t data) {
+    // Port 1 0x00 - 0x1C (YM2608 and YM2610 Delta-T)
+    engine->opn.ch_b.regs[reg] = data;
+    if (reg == 0x00) {
+        if (data & 0x80) {
+            engine->opn.ch_b.playing = true;
+            engine->opn.ch_b.pos_frac = 0;
+            engine->opn.ch_b.adpcm_val = 0;
+            engine->opn.ch_b.adpcm_step_idx = 0;
+            engine->opn.ch_b.pos = engine->opn.ch_b.start_addr;
+        }
+        if (data & 0x01) { // Reset
+            engine->opn.ch_b.playing = false;
+        }
+    } else if (reg == 0x02) {
+        // Start LSB
+    } else if (reg == 0x03) {
+        uint16_t start = (data << 8) | engine->opn.ch_b.regs[0x02];
+        engine->opn.ch_b.start_addr = start << 8;
+    } else if (reg == 0x04) {
+        // End LSB
+    } else if (reg == 0x05) {
+        uint16_t end = (data << 8) | engine->opn.ch_b.regs[0x04];
+        engine->opn.ch_b.end_addr = (end << 8) + 0xFF;
+    } else if (reg == 0x09) { // Delta-N LSB
+    } else if (reg == 0x0A) { // Delta-N MSB
+        uint16_t delta_n = (data << 8) | engine->opn.ch_b.regs[0x09];
+        // step = delta_n * clock / (72 * sample_rate) ?
+        engine->opn.ch_b.step = (uint32_t)delta_n * 65536 / 72; // rough approx
+    } else if (reg == 0x0B) { // Vol
+        engine->opn.ch_b.vol_l = data;
+        engine->opn.ch_b.vol_r = data;
+    }
+}
+
+void pcm_engine_opn_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *out_r) {
+    int32_t mix_l = 0, mix_r = 0;
+    
+    // ADPCM-A
+    if (engine->opn.adpcma_block_count > 0) {
+        for (int i = 0; i < OPN_ADPCMA_CHANNELS; i++) {
+            OPN_ADPCM_Channel *ch = &engine->opn.ch_a[i];
+            if (!ch->playing) continue;
+
+            ch->pos_frac += ch->step;
+            uint32_t step_amount = ch->pos_frac >> 16;
+            ch->pos_frac &= 0xFFFF;
+
+            for (uint32_t s = 0; s < step_amount; s++) {
+                if (ch->pos >= ch->end_addr) { ch->playing = false; break; }
+                uint8_t byte = opn_read_rom(engine->opn.adpcma_blocks, engine->opn.adpcma_block_offsets, engine->opn.adpcma_block_sizes, engine->opn.adpcma_block_count, ch->pos / 2);
+                uint8_t nibble = (ch->pos & 1) ? (byte & 0x0F) : (byte >> 4);
+                opn_adpcm_decode_nibble(nibble, &ch->adpcm_val, &ch->adpcm_step_idx);
+                ch->pos++;
+            }
+            if (ch->playing) {
+                mix_l += (ch->adpcm_val * ch->vol_l * 5) >> 8;
+                mix_r += (ch->adpcm_val * ch->vol_r * 5) >> 8;
+            }
+        }
+    }
+
+    // ADPCM-B
+    if (engine->opn.adpcmb_block_count > 0) {
+        OPN_DeltaT_Channel *ch = &engine->opn.ch_b;
+        if (ch->playing) {
+            ch->pos_frac += ch->step;
+            uint32_t step_amount = ch->pos_frac >> 16;
+            ch->pos_frac &= 0xFFFF;
+
+            for (uint32_t s = 0; s < step_amount; s++) {
+                if (ch->pos >= ch->end_addr) { ch->playing = false; break; }
+                uint8_t byte = opn_read_rom(engine->opn.adpcmb_blocks, engine->opn.adpcmb_block_offsets, engine->opn.adpcmb_block_sizes, engine->opn.adpcmb_block_count, ch->pos / 2);
+                uint8_t nibble = (ch->pos & 1) ? (byte & 0x0F) : (byte >> 4);
+                opn_adpcm_decode_nibble(nibble, &ch->adpcm_val, &ch->adpcm_step_idx);
+                ch->pos++;
+            }
+            if (ch->playing) {
+                mix_l += (ch->adpcm_val * ch->vol_l * 5) >> 8;
+                mix_r += (ch->adpcm_val * ch->vol_r * 5) >> 8;
+            }
+        }
+    }
+    
     *out_l += mix_l;
     *out_r += mix_r;
 }

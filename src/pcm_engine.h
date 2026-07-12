@@ -171,6 +171,62 @@ typedef struct {
 } MSM6258;
 
 // ─────────────────────────────────────────
+// YM2608/YM2610 OPN PCM (Rhythm / ADPCM-A / ADPCM-B)
+// ─────────────────────────────────────────
+#define OPN_ADPCMA_CHANNELS 6
+
+typedef struct {
+    uint32_t start_addr;
+    uint32_t end_addr;
+    uint32_t pos;
+    uint32_t pos_frac;
+    uint32_t step;       // Freq step
+    uint8_t  vol_l;
+    uint8_t  vol_r;
+    uint8_t  pan;
+    bool     playing;
+    // ADPCM decode state
+    int32_t  adpcm_val;
+    int32_t  adpcm_step_idx;
+    uint8_t  regs[0x06]; // Channel specific registers
+} OPN_ADPCM_Channel;
+
+typedef struct {
+    uint32_t start_addr;
+    uint32_t end_addr;
+    uint32_t pos;
+    uint32_t pos_frac;
+    uint32_t step;       // Freq step based on delta-N
+    uint8_t  vol_l;
+    uint8_t  vol_r;
+    uint8_t  pan;
+    bool     playing;
+    // Delta-T ADPCM decode state
+    int32_t  adpcm_val;
+    int32_t  adpcm_step_idx;
+    uint8_t  regs[0x1C]; // Channel specific registers
+} OPN_DeltaT_Channel;
+
+typedef struct {
+    OPN_ADPCM_Channel  ch_a[OPN_ADPCMA_CHANNELS]; // Rhythm / ADPCM-A
+    OPN_DeltaT_Channel ch_b;                      // ADPCM-B (Delta-T)
+    uint8_t  regs[0x30];                          // Global registers
+    
+    // ROM blocks
+    const uint8_t* adpcma_blocks[64];
+    uint32_t adpcma_block_offsets[64];
+    uint32_t adpcma_block_sizes[64];
+    uint32_t adpcma_block_count;
+
+    const uint8_t* adpcmb_blocks[64];
+    uint32_t adpcmb_block_offsets[64];
+    uint32_t adpcmb_block_sizes[64];
+    uint32_t adpcmb_block_count;
+    
+    uint32_t clock;
+} OPN_PCM_Matrix;
+
+// ─────────────────────────────────────────
 // PCMサウンドエンジン全体
 // ─────────────────────────────────────────
 typedef struct {
@@ -181,6 +237,7 @@ typedef struct {
     MSM6258        msm6258;
     SegaPCMEngine  segapcm;
     NamcoPCMEngine namco;
+    OPN_PCM_Matrix opn;
 
     bool c140_enabled;
     bool c352_enabled;
@@ -223,6 +280,13 @@ void pcm_engine_segapcm_write(PCMSoundEngine *engine, uint8_t reg, uint8_t data)
 void pcm_engine_namco_init(PCMSoundEngine *engine, uint32_t clock, uint8_t type);
 void pcm_engine_namco_write(PCMSoundEngine *engine, uint16_t addr, uint16_t data);
 void pcm_engine_namco_mmap(PCMSoundEngine *engine, uint32_t start_addr, const uint8_t *data, uint32_t size);
+
+// OPN (YM2608 / YM2610) ADPCM
+void pcm_engine_opn_init(PCMSoundEngine *engine, uint32_t clock);
+void pcm_engine_write_opn_rhythm(PCMSoundEngine *engine, uint8_t reg, uint8_t data);
+void pcm_engine_write_opn_adpcma(PCMSoundEngine *engine, uint8_t reg, uint8_t data);
+void pcm_engine_write_opn_adpcmb(PCMSoundEngine *engine, uint8_t reg, uint8_t data);
+void pcm_engine_opn_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *out_r);
 
 void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *out_r);
 

@@ -151,15 +151,15 @@ static void mdx_driver_note_on(struct mdx_driver *r, int track_num) {
 		if(track->voice_num >= 0) {
 			uint8_t *v = r->mdx_file->voices[track->voice_num];
 			if(v) {
-				fm_driver_set_pitch(r->fm_driver, track_num, track->pitch);
-				fm_driver_set_tl(r->fm_driver, track_num, track->opm_volume + r->fade_value, v);
+				mdx_fm_set_pitch(r->fm_driver, track_num, track->pitch);
+				mdx_fm_set_tl(r->fm_driver, track_num, track->opm_volume + r->fade_value, v);
 				if(track->skipNoteOn) {
 					track->skipNoteOn = 0;
 				} else {
 					if(track->mhon) {
-						fm_driver_set_pms_ams(r->fm_driver, track_num, track->pms_ams);
+						mdx_fm_set_pms_ams(r->fm_driver, track_num, track->pms_ams);
 						if(track->keysync) {
-							fm_driver_reset_key_sync(r->fm_driver, track_num);
+							mdx_fm_reset_key_sync(r->fm_driver, track_num);
 						}
 					}
 
@@ -171,7 +171,7 @@ static void mdx_driver_note_on(struct mdx_driver *r, int track_num) {
 						}
 					}
 
-					fm_driver_note_on(r->fm_driver, track_num, v[2], v);
+					mdx_fm_note_on(r->fm_driver, track_num, v[2], v);
 				}
 			} else printf("Note on !v %d\n", track_num);
 		}
@@ -186,7 +186,7 @@ static void mdx_driver_note_on(struct mdx_driver *r, int track_num) {
 			// スロット番号のオーバーフローを防ぐガード
 			if (pdx_slot >= 0 && pdx_slot < 96) {
 				if(r->pdx_file->samples[pdx_slot].len > 0){
-					adpcm_driver_play(r->adpcm_driver, track_num - 8, r->pdx_file->samples[pdx_slot].decoded_data, r->pdx_file->samples[pdx_slot].num_samples, track->adpcm_freq_num, mdx_adpcm_volume_from_opm(track->opm_volume + r->fade_value), pdx_slot);
+					mdx_adpcm_play(r->adpcm_driver, track_num - 8, r->pdx_file->samples[pdx_slot].decoded_data, r->pdx_file->samples[pdx_slot].num_samples, track->adpcm_freq_num, mdx_adpcm_volume_from_opm(track->opm_volume + r->fade_value), pdx_slot);
 				}
 			}
 		}
@@ -203,11 +203,11 @@ static void mdx_driver_note_off(struct mdx_driver *driver, int track_num) {
 				track->skipNoteOn = 1;
 				track->skipNoteOff = 0;
 			} else {
-				fm_driver_note_off(driver->fm_driver, track_num);
+				mdx_fm_note_off(driver->fm_driver, track_num);
 			}
 		} else {
 			// 修正箇所：MDX仕様においてPCMはノートオフで強制停止させない。
-			// adpcm_driver_stop(driver->adpcm_driver, track_num - 8);
+			// mdx_adpcm_stop(driver->adpcm_driver, track_num - 8);
 			track->note = -1; // ノートの状態リセットのみ行う
 		}
 		track->note = -1;
@@ -255,18 +255,18 @@ static int mdx_driver_track_advance(struct mdx_driver *driver, int track_num) {
 			if(driver->set_tempo)
 				driver->set_tempo(driver, track->data[track->pos+1], driver->data_ptr);
 			if(driver->timer_driver)
-				timer_driver_set_opm_tempo(driver->timer_driver, track->data[track->pos+1]);
+				mdx_timer_set_opm_tempo(driver->timer_driver, track->data[track->pos+1]);
 			track->pos += 2;
 			break;
 		case 0xfe: // OPM Register Write
-			fm_driver_write_opm_reg(driver->fm_driver, track->data[track->pos + 1], track->data[track->pos + 2]);
+			mdx_fm_write_opm_reg(driver->fm_driver, track->data[track->pos + 1], track->data[track->pos + 2]);
 			track->pos += 3;
 			break;
 		case 0xfd: // Set voice
 			// トラックに関わらず @ の値を保存する
 			track->voice_num = track->data[track->pos + 1]; 
 			if(track_num < 8) {
-				fm_driver_load_voice(driver->fm_driver, track_num, driver->mdx_file->voices[track->voice_num], track->opm_volume, track->pan);
+				mdx_fm_load_voice(driver->fm_driver, track_num, driver->mdx_file->voices[track->voice_num], track->opm_volume, track->pan);
 			}
 			track->pos += 2;
 			break;
@@ -274,7 +274,7 @@ static int mdx_driver_track_advance(struct mdx_driver *driver, int track_num) {
 			if(track_num < 8) {
 				if(track->voice_num >= 0 && driver->mdx_file->voices[track->voice_num]) {
 					track->pan = track->data[track->pos + 1];
-					fm_driver_set_pan(driver->fm_driver, track_num, track->pan, driver->mdx_file->voices[track->voice_num]);
+					mdx_fm_set_pan(driver->fm_driver, track_num, track->pan, driver->mdx_file->voices[track->voice_num]);
 				}
 			} else {
 			}
@@ -285,9 +285,9 @@ static int mdx_driver_track_advance(struct mdx_driver *driver, int track_num) {
 			track->opm_volume = mdx_volume_to_opm(track->volume);
 			if(track_num < 8) {
 				if(track->voice_num >= 0)
-					fm_driver_set_tl(driver->fm_driver, track_num, track->opm_volume, driver->mdx_file->voices[track->voice_num]);
+					mdx_fm_set_tl(driver->fm_driver, track_num, track->opm_volume, driver->mdx_file->voices[track->voice_num]);
 			} else {
-				adpcm_driver_set_volume(driver->adpcm_driver, track_num - 8, mdx_adpcm_volume_from_opm(track->opm_volume));
+				mdx_adpcm_set_volume(driver->adpcm_driver, track_num - 8, mdx_adpcm_volume_from_opm(track->opm_volume));
 			}
 			track->pos += 2;
 			break;
@@ -296,9 +296,9 @@ static int mdx_driver_track_advance(struct mdx_driver *driver, int track_num) {
 			track->opm_volume = mdx_volume_to_opm(track->volume);
 			if(track_num < 8) {
 				if(track->voice_num >= 0)
-					fm_driver_set_tl(driver->fm_driver, track_num, track->opm_volume, driver->mdx_file->voices[track->voice_num]);
+					mdx_fm_set_tl(driver->fm_driver, track_num, track->opm_volume, driver->mdx_file->voices[track->voice_num]);
 			} else {
-				adpcm_driver_set_volume(driver->adpcm_driver, track_num - 8, mdx_adpcm_volume_from_opm(track->opm_volume));
+				mdx_adpcm_set_volume(driver->adpcm_driver, track_num - 8, mdx_adpcm_volume_from_opm(track->opm_volume));
 			}
 			track->pos++;
 			break;
@@ -307,9 +307,9 @@ static int mdx_driver_track_advance(struct mdx_driver *driver, int track_num) {
 			track->opm_volume = mdx_volume_to_opm(track->volume);
 			if(track_num < 8) {
 				if(track->voice_num >= 0)
-					fm_driver_set_tl(driver->fm_driver, track_num, track->opm_volume, driver->mdx_file->voices[track->voice_num]);
+					mdx_fm_set_tl(driver->fm_driver, track_num, track->opm_volume, driver->mdx_file->voices[track->voice_num]);
 			} else {
-				adpcm_driver_set_volume(driver->adpcm_driver, track_num - 8, mdx_adpcm_volume_from_opm(track->opm_volume));
+				mdx_adpcm_set_volume(driver->adpcm_driver, track_num - 8, mdx_adpcm_volume_from_opm(track->opm_volume));
 			}
 			track->pos++;
 			break;
@@ -412,8 +412,8 @@ static int mdx_driver_track_advance(struct mdx_driver *driver, int track_num) {
 		case 0xdb:
 			if(track->pos < track->len - 1) {
 				track->pan = track->data[track->pos + 1];
-				if(track_num >= 8 && driver->adpcm_driver && driver->adpcm_driver->set_pan) {
-					driver->adpcm_driver->set_pan(driver->adpcm_driver, track->pan);
+				if(track_num >= 8 && driver->adpcm_driver) {
+					mdx_adpcm_set_pan(driver->adpcm_driver, track->pan);
 				}
 			}
 			track->pos += 2;
@@ -424,10 +424,10 @@ static int mdx_driver_track_advance(struct mdx_driver *driver, int track_num) {
 			break;
 		case 0xed: // noise frequency / ADPCM freq num
 			if(track_num < 8) {
-				fm_driver_set_noise_freq(driver->fm_driver, track_num, track->data[track->pos + 1]);
+				mdx_fm_set_noise_freq(driver->fm_driver, track_num, track->data[track->pos + 1]);
 			} else {
 				track->adpcm_freq_num = track->data[track->pos + 1];
-				adpcm_driver_set_freq(driver->adpcm_driver, track_num - 8, track->adpcm_freq_num);
+				mdx_adpcm_set_freq(driver->adpcm_driver, track_num - 8, track->adpcm_freq_num);
 			}
 			track->pos += 2;
 			break;
@@ -488,7 +488,7 @@ static int mdx_driver_track_advance(struct mdx_driver *driver, int track_num) {
 				track->keysync = track->data[track->pos + 1] & 0x40;
 				track->pms_ams = track->data[track->pos + 5];
 				track->mhon = 1;
-				fm_driver_load_lfo(driver->fm_driver, track_num, track->data[track->pos + 1] & 0x03, track->data[track->pos + 2], track->data[track->pos + 3], track->data[track->pos + 4]);
+				mdx_fm_load_lfo(driver->fm_driver, track_num, track->data[track->pos + 1] & 0x03, track->data[track->pos + 2], track->data[track->pos + 3], track->data[track->pos + 4]);
 				track->pos += 6;
 			}
 			break;
@@ -551,7 +551,7 @@ void mdx_driver_track_tick(struct mdx_driver *driver, int track_num) {
 			mdx_lfo_tick(&track->pitch_lfo);
 		}
 
-		fm_driver_set_pitch(driver->fm_driver, track_num, pitch);
+		mdx_fm_set_pitch(driver->fm_driver, track_num, pitch);
 
 		int opmvol = track->opm_volume + driver->fade_value;
 		if(track->amplitude_lfo.enable && track->lfo_delay_counter == 0) {
@@ -562,12 +562,12 @@ void mdx_driver_track_tick(struct mdx_driver *driver, int track_num) {
 		if(track->voice_num >= 0) {
 			uint8_t *v = driver->mdx_file->voices[track->voice_num];
 			if(v) {
-				fm_driver_set_tl(driver->fm_driver, track_num, opmvol, v);
+				mdx_fm_set_tl(driver->fm_driver, track_num, opmvol, v);
 			}
 		}
 	} else {
 		if(driver->fade_value)
-			adpcm_driver_set_volume(driver->adpcm_driver, track_num-8, mdx_adpcm_volume_from_opm(track->opm_volume + driver->fade_value));
+			mdx_adpcm_set_volume(driver->adpcm_driver, track_num-8, mdx_adpcm_volume_from_opm(track->opm_volume + driver->fade_value));
 	}
 
 	while(track->ticks_remaining <= 0 && !track->ended) {
@@ -593,18 +593,19 @@ void mdx_driver_tick(struct mdx_driver *driver) {
 	}
 }
 
-static void mdx_timer_driver_tick_callback(struct timer_driver *timer_driver, void *data_ptr) {
+static void mdx_driver_tick_callback(struct mdx_timer *timer_driver, void *data_ptr) {
 	struct mdx_driver *driver = (struct mdx_driver *)data_ptr;
-
 	mdx_driver_tick(driver);
 }
 
-void mdx_driver_init(struct mdx_driver *driver, struct timer_driver *timer_driver, struct fm_driver *fm_driver, struct adpcm_driver *adpcm_driver) {
+void mdx_driver_init(struct mdx_driver *driver, struct mdx_timer *timer_driver, struct mdx_fm *fm_driver, struct mdx_adpcm *adpcm_driver) {
 	driver->timer_driver = timer_driver;
-	timer_driver_set_tick_callback(timer_driver, mdx_timer_driver_tick_callback, driver);
-	int bpm_tempo = 120;
-	int opm_tempo = 256 - (78125 / (16 * bpm_tempo));
-	timer_driver_set_opm_tempo(timer_driver, opm_tempo);
+	mdx_timer_set_tick_callback(timer_driver, mdx_driver_tick_callback, driver);
+	
+	if(driver->timer_driver) {
+		int opm_tempo = driver->mdx_file ? driver->mdx_file->tracks[0].data[1] : 0;
+		mdx_timer_set_opm_tempo(timer_driver, opm_tempo);
+	}
 	driver->fm_driver = fm_driver;
 	driver->adpcm_driver = adpcm_driver;
 

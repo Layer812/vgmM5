@@ -208,9 +208,12 @@ int makevgmlist(fs::FS &fs) {
       filelist[i].type = TYPE_MDX;
       i++;
     } else if(file.isDirectory()){
-      memcpy(filelist[i].filename, file.name(), PATHMAX);
-      filelist[i].type = TYPE_SDIR;
-      i++;
+      const char* fname = file.name();
+      if (strcmp(fname, "System Volume Information") != 0 && strcmp(fname, "/System Volume Information") != 0) {
+        memcpy(filelist[i].filename, fname, PATHMAX);
+        filelist[i].type = TYPE_SDIR;
+        i++;
+      }
     }
 //    printf("ck5 %d %s\n", i, filelist[i]);
     file = root.openNextFile();

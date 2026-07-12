@@ -153,24 +153,38 @@ void IRAM_ATTR wrap_psg_tick2(ISoundChip* obj, int32_t* l, int32_t* r) { psg_eng
 void IRAM_ATTR wrap_ssg_tick(ISoundChip* obj, int32_t* l, int32_t* r) { ssg_engine_update(&g_ssg_engine, l, r); }
 void IRAM_ATTR wrap_scc_tick(ISoundChip* obj, int32_t* l, int32_t* r) { scc_engine_tick(&g_scc_engine, l, r); }
 
-class FmChip final : public ISoundChip { public: FmChip() : ISoundChip(wrap_fm_tick) {} void write(uint8_t port, uint16_t reg, uint8_t data) override { if (chip_type == 0) fm_engine_register_write(&g_fm_engine, reg, data); else if (chip_type == 1 || chip_type == 5) fm_engine_write_ym2612(&g_fm_engine, port, reg, data); else fm_engine_write_opl(&g_fm_engine, reg, data); } };
+class FmChip final : public ISoundChip { public: FmChip() : ISoundChip(wrap_fm_tick) {} void write(uint8_t port, uint16_t reg, uint8_t data) override { if (chip_type == 0) fm_engine_register_write(&g_fm_engine, reg, data); else if (chip_type == 1 || chip_type == 5 || chip_type == 6 || chip_type == 7) fm_engine_write_ym2612(&g_fm_engine, port, reg, data); else fm_engine_write_opl(&g_fm_engine, reg, data); } };
 class PcmChip final : public ISoundChip { 
 public: 
     PcmChip() : ISoundChip(wrap_pcm_tick) {} 
-    void write(uint8_t port, uint16_t reg, uint8_t data) override {
-        // 何もしない（processVGM内で直接エンジンを呼ぶため）
-    } 
+    void write(uint8_t port, uint16_t reg, uint8_t data) override {} 
 };
-class PsgChip final : public ISoundChip { 
-public: 
-    PSGSoundEngine* engine;
-    PsgChip(TickFunc tf, PSGSoundEngine* e) : ISoundChip(tf), engine(e) {} 
-    void write(uint8_t port, uint16_t reg, uint8_t data) override { 
-        psg_engine_write_sn76489(engine, data); 
-    } 
-};
+class PsgChip final : public ISoundChip { public: PsgChip(TickFunc tf, PSGSoundEngine* e) : ISoundChip(tf), engine(e) {} void write(uint8_t port, uint16_t reg, uint8_t data) override { psg_engine_write_sn76489(engine, data); } PSGSoundEngine* engine; };
 class SsgChip final : public ISoundChip { public: SsgChip() : ISoundChip(wrap_ssg_tick) {} void write(uint8_t port, uint16_t reg, uint8_t data) override { ssg_engine_write(&g_ssg_engine, reg, data); } };
 class SccChip final : public ISoundChip { public: SccChip() : ISoundChip(wrap_scc_tick) {} void write(uint8_t port, uint16_t reg, uint8_t data) override { scc_engine_write(&g_scc_engine, port, reg, data); } };
+
+extern FmChip fm_wrapper;
+
+class OpnxChip final : public ISoundChip {
+public:
+    OpnxChip() : ISoundChip(wrap_fm_tick) {}
+    void write(uint8_t port, uint16_t reg, uint8_t data) override {
+        if (port == 0 && reg < 0x10) {
+            ssg_engine_write(&g_ssg_engine, reg, data);
+        } else if (port == 0 && (reg >= 0x10 && reg <= 0x1D)) {
+            pcm_engine_write_opn_rhythm(&g_pcm_engine, reg, data);
+        } else if (port == 1 && reg < 0x30) {
+            // YM2610 Delta-T (ADPCM-B) and ADPCM-A (0x10-0x2F)
+            if (reg < 0x1C) {
+                pcm_engine_write_opn_adpcmb(&g_pcm_engine, reg, data);
+            } else if (reg >= 0x10 && reg <= 0x2F) {
+                pcm_engine_write_opn_adpcma(&g_pcm_engine, reg | 0x100, data);
+            }
+        } else {
+            fm_wrapper.write(port, reg, data);
+        }
+    }
+};
 
 #define MAX_CHIPS 10
 ISoundChip* active_chips[MAX_CHIPS];
@@ -183,6 +197,7 @@ PsgChip     psg_wrapper(wrap_psg_tick1, &g_psg_engine);
 PsgChip     psg_wrapper2(wrap_psg_tick2, &g_psg_engine2);
 SsgChip     ssg_wrapper;
 SccChip     scc_wrapper;
+OpnxChip    opnx_wrapper;
 
 int skipGzipHeader(const uint8_t *data, size_t size) {
     if (size < 10) return -1;
@@ -565,18 +580,45 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     if (vgm_ym2612_clock != 0 || vgm_ym2151_clock != 0 || vgm_ym2610_clock != 0 || vgm_ym2203_clock != 0 || vgm_ym2608_clock != 0 || vgm_ym3812_clock != 0 || vgm_ym2413_clock != 0) {
         uint32_t fm_clock = 0;
         if      (vgm_ym2612_clock != 0) { chip_type = CHIP_YM2612; fm_clock = vgm_ym2612_clock; }
-        else if (vgm_ym2608_clock != 0) { chip_type = CHIP_YM2612; fm_clock = vgm_ym2608_clock; }
-        else if (vgm_ym2610_clock != 0) { chip_type = CHIP_YM2612; fm_clock = vgm_ym2610_clock; }
+        else if (vgm_ym2608_clock != 0) { chip_type = CHIP_YM2608; fm_clock = vgm_ym2608_clock; }
+        else if (vgm_ym2610_clock != 0) { chip_type = CHIP_YM2610; fm_clock = vgm_ym2610_clock; }
         else if (vgm_ym2203_clock != 0) { chip_type = CHIP_YM2203; fm_clock = vgm_ym2203_clock; }
         else if (vgm_ym3812_clock != 0) { chip_type = CHIP_YM3812; fm_clock = vgm_ym3812_clock; }
         else if (vgm_ym2413_clock != 0) { chip_type = CHIP_YM2413; fm_clock = vgm_ym2413_clock; }
         else                            { chip_type = CHIP_YM2151; fm_clock = vgm_ym2151_clock; }
         fm_engine_init(&g_fm_engine, actual_sample_rate, fm_clock, chip_type);
-        active_chips[active_chip_count++] = &fm_wrapper;
-        if (chip_type == CHIP_YM2612) active_channel_count += 6;
-        else if (chip_type == CHIP_YM2151) active_channel_count += 8;
-        else if (chip_type == CHIP_YM2203) active_channel_count += 3;
-        else active_channel_count += 9; // OPL系等は9音
+        
+        if (chip_type == CHIP_YM2608 || chip_type == CHIP_YM2610) {
+            active_chips[active_chip_count++] = &opnx_wrapper;
+            active_channel_count += 6;
+            pcm_engine_opn_init(&g_pcm_engine, fm_clock);
+            
+            if (chip_type == CHIP_YM2608) {
+                static uint8_t *ym2608_rom = nullptr;
+                if (!ym2608_rom && SD.exists("/ym2608_rom.bin")) {
+                    File f = SD.open("/ym2608_rom.bin", "r");
+                    if (f) {
+                        size_t rsize = f.size();
+                        ym2608_rom = (uint8_t*)malloc(rsize);
+                        if (ym2608_rom) {
+                            f.read(ym2608_rom, rsize);
+                            Serial.println("[VGM] YM2608 Rhythm ROM loaded from SD.");
+                        }
+                        f.close();
+                    }
+                }
+                if (ym2608_rom) {
+                    pcm_engine_add_data_block(&g_pcm_engine, 0x82, ym2608_rom, 32768);
+                }
+            }
+        } else {
+            active_chips[active_chip_count++] = &fm_wrapper;
+            if (chip_type == CHIP_YM2612) active_channel_count += 6;
+            else if (chip_type == CHIP_YM2151) active_channel_count += 8;
+            else if (chip_type == CHIP_YM2203) active_channel_count += 3;
+            else if (chip_type == CHIP_YM3812) active_channel_count += 9;
+            else if (chip_type == CHIP_YM2413) active_channel_count += 9;
+        }
     }
 
 
@@ -889,18 +931,14 @@ void processVGM() {
             }
             case 0xA0: {
                 uint8_t reg = readByte(); uint8_t val = readByte();
-                psg_engine_write(&g_fm_engine.psg, reg, val);
+                ssg_engine_write(&g_ssg_engine, reg, val);
                 break;
             }
             case 0x56: case 0x57: 
             case 0x58: case 0x59: {
                 uint8_t port = cmd & 1;
                 uint8_t reg = readByte(); uint8_t val = readByte();
-                if (port == 0 && reg < 0x10) {
-                    ssg_wrapper.write(0, reg, val);
-                } else {
-                    fm_wrapper.write(port, reg, val);
-                }
+                opnx_wrapper.write(port, reg, val);
                 break;
             }
             case 0x54: { uint8_t reg = readByte(); uint8_t val = readByte(); fm_wrapper.write(0, reg, val); break; }

@@ -4,9 +4,9 @@
 #include <stdint.h>
 #include "mdx.h"
 #include "pdx.h"
-#include "timer_driver.h"
-#include "fm_driver.h"
-#include "adpcm_driver.h"
+#include "mdx_timer.h"
+#include "mdx_fm.h"
+#include "mdx_adpcm.h"
 
 struct mdx_driver_track {
 	uint8_t *data;
@@ -43,9 +43,9 @@ struct mdx_driver {
 	struct mdx_file *mdx_file;
 	struct pdx_file *pdx_file;
 
-	struct timer_driver *timer_driver;
-	struct fm_driver *fm_driver;
-	struct adpcm_driver *adpcm_driver;
+	struct mdx_timer *timer_driver;
+	struct mdx_fm *fm_driver;
+	struct mdx_adpcm *adpcm_driver;
 
 	struct mdx_driver_track tracks[16];
 
@@ -59,7 +59,7 @@ struct mdx_driver {
 	void (*unknown_command_cb)(struct mdx_driver *, int track_num, uint8_t cmd, void *data_ptr);
 };
 
-void mdx_driver_init(struct mdx_driver *driver, struct timer_driver *timer_driver, struct fm_driver *fm_driver, struct adpcm_driver *adpcm_driver);
+void mdx_driver_init(struct mdx_driver *driver, struct mdx_timer *timer_driver, struct mdx_fm *fm_driver, struct mdx_adpcm *adpcm_driver);
 void mdx_driver_deinit(struct mdx_driver *driver);
 void mdx_driver_tick(struct mdx_driver *driver);
 int mdx_driver_load(struct mdx_driver *driver, struct mdx_file *file, struct pdx_file *pfile);
