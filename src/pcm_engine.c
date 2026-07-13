@@ -278,7 +278,7 @@ void pcm_engine_write_ym2612(PCMSoundEngine *engine, uint16_t addr, uint8_t data
 // ─────────────────────────────────────────
 // Namco C140 / C352
 // ─────────────────────────────────────────
-void pcm_engine_namco_init(PCMSoundEngine *engine, uint32_t clock, uint8_t type) {
+void pcm_engine_namco_init(PCMSoundEngine *engine, uint32_t clock, uint8_t type, uint8_t c140_type) {
     engine->namco.clock = clock;
     engine->namco.type = type;
     engine->namco.sample_rate = engine->sample_rate;
@@ -286,7 +286,7 @@ void pcm_engine_namco_init(PCMSoundEngine *engine, uint32_t clock, uint8_t type)
         engine->c140_enabled = true;
         engine->c352_enabled = false;
         engine->namco.channels = 24;
-        engine->namco.c140_type = 1;
+        engine->namco.c140_type = c140_type;
     } else {
         engine->c352_enabled = true;
         engine->c140_enabled = false;

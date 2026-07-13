@@ -277,7 +277,7 @@ void pcm_engine_segapcm_init(PCMSoundEngine *engine, uint32_t clock, uint32_t in
 void pcm_engine_segapcm_write(PCMSoundEngine *engine, uint8_t reg, uint8_t data);
 
 // Namco C140 / C352
-void pcm_engine_namco_init(PCMSoundEngine *engine, uint32_t clock, uint8_t type);
+void pcm_engine_namco_init(PCMSoundEngine *engine, uint32_t clock, uint8_t type, uint8_t c140_type);
 void pcm_engine_namco_write(PCMSoundEngine *engine, uint16_t addr, uint16_t data);
 void pcm_engine_namco_mmap(PCMSoundEngine *engine, uint32_t start_addr, const uint8_t *data, uint32_t size);
 

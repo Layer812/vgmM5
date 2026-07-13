@@ -659,13 +659,14 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
         if (vgm_oki_clock != 0)     pcm_engine_set_oki_clock(&g_pcm_engine, vgm_oki_clock);
         if (vgm_segapcm_clock != 0) pcm_engine_segapcm_init(&g_pcm_engine, vgm_segapcm_clock & 0x3FFFFFFF, vgm_spcm_intf);
         if (vgm_c140_clock != 0) {
-            Serial.printf("[VGM] C140 Clock: %lu\n", vgm_c140_clock);
-            pcm_engine_namco_init(&g_pcm_engine, vgm_c140_clock & 0x3FFFFFFF, 0xC1);
+            uint8_t c140_bank_type = (vgm_c140_clock >> 31) & 1; // 0 = System 2, 1 = System 21
+            Serial.printf("[VGM] C140 Clock: %lu, Type: %d\n", vgm_c140_clock & 0x3FFFFFFF, c140_bank_type);
+            pcm_engine_namco_init(&g_pcm_engine, vgm_c140_clock & 0x3FFFFFFF, 0xC1, c140_bank_type);
         }
         if (vgm_c352_clock != 0) {
             uint8_t clkdiv = (vgmDataStart > 0xD6) ? header[0xD6] : 0;
             Serial.printf("[VGM] C352 Clock: %lu (Div: %d)\n", vgm_c352_clock & 0x3FFFFFFF, clkdiv);
-            pcm_engine_namco_init(&g_pcm_engine, vgm_c352_clock & 0x3FFFFFFF, 0xC2);
+            pcm_engine_namco_init(&g_pcm_engine, vgm_c352_clock & 0x3FFFFFFF, 0xC2, 0);
         }
     }
 
@@ -985,11 +986,8 @@ void processVGM() {
             case 0xB7: { uint8_t reg = readByte(); uint8_t val = readByte(); pcm_engine_write_msm6258(&g_pcm_engine, reg, val); break; }
             case 0xB8: { uint8_t val = readByte(); pcm_engine_write_oki(&g_pcm_engine, val); break; }
             case 0xC0: { uint16_t offset = readByte(); offset |= (readByte() << 8); uint8_t val = readByte(); pcm_engine_segapcm_write(&g_pcm_engine, offset & 0xFF, val); break; }
-            case 0xC4: { // Namco C140 (alternative command, same layout as 0xD4)
-                uint8_t port = readByte();
-                uint8_t reg  = readByte();
-                uint8_t val  = readByte();
-                pcm_engine_namco_write(&g_pcm_engine, (port << 8) | reg, val);
+            case 0xC4: { // QSound (not implemented)
+                vgm_ptr += 3;
                 break;
             }
             case 0xD4: { // Namco C140
