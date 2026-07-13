@@ -667,9 +667,9 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
             namco_mix_l += (s_fl * v->vol_l + s_rl * v->vol_rear_l) >> 8;
             namco_mix_r += (s_fr * v->vol_r + s_rr * v->vol_rear_r) >> 8;
         }
-        // Scale down to prevent clipping when many channels and rear speakers are active
-        mix_l += (namco_mix_l * 3) >> 3; // roughly 0.375x
-        mix_r += (namco_mix_r * 3) >> 3;
+        // Scale up Namco PCM because internal amplitude is small compared to FM
+        mix_l += namco_mix_l * 4;
+        mix_r += namco_mix_r * 4;
     }
 
     pcm_engine_opn_tick(engine, &mix_l, &mix_r);
