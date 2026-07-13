@@ -296,9 +296,9 @@ void pcm_engine_namco_init(PCMSoundEngine *engine, uint32_t clock, uint8_t type,
 
     uint32_t native_rate;
     if (type == 0xC1) {
-        native_rate = (clock > 0) ? (clock / 64) : 250000;
+        native_rate = (clock > 0) ? (clock / 192) : (21390000 / 192); // C140 baserate is clock / 384, but MAME multiplies freq by 2
     } else {
-        native_rate = (clock > 0) ? (clock / 288) : 83333;
+        native_rate = (clock > 0) ? (clock / 288) : 83333; // C352
     }
     engine->namco.step_scale = (uint32_t)(((uint64_t)native_rate << 16) / engine->sample_rate);
 }
@@ -384,16 +384,10 @@ void pcm_engine_namco_write(PCMSoundEngine *engine, uint16_t addr, uint16_t data
             case 0x01: ch->vol_l = data8; break;
             case 0x02: ch->step = (ch->step & 0x00FF) | (data8 << 8); break; // Freq MSB
             case 0x03: ch->step = (ch->step & 0xFF00) | data8; break;        // Freq LSB
-            case 0x04: ch->start = (ch->start & 0x00FF) | (data8 << 8); break; // Start MSB
-            case 0x05: ch->start = (ch->start & 0xFF00) | data8; break;        // Start LSB
-            case 0x06: ch->end = (ch->end & 0x00FF) | (data8 << 8); break;     // End MSB
-            case 0x07: ch->end = (ch->end & 0xFF00) | data8; break;            // End LSB
-            case 0x08: ch->loop = (ch->loop & 0x00FF) | (data8 << 8); break;   // Loop MSB
-            case 0x09: ch->loop = (ch->loop & 0xFF00) | data8; break;          // Loop LSB
-            case 0x0A: ch->bank = data8; break;                                // Bank
-            case 0x0B: 
+            case 0x04: ch->bank = data8; break;                              // Bank
+            case 0x05: 
                 ch->mode = data8; // Mode
-                if (data8 & 0x80) { // ★ C140は 0x0B レジスタの bit7 が KeyOn！
+                if (data8 & 0x80) { // C140 KeyOn is 0x05 bit7
                     ch->playing = true;
                     ch->pos = ((uint32_t)ch->bank << 16) | ch->start;
                     ch->pos_frac = 0;
@@ -404,6 +398,12 @@ void pcm_engine_namco_write(PCMSoundEngine *engine, uint16_t addr, uint16_t data
                     ch->playing = false;
                 }
                 break;
+            case 0x06: ch->start = (ch->start & 0x00FF) | (data8 << 8); break; // Start MSB
+            case 0x07: ch->start = (ch->start & 0xFF00) | data8; break;        // Start LSB
+            case 0x08: ch->end = (ch->end & 0x00FF) | (data8 << 8); break;     // End MSB
+            case 0x09: ch->end = (ch->end & 0xFF00) | data8; break;            // End LSB
+            case 0x0A: ch->loop = (ch->loop & 0x00FF) | (data8 << 8); break;   // Loop MSB
+            case 0x0B: ch->loop = (ch->loop & 0xFF00) | data8; break;          // Loop LSB
             case 0x0C:
             case 0x0D:
             case 0x0E:
