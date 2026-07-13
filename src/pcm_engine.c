@@ -150,7 +150,7 @@ void pcm_engine_add_data_block(PCMSoundEngine *engine, uint8_t type, const uint8
         engine->segapcm.blocks[engine->segapcm.block_count].data = data + 8;
         engine->segapcm.blocks[engine->segapcm.block_count].is_allocated = false;
         engine->segapcm.block_count++;
-    } else if (type == 0x8D || type == 0x8E || type == 0x92 || type == 0x93) {
+    } else if (type == 0x8F || type == 0x94) { // C140 (0x8F) and C352 (0x94)
         if (size < 8) return;
         uint32_t start_addr = data[4] | (data[5] << 8) | (data[6] << 16) | (data[7] << 24);
         uint32_t actual = size - 8;
@@ -389,7 +389,10 @@ void pcm_engine_namco_write(PCMSoundEngine *engine, uint16_t addr, uint16_t data
                 ch->mode = data8; // Mode
                 if (data8 & 0x80) { // C140 KeyOn is 0x05 bit7
                     ch->playing = true;
-                    ch->pos = ((uint32_t)ch->bank << 16) | ch->start;
+                    ch->latched_bank = ch->bank;
+                    ch->latched_end = ch->end;
+                    ch->latched_loop = ch->loop;
+                    ch->pos = ((uint32_t)ch->latched_bank << 16) | ch->start;
                     ch->pos_frac = 0;
                     ch->counter = 0;
                     ch->prev_sample = 0;
