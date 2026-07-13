@@ -258,9 +258,12 @@ void pcm_engine_segapcm_write(PCMSoundEngine *engine, uint8_t reg, uint8_t data)
         engine->segapcm.bank[ch] = (uint32_t)(flags & engine->segapcm.bank_mask) << engine->segapcm.bank_shift;
         engine->segapcm.flags[ch] = flags;
         
-        uint8_t cur_hi = engine->segapcm.regs[0x80 + 8*ch + 5];
-        uint8_t cur_lo = engine->segapcm.regs[0x80 + 8*ch + 4];
-        engine->segapcm.addr[ch] = ((uint32_t)cur_hi << 16) | ((uint32_t)cur_lo << 8) | engine->segapcm.low[ch];
+        int reg_idx = reg % 8;
+        if (reg >= 0x80 && (reg_idx == 4 || reg_idx == 5 || reg_idx == 6)) {
+            uint8_t cur_hi = engine->segapcm.regs[0x80 + 8*ch + 5];
+            uint8_t cur_lo = engine->segapcm.regs[0x80 + 8*ch + 4];
+            engine->segapcm.addr[ch] = ((uint32_t)cur_hi << 16) | ((uint32_t)cur_lo << 8) | engine->segapcm.low[ch];
+        }
     }
 }
 

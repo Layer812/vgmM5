@@ -1050,8 +1050,14 @@ void processVGM() {
     }
 }
 
+static uint32_t profile_start_time = 0;
+static uint32_t profile_total_time = 0;
+static uint32_t profile_blocks = 0;
+
 void IRAM_ATTR processAudioBlock() {
     if (!isPlaying) return;
+    uint32_t t_start = esp_timer_get_time();
+    
     int16_t *out_buf = wav_buff[wd];
 
 
@@ -1066,7 +1072,7 @@ void IRAM_ATTR processAudioBlock() {
             }
             if (waitSamples == 0 && isPlaying) {
                 processVGM(); 
-                if (waitSamples == 0) break;
+                if (waitSamples == 0) continue;
             }
         }
 
@@ -1133,6 +1139,20 @@ if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t
     wav_buff_size[wd] = BUFF_SIZE;
     wd = (wd + 1) % WAV_BUFF_COUNT;
     wav_count++;
+    
+    uint32_t t_end = esp_timer_get_time();
+    if (profile_start_time == 0) profile_start_time = t_end;
+    profile_total_time += (t_end - t_start);
+    profile_blocks++;
+
+    if (t_end - profile_start_time >= 1000000) {
+        // uint64_t expected_time = ((uint64_t)profile_blocks * (uint64_t)BUFF_SIZE * 1000000ULL) / (uint64_t)actual_sample_rate;
+        // float cpu_load = ((float)profile_total_time / (float)expected_time) * 100.0f;
+        // Serial.printf("[DSP] Load: %5.1f%% | Buf: %2d/%2d | Chs: %d\n", cpu_load, wav_count.load(), WAV_BUFF_COUNT, active_channel_count);
+        profile_start_time = t_end;
+        profile_total_time = 0;
+        profile_blocks = 0;
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────

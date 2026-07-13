@@ -29,6 +29,7 @@ typedef struct {
     int32_t  tl_atten; 
 
     uint8_t  env_state; 
+    uint8_t  key_on;
     int32_t  env_level; 
     int32_t  ar_step;   
     int32_t  dr_step;   
@@ -37,6 +38,7 @@ typedef struct {
     int32_t  rr_step;   
     
     uint8_t  mul; 
+    uint8_t  dt1;
     uint8_t  am_enable;
     uint8_t  pm_enable;
     uint8_t  ar;
