@@ -908,7 +908,9 @@ void fm_engine_write_opl(FMSoundEngine *engine, uint8_t addr, uint8_t data) {
                     update_eg_rates_opl(engine, ch);
                     break;
                 case 0xE0: // Waveform Select
-                    engine->ops[idx].wave_sel = data & 0x03;
+                    if (engine->opl_wave_enable) {
+                        engine->ops[idx].wave_sel = data & 0x03;
+                    }
                     break;
             }
         }
@@ -1072,20 +1074,20 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
                 if (ch == 6) {
                     int32_t b0 = fb_mod;
                     int32_t o0 = calc_op_internal(engine, b+0, b0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 0, 1);
-                    int32_t out0_delayed = engine->fb_memory[ch][0];
+                    int32_t out0_delayed = engine->fb_memory[ch][1];
                     engine->fb_memory[ch][0] = engine->fb_memory[ch][1]; engine->fb_memory[ch][1] = o0;
                     int32_t bd_mod = (engine->algo[ch] == 0) ? out0_delayed : 0;
                     int32_t o1 = calc_op_internal(engine, b+1, bd_mod, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 0, 1);
                     // BD: Operator 1 output is ignored when connect=1.
-                    ch_out = o1 << 1;
+                    ch_out = o1 << 2;
                 } else if (ch == 7) {
                     int32_t sd_out = calc_op_internal(engine, b+1, 0, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 1, 1);
                     int32_t hh_out = calc_op_internal(engine, b+0, 0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 2, 1);
-                    ch_out = (sd_out + hh_out) << 1;
+                    ch_out = (sd_out + hh_out) << 2;
                 } else if (ch == 8) {
                     int32_t tom_out = calc_op_internal(engine, b+0, 0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 0, 1);
                     int32_t tc_out = calc_op_internal(engine, b+1, 0, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 2, 1);
-                    ch_out = (tom_out + tc_out) << 1;
+                    ch_out = (tom_out + tc_out) << 2;
                 }
             } else {
                 int32_t out0_delayed = engine->mem_value[ch];
