@@ -1069,8 +1069,8 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
                     engine->fb_memory[ch][0] = engine->fb_memory[ch][1]; engine->fb_memory[ch][1] = o0;
                     int32_t bd_mod = (engine->algo[ch] == 0) ? out0_delayed : 0;
                     int32_t o1 = calc_op_internal(engine, b+1, bd_mod, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 0, 1);
-                    ch_out = (engine->algo[ch] == 0) ? o1 : (out0_delayed + o1);
-                    ch_out <<= 1;
+                    // BD: Operator 1 output is ignored when connect=1.
+                    ch_out = o1 << 1;
                 } else if (ch == 7) {
                     int32_t sd_out = calc_op_internal(engine, b+1, 0, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 1, 1);
                     int32_t hh_out = calc_op_internal(engine, b+0, 0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 2, 1);
@@ -1093,9 +1093,11 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
                 int32_t mod1 = (engine->algo[ch] & 1) == 0 ? out0_delayed : 0;
                 int32_t out1 = calc_op_internal(engine, b+1, mod1, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 0, 1);
                 
-                // BD: Operator 1 output is ignored when connect=1.
-                // It only modulates OP2 when connect=0.
-                ch_out = out1 << 1;
+                if ((engine->algo[ch] & 1) == 0) {
+                    ch_out = out1 << 1;
+                } else {
+                    ch_out = (out0_delayed + out1) << 1;
+                }
             }
             mix_l += ch_out * engine->pan_l[ch];
             mix_r += ch_out * engine->pan_r[ch];
