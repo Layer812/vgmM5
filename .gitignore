@@ -15,6 +15,7 @@ data/
 # Scripts and test files
 *.py
 test*.c
+*.txt
 mame_segapcm.cpp
 segapcm.cpp
 
