@@ -1058,7 +1058,7 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
             if (engine->ops[b+0].env_state == EG_OFF && engine->ops[b+1].env_state == EG_OFF) continue;
             
             int32_t fb_sum = engine->fb_memory[ch][0] + engine->fb_memory[ch][1];
-            int32_t fb_mod = (engine->fb_shift[ch] == 0) ? 0 : (fb_sum >> (9 - engine->fb_shift[ch]));
+            int32_t fb_mod = (engine->fb_shift[ch] == 0) ? 0 : (fb_sum >> (16 - engine->fb_shift[ch]));
             int32_t ch_out = 0;
 
             if (engine->rhythm_enable && ch >= 6) {
@@ -1112,7 +1112,7 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
             int32_t ch_am = (global_am * ams_mult[engine->ams[ch]]) >> 2; 
 
             int32_t fb_sum = engine->fb_memory[ch][0] + engine->fb_memory[ch][1];
-            int32_t fb_mod = (engine->fb_shift[ch] == 0) ? 0 : (fb_sum >> (9 - engine->fb_shift[ch]));
+            int32_t fb_mod = (engine->fb_shift[ch] == 0) ? 0 : (fb_sum >> (16 - engine->fb_shift[ch]));
 
             int is_noise_ch = (is_ym2151 && ch == 7 && engine->noise_enable);
 
