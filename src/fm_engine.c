@@ -880,7 +880,6 @@ void fm_engine_write_opl(FMSoundEngine *engine, uint8_t addr, uint8_t data) {
                     engine->ops[idx].am_enable = (data >> 7) & 1;
                     engine->ops[idx].pm_enable = (data >> 6) & 1;
                     engine->ops[idx].mul = data & 0x0F;
-		    engine->ops[idx].dt1 = (data >> 4) & 0x07;
                     engine->ops[idx].ks = (data >> 4) & 1; 
                     engine->ops[idx].dt2 = (data >> 5) & 1; 
                     update_phase_step_opl(engine, ch);
@@ -1081,26 +1080,23 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
                     ch_out = (tom_out + tc_out) << 1;
                 }
             } else {
-                int32_t bus[5] = {0};
-                int32_t mod0 = bus[engine->ops[b+0].src_bus] + fb_mod;
+                int32_t out0_delayed = engine->mem_value[ch];
+                
+                int32_t mod0 = fb_mod;
                 int32_t out0 = calc_op_internal(engine, b+0, mod0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 0, 1);
                 engine->fb_memory[ch][0] = engine->fb_memory[ch][1];
                 engine->fb_memory[ch][1] = out0;
-                bus[engine->ops[b+0].dst_bus] += out0;
-
-                int32_t mod2 = bus[engine->ops[b+2].src_bus];
-                int32_t out2 = calc_op_internal(engine, b+2, mod2, engine->ops[b+2].pm_enable?ch_pm:0, engine->ops[b+2].am_enable?ch_am:0, 0, 1);
-                bus[engine->ops[b+2].dst_bus] += out2;
-
-                int32_t mod1 = bus[engine->ops[b+1].src_bus];
+                
+                engine->mem_value[ch] = out0;
+                
+                int32_t mod1 = (engine->algo[ch] & 1) == 0 ? out0_delayed : 0;
                 int32_t out1 = calc_op_internal(engine, b+1, mod1, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 0, 1);
-                bus[engine->ops[b+1].dst_bus] += out1;
-
-                int32_t mod3 = bus[engine->ops[b+3].src_bus];
-                int32_t out3 = calc_op_internal(engine, b+3, mod3, engine->ops[b+3].pm_enable?ch_pm:0, engine->ops[b+3].am_enable?ch_am:0, 0, 1);
-                bus[engine->ops[b+3].dst_bus] += out3;
-
-                ch_out = bus[4] << 1;
+                
+                if ((engine->algo[ch] & 1) == 0) {
+                    ch_out = out1 << 1;
+                } else {
+                    ch_out = (out0_delayed + out1) << 1;
+                }
             }
             mix_l += ch_out * engine->pan_l[ch];
             mix_r += ch_out * engine->pan_r[ch];
