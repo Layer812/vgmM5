@@ -345,13 +345,12 @@ static IRAM_ATTR void update_envelopes(FMSoundEngine *engine, int active_channel
             switch (engine->ops[op_idx].env_state) {
                 case EG_ATTACK:
                 {
-		      int32_t delta = engine->ops[op_idx].ar_step;
-                     
-                      // 64ビット計算を用いてオーバーフローを防ぐ
-                      int32_t drop = delta + (int32_t)(((int64_t)delta * engine->ops[op_idx].env_level) >> 27);
+                      int32_t delta = engine->ops[op_idx].ar_step;
                       
-                      if (drop <= 0 && delta > 0) drop = 1;
-                      engine->ops[op_idx].env_level -= drop;
+                      // 実機同様の深いエクスポネンシャル・カーブを復元（オーバーフロー対策版）
+                      int64_t drop64 = (int64_t)delta + (((int64_t)delta * engine->ops[op_idx].env_level) >> 17);
+                      if (drop64 > 2000000000) drop64 = 2000000000;
+                      int32_t drop = (int32_t)drop64;
                       
                       if (drop <= 0 && delta > 0) drop = 1;
                       engine->ops[op_idx].env_level -= drop;
@@ -373,17 +372,11 @@ static IRAM_ATTR void update_envelopes(FMSoundEngine *engine, int active_channel
                     engine->ops[op_idx].env_level += engine->ops[op_idx].d2r_step;
                     if (engine->ops[op_idx].env_level >= EG_MAX) engine->ops[op_idx].env_level = EG_MAX;
                     break;
-		case EG_RELEASE:
-                    // ★安全装置：RRがゼロなら即座にゾンビを殺してCPUを解放する
-                    if (engine->ops[op_idx].rr_step == 0) {
+                case EG_RELEASE:
+                    engine->ops[op_idx].env_level += engine->ops[op_idx].rr_step;
+                    if (engine->ops[op_idx].env_level >= EG_MAX) { 
                         engine->ops[op_idx].env_level = EG_MAX;
                         engine->ops[op_idx].env_state = EG_OFF;
-                    } else {
-                        engine->ops[op_idx].env_level += engine->ops[op_idx].rr_step;
-                        if (engine->ops[op_idx].env_level >= EG_MAX) { 
-                            engine->ops[op_idx].env_level = EG_MAX;
-                            engine->ops[op_idx].env_state = EG_OFF;
-                        }
                     }
                     break;
             }
@@ -678,8 +671,7 @@ void fm_engine_write_ym2151(FMSoundEngine *engine, uint16_t addr, uint8_t data) 
                 engine->ops[idx].rr = rr ? (rr * 2 + 1) : 0;  // rr_base を rr に修正 ＆ ユーザー様のゼロ対策を適用
                 
                 int d1l = (data >> 4) & 0x0F; 
-                // SL=0 が完全無音(EG_MAX)になってしまうバグを修正
-                engine->ops[idx].sl_level = (d1l == 15) ? EG_MAX : ((d1l * 4) << 13); 
+                engine->ops[idx].sl_level = (d1l == 15) ? EG_MAX : ((d1l * 4) * 32 << EG_FRACTION_BITS); 
                 update_eg_rates(engine, ch);
             } break;
             
