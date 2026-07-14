@@ -1119,26 +1119,37 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
             int32_t fb_mod = (engine->fb_shift[ch] == 0) ? 0 : (fb_sum >> (9 - engine->fb_shift[ch]));
 
             int is_noise_ch = (is_ym2151 && ch == 7 && engine->noise_enable);
-            int32_t bus[5] = {0};
-            
-            int32_t mod0 = bus[engine->ops[b+0].src_bus] + fb_mod;
-            int32_t out0 = calc_op_internal(engine, b+0, mod0, ch_pm, ch_am, 0, 0);
+
+            static const uint8_t algo_mem_dst[8] = { 2, 2, 2, 3, 5, 2, 5, 5 };
+            static const uint8_t algo_dst_m1[8]  = { 1, 5, 3, 1, 1, 5, 1, 4 }; 
+            static const uint8_t algo_dst_m2[8]  = { 3, 3, 3, 3, 3, 4, 4, 4 }; 
+            static const uint8_t algo_dst_c1[8]  = { 5, 5, 5, 5, 4, 4, 4, 4 }; 
+            static const uint8_t algo_dst_c2[8]  = { 4, 4, 4, 4, 4, 4, 4, 4 };
+
+            int32_t bus[6] = {0};
+            int algo = engine->algo[ch] & 7;
+            bus[algo_mem_dst[algo]] = engine->mem_value[ch];
+
+            int32_t mod0 = bus[0] + fb_mod;
+            int32_t out0 = calc_op_internal(engine, b+0, mod0, ch_pm, ch_am, 0, 0); // M1
             engine->fb_memory[ch][0] = engine->fb_memory[ch][1];
             engine->fb_memory[ch][1] = out0;
-            bus[engine->ops[b+0].dst_bus] += out0;
+            bus[algo_dst_m1[algo]] += out0;
+            if (algo == 5) { bus[1] += out0; bus[3] += out0; } // Special case for algo 5
 
-            int32_t mod2 = bus[engine->ops[b+2].src_bus];
-            int32_t out2 = calc_op_internal(engine, b+2, mod2, ch_pm, ch_am, 0, 0);
-            bus[engine->ops[b+2].dst_bus] += out2;
+            int32_t mod1 = bus[2];
+            int32_t out1 = calc_op_internal(engine, b+1, mod1, ch_pm, ch_am, 0, 0); // M2
+            bus[algo_dst_m2[algo]] += out1;
 
-            int32_t mod1 = bus[engine->ops[b+1].src_bus];
-            int32_t out1 = calc_op_internal(engine, b+1, mod1, ch_pm, ch_am, 0, 0);
-            bus[engine->ops[b+1].dst_bus] += out1;
+            int32_t mod2 = bus[1];
+            int32_t out2 = calc_op_internal(engine, b+2, mod2, ch_pm, ch_am, 0, 0); // C1
+            bus[algo_dst_c1[algo]] += out2;
 
-            int32_t mod3 = bus[engine->ops[b+3].src_bus];
-            int32_t out3 = calc_op_internal(engine, b+3, mod3, ch_pm, ch_am, is_noise_ch ? 1 : 0, 0);
-            bus[engine->ops[b+3].dst_bus] += out3;
+            int32_t mod3 = bus[3];
+            int32_t out3 = calc_op_internal(engine, b+3, mod3, ch_pm, ch_am, is_noise_ch ? 1 : 0, 0); // C2
+            bus[algo_dst_c2[algo]] += out3;
 
+            engine->mem_value[ch] = bus[5];
             int32_t ch_out = bus[4];
             mix_l += ch_out * engine->pan_l[ch];
             mix_r += ch_out * engine->pan_r[ch];

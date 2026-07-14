@@ -98,6 +98,7 @@ typedef struct {
     uint8_t algo[FM_CHANNELS];     
     uint8_t fb_shift[FM_CHANNELS]; 
     int32_t fb_memory[FM_CHANNELS][2];
+    int32_t mem_value[FM_CHANNELS]; // 1-sample delay memory for operators
     uint32_t ym2151_freq_tab[13][64];
     uint32_t ym2612_fnum_tab[2048]; // ★ YM2612 F-Number 事前計算テーブル
 
