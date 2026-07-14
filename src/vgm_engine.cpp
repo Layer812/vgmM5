@@ -333,6 +333,14 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     
     String lname = String(filepath); lname.toLowerCase();
     bool isVgz = lname.endsWith(".vgz");
+    
+    uint8_t magic[2] = {0};
+    f.read(magic, 2);
+    f.seek(0);
+    if (magic[0] == 0x1F && magic[1] == 0x8B) {
+        isVgz = true;
+    }
+    
     uint32_t uncompressed_size = vgm_file_size;
 
     if (isVgz) {
