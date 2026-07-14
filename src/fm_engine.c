@@ -388,15 +388,22 @@ static IRAM_ATTR __attribute__((always_inline)) inline int32_t calc_op_internal(
     if (engine->ops[op_idx].env_state == EG_OFF) return 0;
     
     uint32_t active_phase_step = engine->ops[op_idx].phase_step;
+    // Hardware phase modulation depth correction:
+    // MAME uses a 10-bit phase index, but we use a 12-bit phase index (4x larger).
+    // YM2612 adds a 14-bit output to a 10-bit index (8 cycles max). To get 8 cycles on our 12-bit index, we need to multiply our 13-bit output by 8 (<< 3).
+    // OPL2 adds a 13-bit output to a 10-bit index (4 cycles max). To get 4 cycles on our 12-bit index, we need to multiply our 13-bit output by 4 (<< 2).
     if (is_opl2) {
-        modulation >>= 1; // OPL2 FM modulation depth is roughly half of YM2612
+        modulation <<= 2; 
         if (pm_amount) {
             // OPL2 vibrato (7 cents or 14 cents)
             int32_t pm_mod = (int32_t)((active_phase_step * pm_amount) >> 8); 
             active_phase_step += pm_mod;
         }
-    } else if (pm_amount != 0) {
-        active_phase_step += (int32_t)(((active_phase_step >> 10) * pm_amount) >> 3);
+    } else {
+        modulation <<= 3; // YM2612 FM modulation depth
+        if (pm_amount != 0) {
+            active_phase_step += (int32_t)(((active_phase_step >> 10) * pm_amount) >> 3);
+        }
     }
     engine->ops[op_idx].phase += active_phase_step;
 
@@ -1058,7 +1065,7 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
             if (engine->ops[b+0].env_state == EG_OFF && engine->ops[b+1].env_state == EG_OFF) continue;
             
             int32_t fb_sum = engine->fb_memory[ch][0] + engine->fb_memory[ch][1];
-            int32_t fb_mod = (engine->fb_shift[ch] == 0) ? 0 : (fb_sum >> (16 - engine->fb_shift[ch]));
+            int32_t fb_mod = (engine->fb_shift[ch] == 0) ? 0 : (fb_sum >> (9 - engine->fb_shift[ch]));
             int32_t ch_out = 0;
 
             if (engine->rhythm_enable && ch >= 6) {
@@ -1113,7 +1120,7 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
             int32_t ch_am = (global_am * ams_mult[engine->ams[ch]]) >> 2; 
 
             int32_t fb_sum = engine->fb_memory[ch][0] + engine->fb_memory[ch][1];
-            int32_t fb_mod = (engine->fb_shift[ch] == 0) ? 0 : (fb_sum >> (16 - engine->fb_shift[ch]));
+            int32_t fb_mod = (engine->fb_shift[ch] == 0) ? 0 : (fb_sum >> (9 - engine->fb_shift[ch]));
 
             int is_noise_ch = (is_ym2151 && ch == 7 && engine->noise_enable);
 
