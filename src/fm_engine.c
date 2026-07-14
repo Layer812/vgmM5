@@ -1072,9 +1072,8 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
                 if (ch == 6) {
                     int32_t b0 = fb_mod;
                     int32_t o0 = calc_op_internal(engine, b+0, b0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 0, 1);
-                    int32_t out0_delayed = engine->fb_memory[ch][1];
                     engine->fb_memory[ch][0] = engine->fb_memory[ch][1]; engine->fb_memory[ch][1] = o0;
-                    int32_t bd_mod = (engine->algo[ch] == 0) ? out0_delayed : 0;
+                    int32_t bd_mod = (engine->algo[ch] == 0) ? o0 : 0;
                     int32_t o1 = calc_op_internal(engine, b+1, bd_mod, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 0, 1);
                     // BD: Operator 1 output is ignored when connect=1.
                     ch_out = o1 << 2;
@@ -1088,8 +1087,6 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
                     ch_out = (tom_out + tc_out) << 2;
                 }
             } else {
-                int32_t out0_delayed = engine->mem_value[ch];
-                
                 int32_t mod0 = fb_mod;
                 int32_t out0 = calc_op_internal(engine, b+0, mod0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 0, 1);
                 engine->fb_memory[ch][0] = engine->fb_memory[ch][1];
@@ -1097,13 +1094,13 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
                 
                 engine->mem_value[ch] = out0;
                 
-                int32_t mod1 = (engine->algo[ch] & 1) == 0 ? out0_delayed : 0;
+                int32_t mod1 = (engine->algo[ch] & 1) == 0 ? out0 : 0;
                 int32_t out1 = calc_op_internal(engine, b+1, mod1, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 0, 1);
                 
                 if ((engine->algo[ch] & 1) == 0) {
                     ch_out = out1 << 1;
                 } else {
-                    ch_out = (out0_delayed + out1) << 1;
+                    ch_out = (out0 + out1) << 1;
                 }
             }
             mix_l += ch_out * engine->pan_l[ch];
