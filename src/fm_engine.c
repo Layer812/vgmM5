@@ -390,17 +390,18 @@ static IRAM_ATTR __attribute__((always_inline)) inline int32_t calc_op_internal(
     uint32_t active_phase_step = engine->ops[op_idx].phase_step;
     // Hardware phase modulation depth correction:
     // MAME uses a 10-bit phase index, but we use a 12-bit phase index (4x larger).
-    // YM2612 adds a 14-bit output to a 10-bit index (8 cycles max). To get 8 cycles on our 12-bit index, we need to multiply our 13-bit output by 8 (<< 3).
-    // OPL2 adds a 13-bit output to a 10-bit index (4 cycles max). To get 4 cycles on our 12-bit index, we need to multiply our 13-bit output by 4 (<< 2).
+    // However, our output is 15-bit (max 16384), while MAME OPL2 output is 13-bit (max 4096).
+    // Since our output is 4x larger, and our index is 4x larger, the proportion is exactly the same!
+    // So OPL2 requires NO SHIFT.
+    // YM2612 requires 8 cycles (instead of 4). So YM2612 needs << 1.
     if (is_opl2) {
-        modulation <<= 2; 
         if (pm_amount) {
             // OPL2 vibrato (7 cents or 14 cents)
             int32_t pm_mod = (int32_t)((active_phase_step * pm_amount) >> 8); 
             active_phase_step += pm_mod;
         }
     } else {
-        modulation <<= 3; // YM2612 FM modulation depth
+        modulation <<= 1; // YM2612 FM modulation depth
         if (pm_amount != 0) {
             active_phase_step += (int32_t)(((active_phase_step >> 10) * pm_amount) >> 3);
         }
