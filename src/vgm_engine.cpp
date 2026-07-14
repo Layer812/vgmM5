@@ -173,13 +173,12 @@ public:
             ssg_engine_write(&g_ssg_engine, reg, data);
         } else if (port == 0 && (reg >= 0x10 && reg <= 0x1D)) {
             pcm_engine_write_opn_rhythm(&g_pcm_engine, reg, data);
-        } else if (port == 1 && reg < 0x30) {
-            // YM2610 Delta-T (ADPCM-B) and ADPCM-A (0x10-0x2F)
-            if (reg < 0x1C) {
-                pcm_engine_write_opn_adpcmb(&g_pcm_engine, reg, data);
-            } else if (reg >= 0x10 && reg <= 0x2F) {
-                pcm_engine_write_opn_adpcma(&g_pcm_engine, reg | 0x100, data);
-            }
+        } else if (port == 1 && reg <= 0x0B) {
+            // YM2610 ADPCM-B (Delta-T): port 1, reg 0x00-0x0B
+            pcm_engine_write_opn_adpcmb(&g_pcm_engine, reg, data);
+        } else if (port == 1 && reg >= 0x10 && reg <= 0x2F) {
+            // YM2610 ADPCM-A per-channel: port 1, reg 0x10-0x2F
+            pcm_engine_write_opn_adpcma(&g_pcm_engine, reg | 0x100, data);
         } else {
             fm_wrapper.write(port, reg, data);
         }

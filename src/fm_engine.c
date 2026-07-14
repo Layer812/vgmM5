@@ -616,7 +616,12 @@ void fm_engine_init(FMSoundEngine *engine, uint32_t sample_rate, uint32_t clock,
     
     engine->fchip_step = ((uint64_t)clock * 4294967296ULL) / (uint64_t)(prescaler * engine->sample_rate);
     
-    int active_channels = (engine->chip_type == CHIP_YM2612) ? 6 : ((engine->chip_type == CHIP_YM2151) ? 8 : ((engine->chip_type == CHIP_YM2203) ? 3 : 9));
+    int active_channels = (engine->chip_type == CHIP_YM2612) ? 6 :
+                          (engine->chip_type == CHIP_YM2151) ? 8 :
+                          (engine->chip_type == CHIP_YM2203) ? 3 :
+                          (engine->chip_type == CHIP_YM2608) ? 6 :
+                          (engine->chip_type == CHIP_YM2610) ? 4 :
+                          9; // OPL2/OPLL
           for (int ch = 0; ch < active_channels; ch++) {
           engine->pan_l[ch] = 1;
           engine->pan_r[ch] = 1;
@@ -1030,7 +1035,12 @@ static void update_algorithm_routing(FMSoundEngine *engine, int ch, uint8_t algo
 
 void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *out_r) {
     static int tick_counter = 0;
-    int active_channels = (engine->chip_type == CHIP_YM2612) ? 6 : ((engine->chip_type == CHIP_YM2151) ? 8 : ((engine->chip_type == CHIP_YM2203) ? 3 : 9));
+    int active_channels = (engine->chip_type == CHIP_YM2612) ? 6 :
+                          (engine->chip_type == CHIP_YM2151) ? 8 :
+                          (engine->chip_type == CHIP_YM2203) ? 3 :
+                          (engine->chip_type == CHIP_YM2608) ? 6 :
+                          (engine->chip_type == CHIP_YM2610) ? 4 :
+                          9; // OPL2/OPLL
     
     if ((tick_counter++ & 3) == 0) {
         update_envelopes(engine, active_channels);
@@ -1160,11 +1170,34 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
 
             int is_noise_ch = (is_ym2151 && ch == 7 && engine->noise_enable);
 
-            static const uint8_t algo_mem_dst[8] = { 2, 2, 2, 3, 5, 2, 5, 5 };
-            static const uint8_t algo_dst_m1[8]  = { 1, 5, 3, 1, 1, 5, 1, 4 }; 
-            static const uint8_t algo_dst_m2[8]  = { 3, 3, 3, 3, 3, 4, 4, 4 }; 
-            static const uint8_t algo_dst_c1[8]  = { 5, 5, 5, 5, 4, 4, 4, 4 }; 
-            static const uint8_t algo_dst_c2[8]  = { 4, 4, 4, 4, 4, 4, 4, 4 };
+            // OPM (YM2151): algo diagram uses M1,C1,M2,C2 notation.
+            // Hardware processes in order M1,M2,C1,C2. C1 is processed AFTER M2,
+            // so M2 must use C1's output from the PREVIOUS sample (memory delay).
+            // Signal flow algo 0: M1->C1->M2->C2  (C1->M2 path has 1-sample delay)
+            static const uint8_t opm_algo_mem_dst[8] = { 2, 2, 2, 3, 5, 2, 5, 5 };
+            static const uint8_t opm_algo_dst_m1[8]  = { 1, 5, 3, 1, 1, 5, 1, 4 };
+            static const uint8_t opm_algo_dst_m2[8]  = { 3, 3, 3, 3, 3, 4, 4, 4 };
+            static const uint8_t opm_algo_dst_c1[8]  = { 5, 5, 5, 5, 4, 4, 4, 4 };
+            static const uint8_t opm_algo_dst_c2[8]  = { 4, 4, 4, 4, 4, 4, 4, 4 };
+
+            // OPN (YM2612/YM2608/YM2610/YM2203): algo diagram uses S1,S3,S2,S4 notation.
+            // Slot1=M1, Slot3=M2, Slot2=C1, Slot4=C2 in hardware processing order.
+            // Since processing order = M1,M2,C1,C2, M1 output is always immediately
+            // available to M2 and later operators -> NO one-sample delay needed.
+            // Signal flow algo 0: M1->M2->C1->C2 (all immediate, no delay)
+            // Special cases: algo 3,4 need M1->both M2 and C1 simultaneously;
+            //                algo 5 needs M1->M2,C1,C2 simultaneously.
+            static const uint8_t opn_algo_mem_dst[8] = { 5, 5, 5, 5, 5, 5, 5, 5 };
+            static const uint8_t opn_algo_dst_m1[8]  = { 2, 1, 3, 2, 2, 2, 2, 4 };
+            static const uint8_t opn_algo_dst_m2[8]  = { 1, 1, 1, 1, 3, 4, 4, 4 };
+            static const uint8_t opn_algo_dst_c1[8]  = { 3, 3, 3, 3, 3, 4, 4, 4 };
+            static const uint8_t opn_algo_dst_c2[8]  = { 4, 4, 4, 4, 4, 4, 4, 4 };
+
+            const uint8_t *algo_mem_dst = is_ym2151 ? opm_algo_mem_dst : opn_algo_mem_dst;
+            const uint8_t *algo_dst_m1  = is_ym2151 ? opm_algo_dst_m1  : opn_algo_dst_m1;
+            const uint8_t *algo_dst_m2  = is_ym2151 ? opm_algo_dst_m2  : opn_algo_dst_m2;
+            const uint8_t *algo_dst_c1  = is_ym2151 ? opm_algo_dst_c1  : opn_algo_dst_c1;
+            const uint8_t *algo_dst_c2  = is_ym2151 ? opm_algo_dst_c2  : opn_algo_dst_c2;
 
             int32_t bus[6] = {0};
             int algo = engine->algo[ch] & 7;
@@ -1175,7 +1208,14 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
             engine->fb_memory[ch][0] = engine->fb_memory[ch][1];
             engine->fb_memory[ch][1] = out0;
             bus[algo_dst_m1[algo]] += out0;
-            if (algo == 5) { bus[1] += out0; bus[3] += out0; } // Special case for algo 5
+            if (is_ym2151) {
+                if (algo == 5) { bus[1] += out0; bus[3] += out0; } // OPM algo 5
+            } else {
+                // OPN: algos 3 and 4 need M1 to reach C1's bus (bus[1]) in addition to M2's bus (bus[2])
+                // OPN algo 5 needs M1 to reach C1 (bus[1]) and C2 (bus[3]) too
+                if (algo == 3 || algo == 4) { bus[1] += out0; }
+                if (algo == 5)              { bus[1] += out0; bus[3] += out0; }
+            }
 
             int32_t mod1 = bus[2];
             int32_t out1 = calc_op_internal(engine, b+1, mod1, ch_pm, ch_am, 0, 0); // M2

@@ -615,7 +615,6 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
                     }
 
                     uint8_t dt = 0x00;
-                    if (engine->c140_enabled) dt = 0x80;
 
                     int b = v->current_block;
                     if (b < engine->namco.block_count && 
@@ -707,6 +706,41 @@ static uint8_t opn_read_rom(const uint8_t** blocks, uint32_t* offsets, uint32_t*
 void pcm_engine_opn_init(PCMSoundEngine *engine, uint32_t clock) {
     memset(&engine->opn, 0, sizeof(OPN_PCM_Matrix));
     engine->opn.clock = clock;
+
+    // YM2608 ADPCM-A (Rhythm) ROM sample positions (in nibbles)
+    // These are fixed offsets within ym2608_rom.bin (32768 bytes = 65536 nibbles)
+    // Layout matches the actual YM2608 internal ADPCM-A ROM
+    static const uint32_t ym2608_rhythm_start[6] = {
+        0x0000, // Ch0: Bass Drum
+        0x01C0, // Ch1: Snare Drum
+        0x0440, // Ch2: Top Cymbal
+        0x1B80, // Ch3: Hi-Hat
+        0x1D00, // Ch4: Tom-Tom
+        0x1F80  // Ch5: Rim Shot
+    };
+    static const uint32_t ym2608_rhythm_end[6] = {
+        0x01BF, // Ch0: Bass Drum
+        0x043F, // Ch1: Snare Drum
+        0x1B7F, // Ch2: Top Cymbal
+        0x1CFF, // Ch3: Hi-Hat
+        0x1F7F, // Ch4: Tom-Tom
+        0x1FFF  // Ch5: Rim Shot
+    };
+    for (int i = 0; i < 6; i++) {
+        engine->opn.ch_a[i].start_addr = ym2608_rhythm_start[i];
+        engine->opn.ch_a[i].end_addr   = ym2608_rhythm_end[i] + 1;
+        // Default: both L and R enabled at full volume (will be overridden by VGM reg writes)
+        engine->opn.ch_a[i].vol_l = 0x1F;
+        engine->opn.ch_a[i].vol_r = 0x1F;
+        // ADPCM-A sample rate:
+        //   YM2608: clock / 432 ≈ 18500 Hz at 7.987 MHz
+        //   YM2610: clock / 576 ≈ 13900 Hz at 8.000 MHz
+        // We distinguish by whether the init clock looks like YM2610 (8 MHz range)
+        // In practice, the step is also recalculated when VGM writes volume registers.
+        uint32_t adpcma_div = (clock >= 7000000 && clock <= 9000000) ? 576 : 432;
+        uint32_t native_adpcma = (clock > 0) ? (clock / adpcma_div) : 18500;
+        engine->opn.ch_a[i].step = (uint32_t)(((uint64_t)native_adpcma << 16) / 22050);
+    }
 }
 
 void pcm_engine_write_opn_rhythm(PCMSoundEngine *engine, uint8_t reg, uint8_t data) {
@@ -732,10 +766,9 @@ void pcm_engine_write_opn_rhythm(PCMSoundEngine *engine, uint8_t reg, uint8_t da
         int ch = reg - 0x18;
         engine->opn.ch_a[ch].vol_l = (data & 0x80) ? (data & 0x1F) : 0;
         engine->opn.ch_a[ch].vol_r = (data & 0x40) ? (data & 0x1F) : 0;
-        // YM2608 rhythm freq is fixed. We assume 44.1kHz sample rate, 
-        // YM2608 rhythm sample rate is clock / 144 / 6? Wait, it's clock / 72.
-        // Let's use a fixed step. YM2610 ADPCM-A sets step via 0x100.
-        engine->opn.ch_a[ch].step = (engine->opn.clock / 72) * 65536 / engine->sample_rate;
+        // YM2608 ADPCM-A sample rate = clock / 432
+        uint32_t native_rate = (engine->opn.clock > 0) ? (engine->opn.clock / 432) : 18500;
+        engine->opn.ch_a[ch].step = (uint32_t)(((uint64_t)native_rate << 16) / engine->sample_rate);
     }
 }
 
