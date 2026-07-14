@@ -447,7 +447,7 @@ static IRAM_ATTR __attribute__((always_inline)) inline int32_t calc_op_internal(
         int output_enable = 1;
         
         if (is_opl2) {
-            int wave = engine->ops[op_idx].wave_sel; // OPL2 wave_sel is preserved even if enable flag goes down
+            int wave = engine->opl_wave_enable ? engine->ops[op_idx].wave_sel : 0;
             if (wave == 1) {       
                 if (is_negative) output_enable = 0;
             } else if (wave == 2) { 
@@ -573,8 +573,7 @@ void fm_engine_init(FMSoundEngine *engine, uint32_t sample_rate, uint32_t clock,
     engine->phase_step_factor = 4294967296.0f / (float)sample_rate;
     float prescaler = (chip_type == CHIP_YM2203 || chip_type == CHIP_YM3812) ? 72.0f : ((chip_type == CHIP_YM2151) ? 64.0f : 144.0f);
     engine->ym2612_step_factor = ((float)clock) / (prescaler * 1048576.0f);
-    engine->opl2_step_factor = ((float)clock) / (72.0f * 2097152.0f);
-    //engine->opl2_step_factor = ((float)clock) / (72.0f * 1048576.0f);
+    engine->opl2_step_factor = ((float)clock) / (72.0f * 1048576.0f);
     
     engine->fchip_step = ((uint64_t)clock * 4294967296ULL) / (uint64_t)(prescaler * engine->sample_rate);
     
@@ -909,9 +908,7 @@ void fm_engine_write_opl(FMSoundEngine *engine, uint8_t addr, uint8_t data) {
                     update_eg_rates_opl(engine, ch);
                     break;
                 case 0xE0: // Waveform Select
-                    if (engine->opl_wave_enable) {
-                        engine->ops[idx].wave_sel = data & 0x03;
-                    }
+                    engine->ops[idx].wave_sel = data & 0x03;
                     break;
             }
         }
