@@ -261,9 +261,8 @@ static int            saved_cursor_chip     = 0;
 static int            saved_cursor_album    = 0;
 static UIState        parent_state_of_album = STATE_TOP_MENU;
 static bool      cloud_force_redraw = true;
-
 #ifndef VERSION
-#define VERSION 0.9
+#define VERSION 0.94
 #endif
 
 void disptitle(int stat, char *title){
@@ -271,7 +270,7 @@ void disptitle(int stat, char *title){
   M5Cardputer.Display.setCursor(0, 0);
   M5Cardputer.Display.fillRect(0, 0, 240, 34, BLACK);
   M5Cardputer.Display.setTextColor(OLIVE);
-  M5Cardputer.Display.printf("vgmM5 %.1f ", VERSION);
+  M5Cardputer.Display.printf("vgmM5 %.2f ", VERSION);
   M5Cardputer.Display.drawLine(0,33,240,33,OLIVE);
   if(title){
     M5Cardputer.Display.setCursor(0, 18);

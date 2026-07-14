@@ -155,6 +155,12 @@ typedef struct {
     float ym2612_step_factor;
     float opl2_step_factor;
     
+    // OPLL YM2413 specific state
+    uint8_t opll_custom_inst[8];
+    uint8_t opll_inst[9];
+    uint8_t opll_vol[9];
+    uint8_t opll_rhythm_mode;
+    
     int32_t prev_l;
     int32_t prev_r;
     

@@ -336,7 +336,7 @@ static void update_eg_rates_opl(FMSoundEngine *engine, int ch) {
 
 
 static IRAM_ATTR void update_envelopes(FMSoundEngine *engine, int active_channels) {
-    int ops_per_ch = (engine->chip_type == CHIP_YM3812) ? 2 : 4;
+    int ops_per_ch = (engine->chip_type == CHIP_YM3812 || engine->chip_type == CHIP_YM2413) ? 2 : 4;
     for (int ch = 0; ch < active_channels; ch++) {
         int b = ch * 4;
         for (int i = 0; i < ops_per_ch; i++) {
@@ -479,48 +479,87 @@ static IRAM_ATTR __attribute__((always_inline)) inline int32_t calc_op_internal(
 static uint8_t YM2612_OP_MAP[4] = { 0, 2, 1, 3 }; // Op1(0), Op3(2), Op2(1), Op4(3)
 
 // YM2413 Internal Instrument ROM Data (15 instruments x 8 bytes)
-static const uint8_t YM2413_ROM_DATA[120] = {
+static const uint8_t YM2413_ROM_DATA[15 * 8] = {
     // 01: Violin
-    0x01, 0x11, 0x0c, 0x14, 0x94, 0x14, 0x01, 0x06,
+    0x71, 0x61, 0x1E, 0x17, 0xD0, 0x78, 0x00, 0x17,
     // 02: Guitar
-    0x01, 0x12, 0x01, 0x01, 0x15, 0x04, 0x05, 0x03,
+    0x13, 0x41, 0x1A, 0x0D, 0xD8, 0xF7, 0x23, 0x13,
     // 03: Piano
-    0x02, 0x12, 0x01, 0x12, 0x15, 0x0a, 0x01, 0x06,
+    0x13, 0x01, 0x99, 0x00, 0xF2, 0xC4, 0x21, 0x23,
     // 04: Flute
-    0x01, 0x11, 0x00, 0x05, 0x13, 0x09, 0x01, 0x04,
+    0x11, 0x61, 0x0E, 0x07, 0x8D, 0x64, 0x70, 0x27,
     // 05: Clarinet
-    0x01, 0x01, 0x11, 0x01, 0x18, 0x05, 0x01, 0x04,
+    0x32, 0x21, 0x1E, 0x06, 0xE1, 0x76, 0x01, 0x28,
     // 06: Oboe
-    0x01, 0x01, 0x11, 0x01, 0x15, 0x05, 0x02, 0x04,
+    0x31, 0x22, 0x16, 0x05, 0xE0, 0x71, 0x00, 0x18,
     // 07: Trumpet
-    0x01, 0x12, 0x01, 0x11, 0x18, 0x05, 0x01, 0x06,
+    0x21, 0x61, 0x1D, 0x07, 0x82, 0x81, 0x11, 0x07,
     // 08: Organ
-    0x01, 0x01, 0x11, 0x01, 0x15, 0x05, 0x01, 0x06,
+    0x33, 0x21, 0x2D, 0x13, 0xB0, 0x70, 0x00, 0x07,
     // 09: Horn
-    0x01, 0x01, 0x11, 0x05, 0x15, 0x05, 0x01, 0x06,
+    0x61, 0x61, 0x1B, 0x06, 0x64, 0x65, 0x10, 0x17,
     // 10: Synthesizer
-    0x01, 0x01, 0x11, 0x05, 0x15, 0x05, 0x01, 0x06,
+    0x41, 0x61, 0x0B, 0x18, 0x85, 0xF0, 0x81, 0x07,
     // 11: Harpsichord
-    0x01, 0x01, 0x11, 0x05, 0x15, 0x05, 0x01, 0x06,
+    0x33, 0x01, 0x83, 0x11, 0xEA, 0xEF, 0x10, 0x04,
     // 12: Vibraphone
-    0x01, 0x01, 0x11, 0x05, 0x15, 0x05, 0x01, 0x06,
+    0x17, 0xC1, 0x24, 0x07, 0xF8, 0xF8, 0x22, 0x12,
     // 13: Synthesizer Bass
-    0x01, 0x01, 0x11, 0x05, 0x15, 0x05, 0x01, 0x06,
+    0x61, 0x50, 0x0C, 0x05, 0xD2, 0xF5, 0x40, 0x42,
     // 14: Acoustic Bass
-    0x01, 0x01, 0x11, 0x05, 0x15, 0x05, 0x01, 0x06,
+    0x01, 0x01, 0x55, 0x03, 0xE9, 0x90, 0x03, 0x02,
     // 15: Electric Guitar
-    0x01, 0x01, 0x11, 0x05, 0x15, 0x05, 0x01, 0x06
-}; // Simplified mock table for structural test, real OPLL ROM will replace this.
+    0x41, 0x41, 0x89, 0x03, 0xF1, 0xE4, 0xC0, 0x13
+};
+
+static const uint8_t YM2413_RHYTHM_ROM_DATA[3 * 8] = {
+    // 16: BD
+    0x01, 0x01, 0x18, 0x0F, 0xDF, 0xF8, 0x6A, 0x6D,
+    // 17: HH / SD
+    0x01, 0x01, 0x00, 0x00, 0xC8, 0xD8, 0xA7, 0x68,
+    // 18: TOM / TC
+    0x05, 0x01, 0x00, 0x00, 0xF8, 0xAA, 0x59, 0x55
+};
 
 static const int YM2612_PROJECTION_MAP[2][4] = {
     {0, 2, 1, 3}, // FM Operator sequence: 1, 3, 2, 4 -> offsets
     {0, 2, 1, 3}
 };
 
-static void inject_instrument(FMSoundEngine *engine, int ch, int inst_id) {
-    if (inst_id <= 0 || inst_id > 15) return;
-    const uint8_t *rom = &YM2413_ROM_DATA[(inst_id - 1) * 8];
-    // Will implement YM2413 ROM to matrix injection here
+static void inject_instrument(FMSoundEngine *engine, int ch, int inst_id, int vol) {
+    const uint8_t *inst_data;
+    if (inst_id == 0) {
+        inst_data = engine->opll_custom_inst;
+    } else if (inst_id <= 15) {
+        inst_data = &YM2413_ROM_DATA[(inst_id - 1) * 8];
+    } else {
+        inst_data = &YM2413_RHYTHM_ROM_DATA[(inst_id - 16) * 8];
+    }
+    
+    // OPL2 operators mapping
+    static const uint8_t ch_to_op[9] = {0,1,2, 8,9,10, 16,17,18};
+    uint8_t op_m = ch_to_op[ch];
+    uint8_t op_c = op_m + 3;
+
+    fm_engine_write_opl(engine, 0x20 + op_m, inst_data[0]);
+    fm_engine_write_opl(engine, 0x20 + op_c, inst_data[1]);
+    fm_engine_write_opl(engine, 0x40 + op_m, inst_data[2]);
+    
+    uint8_t ksl_c = inst_data[3] & 0xC0;
+    uint8_t wave_m = (inst_data[3] & 0x10) ? 1 : 0;
+    uint8_t wave_c = (inst_data[3] & 0x08) ? 1 : 0;
+    uint8_t fb = inst_data[3] & 0x07;
+    uint8_t tl_c = (vol << 2);
+    fm_engine_write_opl(engine, 0x40 + op_c, ksl_c | tl_c);
+    
+    fm_engine_write_opl(engine, 0x60 + op_m, inst_data[4]);
+    fm_engine_write_opl(engine, 0x60 + op_c, inst_data[5]);
+    fm_engine_write_opl(engine, 0x80 + op_m, inst_data[6]);
+    fm_engine_write_opl(engine, 0x80 + op_c, inst_data[7]);
+    
+    fm_engine_write_opl(engine, 0xE0 + op_m, wave_m);
+    fm_engine_write_opl(engine, 0xE0 + op_c, wave_c);
+    fm_engine_write_opl(engine, 0xC0 + ch, (fb << 1) | 0x00);
 }
 
 static inline void update_ssg_eg_state(FMSoundEngine *engine, int op_row) {
@@ -571,7 +610,7 @@ void fm_engine_init(FMSoundEngine *engine, uint32_t sample_rate, uint32_t clock,
     engine->opl2_lfo_pm_step = (uint32_t)((6.1f * 4294967296.0f) / (float)sample_rate);
     
     engine->phase_step_factor = 4294967296.0f / (float)sample_rate;
-    float prescaler = (chip_type == CHIP_YM2203 || chip_type == CHIP_YM3812) ? 72.0f : ((chip_type == CHIP_YM2151) ? 64.0f : 144.0f);
+    float prescaler = (chip_type == CHIP_YM2203 || chip_type == CHIP_YM3812 || chip_type == CHIP_YM2413) ? 72.0f : ((chip_type == CHIP_YM2151) ? 64.0f : 144.0f);
     engine->ym2612_step_factor = ((float)clock) / (prescaler * 1048576.0f);
     engine->opl2_step_factor = ((float)clock) / (72.0f * 1048576.0f);
     
@@ -922,7 +961,7 @@ typedef int32_t (*AlgoFunc)(FMSoundEngine*, int, int32_t, int32_t, int32_t, int)
 static void update_algorithm_routing(FMSoundEngine *engine, int ch, uint8_t algo) {
     int b = ch * 4;
 
-    if (engine->chip_type == CHIP_YM3812) {
+    if (engine->chip_type == CHIP_YM3812 || engine->chip_type == CHIP_YM2413) {
         // OPL2 uses 2 operators per channel (OP1 is at b, OP2 is at b+1)
         switch (algo & 1) {
             case 0: // OP1 -> OP2 -> MIX
@@ -1000,7 +1039,7 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
     int32_t mix_l = 0;
     int32_t mix_r = 0;
 
-    if (engine->noise_enable || (engine->chip_type == CHIP_YM3812 && engine->rhythm_enable)) {
+    if (engine->noise_enable || ((engine->chip_type == CHIP_YM3812 || engine->chip_type == CHIP_YM2413) && engine->rhythm_enable)) {
         engine->noise_phase += engine->noise_step;
         if (engine->noise_step == 0) engine->noise_step = 0x01000000 >> 2; 
         if (engine->noise_phase < engine->noise_step) {
@@ -1052,7 +1091,7 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
     static int32_t pms_mult[8] = { 0, 1, 2, 4, 8, 16, 32, 64 };
     static int32_t ams_mult[4] = { 0, 2, 4, 8 };
 
-    if (engine->chip_type == CHIP_YM3812) {
+    if (engine->chip_type == CHIP_YM3812 || engine->chip_type == CHIP_YM2413) {
         engine->lfo_am_phase += engine->opl2_lfo_am_step;
         engine->lfo_pm_phase += engine->opl2_lfo_pm_step;
         int32_t opl2_am = (engine->lfo_am_phase & 0x80000000U) ? 210 : 0; 
@@ -1076,15 +1115,15 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
                     int32_t bd_mod = (engine->algo[ch] == 0) ? (o0 >> 1) : 0;
                     int32_t o1 = calc_op_internal(engine, b+1, bd_mod, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 0, 1);
                     // BD: Operator 1 output is ignored when connect=1.
-                    ch_out = o1 << 2;
+                    ch_out = o1 << 1;
                 } else if (ch == 7) {
                     int32_t sd_out = calc_op_internal(engine, b+1, 0, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 1, 1);
                     int32_t hh_out = calc_op_internal(engine, b+0, 0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 2, 1);
-                    ch_out = (sd_out + hh_out) << 2;
+                    ch_out = (sd_out + hh_out) << 1;
                 } else if (ch == 8) {
                     int32_t tom_out = calc_op_internal(engine, b+0, 0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 0, 1);
                     int32_t tc_out = calc_op_internal(engine, b+1, 0, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 2, 1);
-                    ch_out = (tom_out + tc_out) << 2;
+                    ch_out = (tom_out + tc_out) << 1;
                 }
             } else {
                 int32_t mod0 = fb_mod;
@@ -1186,14 +1225,50 @@ void fm_engine_register_write(FMSoundEngine *engine, uint16_t addr, uint8_t data
     } else if (engine->chip_type == CHIP_YM2413) {
         // YM2413 OPLL routing
         int ch = addr & 0x0F;
-        if (addr >= 0x10 && addr <= 0x18) {
+        if (addr >= 0x00 && addr <= 0x07) {
+            engine->opll_custom_inst[addr] = data;
+            // Update channels using the custom instrument
+            for (int i = 0; i < 9; i++) {
+                if (engine->opll_inst[i] == 0) {
+                    inject_instrument(engine, i, 0, engine->opll_vol[i]);
+                }
+            }
+        } else if (addr == 0x0E) {
+            engine->opll_rhythm_mode = data;
+            bool rhythm_en = (data & 0x20) != 0;
+            // OPLL: 0x0E: 0(2) | RHYTHM_EN(1) | BD(1) | SD(1) | TOM(1) | TC(1) | HH(1)
+            // OPL2: 0xBD: AM_DEP(1) | VIB_DEP(1) | RHYTHM_EN(1) | BD(1) | SD(1) | TOM(1) | TC(1) | HH(1)
+            fm_engine_write_opl(engine, 0xBD, data & 0x3F);
+            if (rhythm_en) {
+                // OPLL rhythm mapping: BD(ch6), HH/SD(ch7), TOM/TC(ch8)
+                inject_instrument(engine, 6, 16, engine->opll_vol[6]); // BD
+                inject_instrument(engine, 7, 17, engine->opll_vol[7]); // HH / SD
+                inject_instrument(engine, 8, 18, engine->opll_vol[8]); // TOM / TC
+            }
+        } else if (addr >= 0x10 && addr <= 0x18) {
             // F-Num low
+            fm_engine_write_opl(engine, 0xA0 + ch, data);
         } else if (addr >= 0x20 && addr <= 0x28) {
             // F-Num high / Block / Key On
+            // OPLL: SUS(1) | KEY(1) | BLK(3) | FNUM_H(1)
+            // OPL2: 0(2) | KEY(1) | BLK(3) | FNUM_H(2)
+            uint8_t opl2_data = 0;
+            if (data & 0x10) opl2_data |= 0x20; // KEY-ON
+            opl2_data |= (data & 0x0E) << 1;    // BLK
+            opl2_data |= (data & 0x01);         // FNUM_H
+            fm_engine_write_opl(engine, 0xB0 + ch, opl2_data);
         } else if (addr >= 0x30 && addr <= 0x38) {
             // Instrument / Volume
             int inst = data >> 4;
-            inject_instrument(engine, ch, inst);
+            int vol = data & 0x0F;
+            engine->opll_inst[ch] = inst;
+            engine->opll_vol[ch] = vol;
+            
+            // Skip injection for rhythm channels if rhythm is enabled
+            bool rhythm_en = (engine->opll_rhythm_mode & 0x20) != 0;
+            if (!(rhythm_en && ch >= 6)) {
+                inject_instrument(engine, ch, inst, vol);
+            }
         }
     } else if (addr & 0x1000) {
         // encoded PSG write
