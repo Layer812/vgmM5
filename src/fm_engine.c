@@ -397,13 +397,13 @@ static IRAM_ATTR __attribute__((always_inline)) inline int32_t calc_op_internal(
     if (is_opl2) {
         if (pm_amount) {
             // OPL2 vibrato (7 cents or 14 cents)
-            int32_t pm_mod = (int32_t)((active_phase_step * pm_amount) >> 8); 
+            int32_t pm_mod = ((int32_t)active_phase_step * pm_amount) >> 8; 
             active_phase_step += pm_mod;
         }
     } else {
         modulation <<= 1; // YM2612 FM modulation depth
         if (pm_amount != 0) {
-            active_phase_step += (int32_t)(((active_phase_step >> 10) * pm_amount) >> 3);
+            active_phase_step += (((int32_t)(active_phase_step >> 10)) * pm_amount) >> 3;
         }
     }
     engine->ops[op_idx].phase += active_phase_step;
