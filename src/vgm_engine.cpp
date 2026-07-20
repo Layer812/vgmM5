@@ -169,18 +169,31 @@ class OpnxChip final : public ISoundChip {
 public:
     OpnxChip() : ISoundChip(wrap_fm_tick) {}
     void write(uint8_t port, uint16_t reg, uint8_t data) override {
-        if (port == 0 && reg < 0x10) {
-            ssg_engine_write(&g_ssg_engine, reg, data);
-        } else if (port == 0 && (reg >= 0x10 && reg <= 0x1D)) {
-            pcm_engine_write_opn_rhythm(&g_pcm_engine, reg, data);
-        } else if (port == 1 && reg <= 0x0B) {
-            // YM2610 ADPCM-B (Delta-T): port 1, reg 0x00-0x0B
-            pcm_engine_write_opn_adpcmb(&g_pcm_engine, reg, data);
-        } else if (port == 1 && reg >= 0x10 && reg <= 0x2F) {
-            // YM2610 ADPCM-A per-channel: port 1, reg 0x10-0x2F
-            pcm_engine_write_opn_adpcma(&g_pcm_engine, reg | 0x100, data);
+        if (g_fm_engine.chip_type == CHIP_YM2610) {
+            if (port == 0 && reg < 0x10) {
+                ssg_engine_write(&g_ssg_engine, reg, data);
+            } else if (port == 0 && (reg >= 0x10 && reg <= 0x1B)) {
+                // YM2610 ADPCM-B (Delta-T) is on Port 0, reg 0x10-0x1B
+                pcm_engine_write_opn_adpcmb(&g_pcm_engine, reg - 0x10, data);
+            } else if (port == 1 && reg <= 0x2F) {
+                // YM2610 ADPCM-A is on Port 1, reg 0x00-0x2F
+                pcm_engine_write_opn_adpcma(&g_pcm_engine, reg, data);
+            } else {
+                fm_wrapper.write(port, reg, data);
+            }
         } else {
-            fm_wrapper.write(port, reg, data);
+            // YM2608
+            if (port == 0 && reg < 0x10) {
+                ssg_engine_write(&g_ssg_engine, reg, data);
+            } else if (port == 0 && (reg >= 0x10 && reg <= 0x1D)) {
+                // YM2608 Rhythm is on Port 0, reg 0x10-0x1D
+                pcm_engine_write_opn_rhythm(&g_pcm_engine, reg, data);
+            } else if (port == 1 && reg <= 0x0B) {
+                // YM2608 ADPCM (Delta-T) is on Port 1, reg 0x00-0x0B
+                pcm_engine_write_opn_adpcmb(&g_pcm_engine, reg, data);
+            } else {
+                fm_wrapper.write(port, reg, data);
+            }
         }
     }
 };
@@ -238,10 +251,12 @@ void vgmSeek(uint32_t pos) { if (pos < vgm_file_size) vgm_ptr = pos; }
 bool is_dual_sn76489 = false;
 int sn76489_writes = 0;
 
-const esp_partition_t* vgm_swap_partition = nullptr;
-uint32_t vgm_swap_offset = 0;
-uint32_t vgm_swap_erased_limit = 0;
-spi_flash_mmap_handle_t vgm_mmap_handle = 0;
+static const esp_partition_t* vgm_swap_partition = nullptr;
+static uint32_t         vgm_swap_offset = 0;
+static uint32_t         vgm_swap_erased_limit = 0;
+static spi_flash_mmap_handle_t vgm_mmap_handle = 0;
+
+
 
 int puff_write_cb(void* ctx, const unsigned char* buf, unsigned long len) {
     if (!vgm_swap_partition) return -1;
@@ -566,6 +581,9 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     uint32_t vgm_version = header[0x08] | (header[0x09] << 8) | (header[0x0A] << 16) | (header[0x0B] << 24);
     actual_sample_rate = 44100;
     
+    // Initialize PCM engine first before loading any specific PCM chips or ROMs
+    pcm_engine_init(&g_pcm_engine, actual_sample_rate);
+    
     uint32_t vgm_sn_clock      = (vgmDataStart > 0x0F) ? (header[0x0C] | (header[0x0D] << 8) | (header[0x0E] << 16) | (header[0x0F] << 24)) : 0;
     uint32_t vgm_ym2413_clock  = (vgmDataStart > 0x13) ? (header[0x10] | (header[0x11] << 8) | (header[0x12] << 16) | (header[0x13] << 24)) : 0;
     uint32_t vgm_ym2612_clock  = (vgmDataStart > 0x2F) ? (header[0x2C] | (header[0x2D] << 8) | (header[0x2E] << 16) | (header[0x2F] << 24)) : 0;
@@ -594,11 +612,11 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
         else if (vgm_ym2413_clock != 0) { chip_type = CHIP_YM2413; fm_clock = vgm_ym2413_clock; }
         else                            { chip_type = CHIP_YM2151; fm_clock = vgm_ym2151_clock; }
         fm_engine_init(&g_fm_engine, actual_sample_rate, fm_clock, chip_type);
+        pcm_engine_opn_init(&g_pcm_engine, fm_clock, chip_type);
         
         if (chip_type == CHIP_YM2608 || chip_type == CHIP_YM2610) {
             active_chips[active_chip_count++] = &opnx_wrapper;
             active_channel_count += 6;
-            pcm_engine_opn_init(&g_pcm_engine, fm_clock);
             
             if (chip_type == CHIP_YM2608) {
                 static uint8_t *ym2608_rom = nullptr;
@@ -644,8 +662,9 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     Serial.printf("[VGM] AY8910: %lu, YM2610: %lu, YM2608: %lu, YM2203: %lu\n", vgm_ay8910_clock, vgm_ym2610_clock, vgm_ym2608_clock, vgm_ym2203_clock);
     if (vgm_ay8910_clock != 0 || vgm_ym2610_clock != 0 || vgm_ym2608_clock != 0 || vgm_ym2203_clock != 0) {
         uint32_t ssg_clock = vgm_ay8910_clock & 0x3FFFFFFF;
-        if (ssg_clock == 0) ssg_clock = (vgm_ym2610_clock != 0) ? vgm_ym2610_clock / 4 : ((vgm_ym2608_clock != 0) ? vgm_ym2608_clock / 4 : ((vgm_ym2203_clock != 0) ? vgm_ym2203_clock / 4 : 1500000));
-        ssg_engine_init(&g_ssg_engine, actual_sample_rate, ssg_clock); active_chips[active_chip_count++] = &ssg_wrapper;
+        if (ssg_clock == 0) ssg_clock = (vgm_ym2610_clock != 0) ? vgm_ym2610_clock / 4 : ((vgm_ym2608_clock != 0) ? vgm_ym2608_clock / 4 : ((vgm_ym2203_clock != 0) ? vgm_ym2203_clock / 2 : 1500000));
+        ssg_engine_init(&g_ssg_engine, actual_sample_rate, ssg_clock); 
+        active_chips[active_chip_count++] = &ssg_wrapper;
         active_channel_count += 3;
     }
     if (vgm_scc_clock != 0) {
@@ -658,8 +677,8 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     // ========================================================
     // PCM engine init: add pcm_wrapper when any PCM chip present
     // ========================================================
-    pcm_engine_init(&g_pcm_engine, actual_sample_rate);
-    if (vgm_msm6258_clock != 0 || vgm_oki_clock != 0 || vgm_segapcm_clock != 0 || vgm_ym2612_clock != 0 || vgm_c140_clock != 0 || vgm_c352_clock != 0) {
+
+    if (vgm_msm6258_clock != 0 || vgm_oki_clock != 0 || vgm_segapcm_clock != 0 || vgm_ym2612_clock != 0 || vgm_ym2608_clock != 0 || vgm_ym2610_clock != 0 || vgm_c140_clock != 0 || vgm_c352_clock != 0) {
         active_chips[active_chip_count++] = &pcm_wrapper;
         active_channel_count += 1;
         if (vgm_msm6258_clock != 0) pcm_engine_set_msm6258_clock(&g_pcm_engine, vgm_msm6258_clock);
@@ -907,7 +926,7 @@ static inline uint8_t readByte() {
 void processVGM() {
     if (!isPlaying || (!vgm_is_streaming && vgm_data == nullptr)) return;
 
-    while (vgm_ptr < vgm_file_size && waitSamples == 0) {
+    while (isPlaying && vgm_ptr < vgm_file_size && waitSamples == 0) {
         uint8_t cmd = readByte();
         
         // DEBUG: 最初の20コマンドをダンプ
@@ -967,6 +986,7 @@ void processVGM() {
                         }
                     }
                     vgmSeek(vgmLoopStart); 
+                    if (waitSamples == 0) waitSamples = 1;
                 }
                 break;
             }
@@ -1049,11 +1069,22 @@ void processVGM() {
 		else if (cmd >= 0xE2 && cmd <= 0xFF) {
 		                // 未知のE2〜FFコマンドは引数4バイトを読み飛ばす
 		                readByte(); readByte(); readByte(); readByte();
-		}
+		} else {
+            isPlaying = false;
+        }
                  break;
         }
     }
+    
+    if (vgm_ptr >= vgm_file_size) {
+        isPlaying = false;
+    }
 }
+
+
+static uint32_t prof_fm_time = 0;
+static uint32_t prof_pcm_time = 0;
+static uint32_t prof_vgm_time = 0;
 
 static uint32_t profile_start_time = 0;
 static uint32_t profile_total_time = 0;
@@ -1076,7 +1107,7 @@ void IRAM_ATTR processAudioBlock() {
                 vgm_time_acc -= consume * actual_sample_rate;
             }
             if (waitSamples == 0 && isPlaying) {
-                processVGM(); 
+                uint32_t t_vgm = esp_timer_get_time(); processVGM(); prof_vgm_time += esp_timer_get_time() - t_vgm; 
                 if (waitSamples == 0) continue;
             }
         }
@@ -1089,7 +1120,13 @@ void IRAM_ATTR processAudioBlock() {
 
         for (int c = 0; c < active_chip_count; c++) {
             int32_t ch_l = 0, ch_r = 0;
+            
+            uint32_t t_tick = esp_timer_get_time();
             active_chips[c]->tick(&ch_l, &ch_r);
+            uint32_t t_diff = esp_timer_get_time() - t_tick;
+            if (active_chips[c] == &fm_wrapper) prof_fm_time += t_diff;
+            else if (active_chips[c] == &pcm_wrapper) prof_pcm_time += t_diff;
+
             mix_l += ch_l;
             mix_r += ch_r;
         }
@@ -1151,9 +1188,15 @@ if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t
     profile_blocks++;
 
     if (t_end - profile_start_time >= 1000000) {
-        // uint64_t expected_time = ((uint64_t)profile_blocks * (uint64_t)BUFF_SIZE * 1000000ULL) / (uint64_t)actual_sample_rate;
-        // float cpu_load = ((float)profile_total_time / (float)expected_time) * 100.0f;
-        // Serial.printf("[DSP] Load: %5.1f%% | Buf: %2d/%2d | Chs: %d\n", cpu_load, wav_count.load(), WAV_BUFF_COUNT, active_channel_count);
+        uint64_t expected_time = ((uint64_t)profile_blocks * (uint64_t)BUFF_SIZE * 1000000ULL) / (uint64_t)actual_sample_rate;
+        float cpu_load = ((float)profile_total_time / (float)expected_time) * 100.0f;
+        float fm_load = ((float)prof_fm_time / (float)expected_time) * 100.0f;
+        float pcm_load = ((float)prof_pcm_time / (float)expected_time) * 100.0f;
+        float vgm_load = ((float)prof_vgm_time / (float)expected_time) * 100.0f;
+        // Serial.printf("[DSP] Load: %5.1f%% (FM:%5.1f%% PCM:%5.1f%% VGM:%5.1f%%) | Buf: %2d/%2d\n", cpu_load, fm_load, pcm_load, vgm_load, (int)wav_count.load(), WAV_BUFF_COUNT);
+        prof_fm_time = 0;
+        prof_pcm_time = 0;
+        prof_vgm_time = 0;
         profile_start_time = t_end;
         profile_total_time = 0;
         profile_blocks = 0;
@@ -1173,7 +1216,7 @@ void audio_generate_task(void *args) {
             if (wav_count < (WAV_BUFF_COUNT - 4)) {
                 processAudioBlock(); 
                 // タスク独占防止のための1ms休止
-                vTaskDelay(pdMS_TO_TICKS(1)); 
+                taskYIELD(); 
             } else {
                 // ★修正点：バッファが満杯の場合は break でループを抜けるのではなく、
                 // I2S（スピーカー）が音声を消費してバッファが空くまで待機する
@@ -1248,7 +1291,7 @@ void vgm_engine_init() {
 
     // DSP生成タスクをCore 0に移動し、メインループ(Core 1)のM5.update()による遅延から完全に切り離す
     // 優先度は2に設定
-    xTaskCreatePinnedToCore(audio_generate_task, "AudioGenTask", 8192, NULL, 2, &playTaskHandle, 0);
+    xTaskCreatePinnedToCore(audio_generate_task, "AudioGenTask", 8192, NULL, 5, &playTaskHandle, 1);
     
     // 再生タスクはCore 0の高優先度
     xTaskCreatePinnedToCore(audio_play_task, "AudioPlayTask", 4096, NULL, 4, NULL, 0);

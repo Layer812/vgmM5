@@ -75,6 +75,9 @@ typedef struct {
     
     // Block cache
     int current_block;
+    uint32_t step_adjusted;
+    int16_t mix_vol_l;
+    int16_t mix_vol_r;
 } NamcoPCMChannel;
 
 // Legacy alias for compatibility
@@ -94,6 +97,8 @@ typedef struct {
     uint32_t block_count;
     bool     is_mmap;
     uint32_t rom_size;
+    int last_block;
+    int16_t last_sample;
 } NamcoPCMEngine;
 
 typedef struct {
@@ -118,6 +123,8 @@ typedef struct {
     int32_t  vol_l[16];
     int32_t  vol_r[16];
     uint8_t  flags[16];
+    uint8_t line_buf[16][32];
+    uint32_t line_addr[16];
 } SegaPCMEngine;
 
 // ─────────────────────────────────────────
@@ -154,7 +161,7 @@ typedef struct {
 typedef struct {
     uint8_t  playing;
     int32_t  adpcm_val;
-    int32_t  adpcm_step_idx;
+    int32_t  adpcm_step;
     uint8_t  nibble_sel;    // 0=上位ニブル待ち, 1=下位ニブル待ち
     uint32_t step_accum;
     uint32_t step_size;     // サンプルレート変換用 固定小数(×65536)
@@ -187,7 +194,7 @@ typedef struct {
     bool     playing;
     // ADPCM decode state
     int32_t  adpcm_val;
-    int32_t  adpcm_step_idx;
+    int32_t  adpcm_step;
     uint8_t  regs[0x06]; // Channel specific registers
 } OPN_ADPCM_Channel;
 
@@ -203,7 +210,7 @@ typedef struct {
     bool     playing;
     // Delta-T ADPCM decode state
     int32_t  adpcm_val;
-    int32_t  adpcm_step_idx;
+    int32_t  adpcm_step;
     uint8_t  regs[0x1C]; // Channel specific registers
 } OPN_DeltaT_Channel;
 
@@ -222,6 +229,7 @@ typedef struct {
     uint32_t adpcmb_block_offsets[64];
     uint32_t adpcmb_block_sizes[64];
     uint32_t adpcmb_block_count;
+    uint8_t adpcma_tl;
     
     uint32_t clock;
 } OPN_PCM_Matrix;
@@ -282,7 +290,7 @@ void pcm_engine_namco_write(PCMSoundEngine *engine, uint16_t addr, uint16_t data
 void pcm_engine_namco_mmap(PCMSoundEngine *engine, uint32_t start_addr, const uint8_t *data, uint32_t size);
 
 // OPN (YM2608 / YM2610) ADPCM
-void pcm_engine_opn_init(PCMSoundEngine *engine, uint32_t clock);
+void pcm_engine_opn_init(PCMSoundEngine *engine, uint32_t clock, uint8_t chip_type);
 void pcm_engine_write_opn_rhythm(PCMSoundEngine *engine, uint8_t reg, uint8_t data);
 void pcm_engine_write_opn_adpcma(PCMSoundEngine *engine, uint8_t reg, uint8_t data);
 void pcm_engine_write_opn_adpcmb(PCMSoundEngine *engine, uint8_t reg, uint8_t data);

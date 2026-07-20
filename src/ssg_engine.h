@@ -20,7 +20,7 @@ typedef struct {
     int8_t   noise_out;
     
     // エンベロープジェネレータ
-    int32_t  env_cnt;
+    uint64_t env_cnt;
     int32_t  env_period;
     int8_t   env_vol;       // 現在のエンベロープ音量 (0-15)
     bool     env_hold;

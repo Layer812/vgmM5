@@ -413,7 +413,7 @@ static int mdx_driver_track_advance(struct mdx_driver *driver, int track_num) {
 			if(track->pos < track->len - 1) {
 				track->pan = track->data[track->pos + 1];
 				if(track_num >= 8 && driver->adpcm_driver) {
-					mdx_adpcm_set_pan(driver->adpcm_driver, track->pan);
+					mdx_adpcm_set_pan(driver->adpcm_driver, track_num - 8, track->pan);
 				}
 			}
 			track->pos += 2;

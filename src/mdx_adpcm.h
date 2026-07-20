@@ -20,23 +20,23 @@ struct mdx_adpcm_channel {
     int      cnt;
     int      fin;
     uint8_t  slot;
+    uint8_t  pan;
 };
 
 struct mdx_adpcm {
     struct mdx_adpcm_channel channels[8];
-    uint8_t pan;
 };
 
 int  mdx_adpcm_init(struct mdx_adpcm *driver, int sample_rate);
 void mdx_adpcm_deinit(struct mdx_adpcm *driver);
 int  mdx_adpcm_estimate(struct mdx_adpcm *driver, int buf_size);
-void mdx_adpcm_run(struct mdx_adpcm *driver, int32_t *out_buf, int buf_size);
+void mdx_adpcm_tick(struct mdx_adpcm *driver, int32_t *l, int32_t *r);
 
 int mdx_adpcm_play(struct mdx_adpcm *driver, uint8_t channel, short *data, int len, uint8_t freq, uint8_t vol, uint8_t slot);
 int mdx_adpcm_stop(struct mdx_adpcm *driver, uint8_t channel);
 int mdx_adpcm_set_volume(struct mdx_adpcm *driver, uint8_t channel, uint8_t vol);
 int mdx_adpcm_set_freq(struct mdx_adpcm *driver, uint8_t channel, uint8_t freq);
-int mdx_adpcm_set_pan(struct mdx_adpcm *driver, uint8_t pan);
+int mdx_adpcm_set_pan(struct mdx_adpcm *driver, uint8_t channel, uint8_t pan);
 
 #ifdef __cplusplus
 }

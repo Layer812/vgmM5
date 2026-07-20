@@ -120,11 +120,3 @@ void mdx_fm_init(struct mdx_fm *driver, uint32_t sample_rate) {
 		mdx_fm_write(driver, 0x08, i);
 }
 
-void mdx_fm_run(struct mdx_fm *driver, int32_t *out_buf, int num_samples) {
-    (void)driver;
-    for (int i = 0; i < num_samples; i++) {
-        int32_t l = 0, r = 0;
-        fm_engine_tick(&g_fm_engine, &l, &r);
-        out_buf[i] += (l + r) >> 1;
-    }
-}

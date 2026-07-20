@@ -39,7 +39,8 @@ extern int32_t *vgm_mix_buf;
 // 内部バッファ（int32 ミックス用のみ — 共有バッファへの変換に使用）
 // sizeof = 512 × 4 = 2048 byte (BSS)
 // ============================================================
-static int32_t s_mix_buf[VGM_BUFF_SIZE];
+static int32_t s_mix_buf_l[VGM_BUFF_SIZE];
+static int32_t s_mix_buf_r[VGM_BUFF_SIZE];
 
 // ============================================================
 // MDX/PDXドライバー
@@ -330,49 +331,65 @@ static void mdx_gen_task(void *args) {
                 continue;
             }
 
-            memset(s_mix_buf, 0, VGM_BUFF_SIZE * sizeof(int32_t));
+            memset(s_mix_buf_l, 0, VGM_BUFF_SIZE * sizeof(int32_t));
+            memset(s_mix_buf_r, 0, VGM_BUFF_SIZE * sizeof(int32_t));
 
             int remaining = VGM_BUFF_SIZE;
             int pos       = 0;
             while (remaining > 0) {
-            int timer_est = mdx_timer_estimate(&s_timer_driver, remaining);
-            int samples   = timer_est;
-            if (samples <= 0) samples = 1;
+                int timer_est = mdx_timer_estimate(&s_timer_driver, remaining);
+                int samples   = timer_est;
+                if (samples <= 0) samples = 1;
 
-            // Generate ADPCM and FM mixed buffer
-            mdx_adpcm_run(&s_adpcm_driver, &s_mix_buf[pos], samples);
-            mdx_fm_run(&s_fm_driver, &s_mix_buf[pos], samples);
+                for (int i = 0; i < samples; i++) {
+                    int32_t fm_l = 0, fm_r = 0;
+                    fm_engine_tick(&g_fm_engine, &fm_l, &fm_r);
 
-            remaining -= samples;
-            pos += samples;
+                    int32_t adpcm_l = 0, adpcm_r = 0;
+                    mdx_adpcm_tick(&s_adpcm_driver, &adpcm_l, &adpcm_r);
 
-            if (mdx_timer_advance(&s_timer_driver, samples)) {
-                if (s_mdx_driver.ended) {
-                    break;
+                    s_mix_buf_l[pos + i] = fm_l + adpcm_l;
+                    s_mix_buf_r[pos + i] = fm_r + adpcm_r;
+                }
+
+                remaining -= samples;
+                pos += samples;
+
+                if (mdx_timer_advance(&s_timer_driver, samples)) {
+                    if (s_mdx_driver.ended) {
+                        break;
+                    }
                 }
             }
-        }
 
-	    static int64_t dc_state = 0;
-            static int32_t dc_prev = 0;
+            static int64_t dc_state_l = 0;
+            static int32_t dc_prev_l = 0;
+            static int64_t dc_state_r = 0;
+            static int32_t dc_prev_r = 0;
 
             int16_t *out_buf = wav_buff[wd];
             for (int i = 0; i < VGM_BUFF_SIZE; i++) {
-                int32_t raw_in = s_mix_buf[i];
+                int32_t raw_in_l = s_mix_buf_l[i];
+                int32_t raw_in_r = s_mix_buf_r[i];
 
-                // ★追加: DCブロッカー（FM音源特有の波形の偏りを除去）
-                dc_state = (int64_t)(raw_in - dc_prev) * 16384 + (dc_state * 1019) / 1024;
-                dc_prev = raw_in;
-                int32_t centered = (int32_t)(dc_state / 16384);
+                dc_state_l = (int64_t)(raw_in_l - dc_prev_l) * 16384 + (dc_state_l * 1019) / 1024;
+                dc_prev_l = raw_in_l;
+                int32_t centered_l = (int32_t)(dc_state_l / 16384);
 
-                // ★修正: 複数チャンネル合算時のハードクリップを防ぐため、ゲインを 1/4 (25%) 程度に下げる
-                // （元の 80/100 では8和音時に上限を遥かに超えて波形が潰れていました）
-                int32_t v = centered / 4; 
+                dc_state_r = (int64_t)(raw_in_r - dc_prev_r) * 16384 + (dc_state_r * 1019) / 1024;
+                dc_prev_r = raw_in_r;
+                int32_t centered_r = (int32_t)(dc_state_r / 16384);
 
-                if (v >  32767) v =  32767;
-                if (v < -32768) v = -32768;
-                out_buf[i * 2]     = (int16_t)v; // L
-                out_buf[i * 2 + 1] = (int16_t)v; // R
+                int32_t vl = centered_l / 4; 
+                if (vl >  32767) vl =  32767;
+                if (vl < -32768) vl = -32768;
+
+                int32_t vr = centered_r / 4; 
+                if (vr >  32767) vr =  32767;
+                if (vr < -32768) vr = -32768;
+
+                out_buf[i * 2]     = (int16_t)vl; // L
+                out_buf[i * 2 + 1] = (int16_t)vr; // R
             }
             wav_buff_size[wd] = VGM_BUFF_SIZE;
             wd = (wd + 1) % VGM_WAV_BUFF_COUNT;

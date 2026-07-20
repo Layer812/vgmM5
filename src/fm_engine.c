@@ -1,4 +1,6 @@
 #include "fm_engine.h"
+#include "ssg_engine.h"
+#include "pcm_engine.h"
 #include <string.h>
 #include <math.h>
 
@@ -28,6 +30,7 @@ static uint8_t DT_TAB[4][32] = {
 #define EG_MAX (4096 << EG_FRACTION_BITS)
 
 static void update_algorithm_routing(FMSoundEngine *engine, int ch, uint8_t algo);
+static inline void update_ssg_eg_state(FMSoundEngine *engine, int op_row);
 
 static void init_tables() {
     if (table_initialized) return;
@@ -166,6 +169,7 @@ static void apply_fnumber_routing(FMSoundEngine *engine, int ch) {
 }
 static void update_phase_step_ym2612(FMSoundEngine *engine, int ch) {
     static uint8_t fn_note_table[16] = {0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 2, 3, 3, 3, 3, 3};
+    bool is_ym2612_family = (engine->chip_type == CHIP_YM2612 || engine->chip_type == CHIP_YM2608 || engine->chip_type == CHIP_YM2610);
     
     for(int op = 0; op < 4; op++) {
         int idx = ch * 4 + op;
@@ -173,7 +177,7 @@ static void update_phase_step_ym2612(FMSoundEngine *engine, int ch) {
         uint32_t op_blk = engine->ops[idx].block;
         
         uint32_t base_step;
-        if (engine->chip_type == CHIP_YM2612) {
+        if (is_ym2612_family) {
             base_step = engine->ym2612_fnum_tab[op_fn] << op_blk;
         } else {
             // YM2203 has different prescaler (72.0f instead of 144.0f) so the base_step is exactly twice as fast
@@ -216,6 +220,7 @@ static void update_phase_step_ym2612(FMSoundEngine *engine, int ch) {
 
 static void update_eg_rates_ym2612(FMSoundEngine *engine, int ch) {
     static uint8_t fn_note_table[16] = {0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 2, 3, 3, 3, 3, 3};
+    bool is_ym2612_family = (engine->chip_type == CHIP_YM2612 || engine->chip_type == CHIP_YM2608 || engine->chip_type == CHIP_YM2610);
     
     for (int op = 0; op < 4; op++) {
         int idx = ch * 4 + op;
@@ -337,17 +342,24 @@ static void update_eg_rates_opl(FMSoundEngine *engine, int ch) {
 
 static IRAM_ATTR void update_envelopes(FMSoundEngine *engine, int active_channels) {
     int ops_per_ch = (engine->chip_type == CHIP_YM3812 || engine->chip_type == CHIP_YM2413) ? 2 : 4;
+        int is_ym2151 = (engine->chip_type == CHIP_YM2151);
     for (int ch = 0; ch < active_channels; ch++) {
         int b = ch * 4;
         for (int i = 0; i < ops_per_ch; i++) {
             int op_idx = b + i;
             if (engine->ops[op_idx].env_state == EG_OFF) continue;
+            if ((engine->ops[op_idx].ssg_eg_mode & 8) != 0) {
+                update_ssg_eg_state(engine, op_idx);
+                continue;
+            }
             switch (engine->ops[op_idx].env_state) {
                 case EG_ATTACK:
                 {
                       int32_t delta = engine->ops[op_idx].ar_step;
                       
-                      // 実機同様の深いエクスポネンシャル・カーブを復元（オーバーフロー対策版）
+                      // 高速な32bit演算で近似 (int64_tを排除してCPU負荷削減)
+                      // delta は最大 ~65535。env_level は最大 2097152 (21bit)
+                      // env_level を 9bit シフトすれば 12bit になるので、delta (16bit) と掛けても 28bit に収まる
                       int64_t drop64 = (int64_t)delta + (((int64_t)delta * engine->ops[op_idx].env_level) >> 17);
                       if (drop64 > 2000000000) drop64 = 2000000000;
                       int32_t drop = (int32_t)drop64;
@@ -363,9 +375,11 @@ static IRAM_ATTR void update_envelopes(FMSoundEngine *engine, int active_channel
                 }
                 case EG_DECAY:
                     engine->ops[op_idx].env_level += engine->ops[op_idx].dr_step;
-                    if (engine->ops[op_idx].env_level >= engine->ops[op_idx].sl_level) {
-                        engine->ops[op_idx].env_level = engine->ops[op_idx].sl_level;
-                        engine->ops[op_idx].env_state = EG_SUSTAIN;
+                    if ((engine->ops[op_idx].ssg_eg_mode & 8) == 0) {
+                        if (engine->ops[op_idx].env_level >= engine->ops[op_idx].sl_level) {
+                            engine->ops[op_idx].env_level = engine->ops[op_idx].sl_level;
+                            engine->ops[op_idx].env_state = EG_SUSTAIN;
+                        }
                     }
                     break;
                 case EG_SUSTAIN:
@@ -380,14 +394,18 @@ static IRAM_ATTR void update_envelopes(FMSoundEngine *engine, int active_channel
                     }
                     break;
             }
+            if (__builtin_expect(engine->ops[op_idx].ssg_eg_mode != 0, 0)) {
+                update_ssg_eg_state(engine, op_idx);
+            }
         }
     }
 }
 
-static IRAM_ATTR __attribute__((always_inline)) inline int32_t calc_op_internal(FMSoundEngine *engine, int op_idx, int32_t modulation, int32_t pm_amount, int32_t am_offset, int is_noise, int is_opl2) {
-    if (engine->ops[op_idx].env_state == EG_OFF) return 0;
+static IRAM_ATTR __attribute__((always_inline, optimize("O3"))) inline int32_t calc_op_internal(FMSoundEngine *engine, int op_idx, int32_t modulation, int32_t pm_amount, int32_t am_offset, int is_noise, int is_opl2, int ssg_eg_supported) {
+    OperatorState *op = &engine->ops[op_idx];
+    if (op->env_state == EG_OFF) return 0;
     
-    uint32_t active_phase_step = engine->ops[op_idx].phase_step;
+    uint32_t active_phase_step = op->phase_step;
     // Hardware phase modulation depth correction:
     // MAME uses a 10-bit phase index, but we use a 12-bit phase index (4x larger).
     // However, our output is 15-bit (max 16384), while MAME OPL2 output is 13-bit (max 4096).
@@ -406,14 +424,26 @@ static IRAM_ATTR __attribute__((always_inline)) inline int32_t calc_op_internal(
             active_phase_step += (((int32_t)(active_phase_step >> 10)) * pm_amount) >> 3;
         }
     }
-    engine->ops[op_idx].phase += active_phase_step;
+    op->phase += active_phase_step;
 
-    int32_t current_atten = (engine->ops[op_idx].env_level >> EG_FRACTION_BITS) + engine->ops[op_idx].tl_atten;
-    current_atten += am_offset * engine->ops[op_idx].am_enable; 
-    if (current_atten >= 8192) return 0;
+    int32_t env_atten = op->env_level >> EG_FRACTION_BITS;
+    if (ssg_eg_supported) {
+        if (__builtin_expect((op->ssg_eg_mode & 8) != 0, 0)) {
+            if (op->env_state != EG_ATTACK) {
+                if (env_atten > 0x800) env_atten = 0x800;
+                if (op->ssg_inverted) {
+                    env_atten = 0x800 - env_atten;
+                }
+                env_atten <<= 1;
+            }
+        }
+    }
+    int32_t current_atten = env_atten + op->tl_atten;
+    current_atten += am_offset * op->am_enable; 
+    if (current_atten >= 3840) return 0;
 
     int32_t mod_idx = modulation; 
-    uint32_t phase_12bit = engine->ops[op_idx].phase >> 20;
+    uint32_t phase_12bit = op->phase >> 20;
     uint32_t idx = (phase_12bit + mod_idx) & 0xFFF;
     
     int32_t out;
@@ -447,7 +477,7 @@ static IRAM_ATTR __attribute__((always_inline)) inline int32_t calc_op_internal(
         int output_enable = 1;
         
         if (is_opl2) {
-            int wave = engine->opl_wave_enable ? engine->ops[op_idx].wave_sel : 0;
+            int wave = engine->opl_wave_enable ? op->wave_sel : 0;
             if (wave == 1) {       
                 if (is_negative) output_enable = 0;
             } else if (wave == 2) { 
@@ -461,9 +491,9 @@ static IRAM_ATTR __attribute__((always_inline)) inline int32_t calc_op_internal(
         if (!output_enable) {
             out = 0;
         } else {
-            int32_t total_atten = current_atten + engine->ops[op_idx].ksl_atten_val + SIN_TAB[sin_idx];
+            int32_t total_atten = current_atten + op->ksl_atten_val + SIN_TAB[sin_idx];
             if (total_atten < 0) total_atten = 0;
-            if (total_atten >= 8192) {
+            if (total_atten >= 3840) {
                 out = 0;
             } else {
                 uint32_t exp_shift = total_atten >> 8;
@@ -564,39 +594,40 @@ static void inject_instrument(FMSoundEngine *engine, int ch, int inst_id, int vo
 
 static inline void update_ssg_eg_state(FMSoundEngine *engine, int op_row) {
     OperatorState *op = &engine->ops[op_row];
-    uint32_t current_state = op->env_state;
-    if (current_state == EG_OFF) return;
+    if ((op->ssg_eg_mode & 8) == 0) return;
     
-    // Attenuation is tracked as env_level. 0x200 in standard SSG-EG is halfway.
+    uint32_t current_state = op->env_state;
+    if (current_state == EG_OFF || current_state == EG_ATTACK) return;
+    
     uint32_t current_atten = op->env_level >> EG_FRACTION_BITS; 
-    uint32_t is_active = (current_atten >= 0x200);
+    if (current_atten < 0x800) return;
 
     uint32_t mode = op->ssg_eg_mode;
-
     uint32_t is_hold = mode & 1;
-    uint32_t is_cont = is_hold ^ 1;
     uint32_t alt_bit = (mode >> 1) & 1;
-    uint32_t end_state = ((mode >> 2) & 1) ^ alt_bit; 
-
-    uint32_t apply_hold = is_hold & (current_state != EG_ATTACK);
+    if (alt_bit == 0) is_hold = 1; 
     
-    op->ssg_inverted ^= apply_hold * (end_state ^ op->ssg_inverted);
-    
-    uint32_t hold_vol = op->ssg_inverted ? 0x200 : 0x3ff;
-    uint32_t new_atten = (apply_hold * hold_vol) + ((apply_hold ^ 1) * current_atten);
-
-    uint32_t final_atten = (is_active * new_atten) + ((is_active ^ 1) * current_atten);
-    op->env_level = final_atten << EG_FRACTION_BITS;
-
-    op->ssg_inverted ^= (is_active * (is_cont * alt_bit));
-
-    uint32_t is_decay_sus = (current_state == EG_DECAY) | (current_state == EG_SUSTAIN);
-    uint32_t do_restart = is_active & is_cont & is_decay_sus;
-    
-    op->env_state = (do_restart * EG_ATTACK) + ((do_restart ^ 1) * current_state);
-
-    uint32_t do_phase_reset = is_active & is_cont & (alt_bit ^ 1);
-    op->phase &= (do_phase_reset - 1);
+    if (is_hold) {
+        uint32_t final_inverted = 0;
+        switch (mode) {
+            case 8:  final_inverted = 0; break; 
+            case 9:  final_inverted = 0; break; 
+            case 11: final_inverted = 1; break; 
+            case 12: final_inverted = 0; break; 
+            case 13: final_inverted = 1; break; 
+            case 15: final_inverted = 0; break; 
+            default: final_inverted = 0; break;
+        }
+        op->ssg_inverted = final_inverted;
+        op->env_level = (final_inverted ? 0x800 : 0xfff) << EG_FRACTION_BITS;
+    } else {
+        op->ssg_inverted ^= alt_bit;
+        op->env_state = EG_DECAY;
+        op->env_level = 0;
+        if (alt_bit == 0) {
+            op->phase = 0;
+        }
+    }
 }
 
 void fm_engine_init(FMSoundEngine *engine, uint32_t sample_rate, uint32_t clock, uint8_t chip_type) {
@@ -620,9 +651,9 @@ void fm_engine_init(FMSoundEngine *engine, uint32_t sample_rate, uint32_t clock,
                           (engine->chip_type == CHIP_YM2151) ? 8 :
                           (engine->chip_type == CHIP_YM2203) ? 3 :
                           (engine->chip_type == CHIP_YM2608) ? 6 :
-                          (engine->chip_type == CHIP_YM2610) ? 4 :
+                          (engine->chip_type == CHIP_YM2610) ? 6 :
                           9; // OPL2/OPLL
-          for (int ch = 0; ch < active_channels; ch++) {
+      for (int ch = 0; ch < active_channels; ch++) {
           engine->pan_l[ch] = 1;
           engine->pan_r[ch] = 1;
           update_algorithm_routing(engine, ch, 0);
@@ -732,6 +763,12 @@ void fm_engine_write_ym2151(FMSoundEngine *engine, uint16_t addr, uint8_t data) 
 
 
 void fm_engine_write_ym2612(FMSoundEngine *engine, uint8_t port, uint8_t addr, uint8_t data) {
+    if (port == 0 && addr <= 0x0F) {
+        if (engine->chip_type == CHIP_YM2203 || engine->chip_type == CHIP_YM2608 || engine->chip_type == CHIP_YM2610) {
+            ssg_engine_write(&g_ssg_engine, addr, data);
+            return;
+        }
+    }
     if (port == 0 && addr == 0x28) {
         int ch = data & 3; 
         if (ch == 3) return;
@@ -748,6 +785,11 @@ void fm_engine_write_ym2612(FMSoundEngine *engine, uint8_t port, uint8_t addr, u
             int idx = b + op;
             if (key_on[op]) {
                 if (engine->ops[idx].env_state == EG_OFF) engine->ops[idx].env_level = EG_MAX;
+                if (engine->ops[idx].ssg_eg_mode & 8) {
+                    engine->ops[idx].ssg_inverted = (engine->ops[idx].ssg_eg_mode & 4) ? 1 : 0;
+                } else {
+                    engine->ops[idx].ssg_inverted = 0;
+                }
                 engine->ops[idx].env_state = EG_ATTACK;
                 engine->ops[idx].phase = 0;
             } else {
@@ -826,7 +868,7 @@ void fm_engine_write_ym2612(FMSoundEngine *engine, uint8_t port, uint8_t addr, u
             case 0x60: engine->ops[idx].dr = data & 0x1F; engine->ops[idx].am_enable = (data >> 7) & 1; update_eg_rates_ym2612(engine, ch); break;
             case 0x70: engine->ops[idx].d2r = data & 0x1F; update_eg_rates_ym2612(engine, ch); break;
             case 0x80: { int d1l = (data >> 4) & 0x0F; engine->ops[idx].sl_level = (d1l == 15) ? EG_MAX : ((d1l * 4) * 32 << EG_FRACTION_BITS); int rr = data & 0x0F; engine->ops[idx].rr = rr ? rr * 2 + 1 : 0; update_eg_rates_ym2612(engine, ch); } break;
-            case 0x90: break; // SSG-EG (unsupported)
+            case 0x90: engine->ops[idx].ssg_eg_mode = data & 0x0F; break;
         }
     }
 }
@@ -1033,13 +1075,13 @@ static void update_algorithm_routing(FMSoundEngine *engine, int ch, uint8_t algo
     }
 }
 
-void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *out_r) {
+__attribute__((optimize("O3"))) void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *out_r) {
     static int tick_counter = 0;
     int active_channels = (engine->chip_type == CHIP_YM2612) ? 6 :
                           (engine->chip_type == CHIP_YM2151) ? 8 :
                           (engine->chip_type == CHIP_YM2203) ? 3 :
                           (engine->chip_type == CHIP_YM2608) ? 6 :
-                          (engine->chip_type == CHIP_YM2610) ? 4 :
+                          (engine->chip_type == CHIP_YM2610) ? 6 :
                           9; // OPL2/OPLL
     
     if ((tick_counter++ & 3) == 0) {
@@ -1094,8 +1136,8 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
         int32_t lfo_am = LFO_AM_TAB[wave][p];
 #endif
 
-        global_pm = (engine->chip_type == CHIP_YM2151) ? ((lfo_pm * engine->pmd) >> 7) : lfo_pm; 
-        global_am = (engine->chip_type == CHIP_YM2151) ? ((lfo_am * engine->amd) >> 7) : lfo_am; 
+        global_pm = (engine->chip_type == CHIP_YM2151) ? ((lfo_pm * engine->pmd + 63) >> 7) : lfo_pm;
+        global_am = (engine->chip_type == CHIP_YM2151) ? ((lfo_am * engine->amd + 63) >> 7) : lfo_am; 
     }
 
     static int32_t pms_mult[8] = { 0, 1, 2, 4, 8, 16, 32, 64 };
@@ -1109,7 +1151,7 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
         int32_t ch_am = engine->amd ? opl2_am : (opl2_am >> 2); 
         int32_t ch_pm = engine->pmd ? (opl2_pm << 1) : opl2_pm; 
 
-        for (int ch = 0; ch < active_channels; ch++) {
+    for (int ch = 0; ch < active_channels; ch++) {
             int b = ch * 4; 
             if (engine->ops[b+0].env_state == EG_OFF && engine->ops[b+1].env_state == EG_OFF) continue;
             
@@ -1120,31 +1162,31 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
             if (engine->rhythm_enable && ch >= 6) {
                 if (ch == 6) {
                     int32_t b0 = fb_mod;
-                    int32_t o0 = calc_op_internal(engine, b+0, b0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 0, 1);
+                    int32_t o0 = calc_op_internal(engine, b+0, b0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 0, 1, 1);
                     engine->fb_memory[ch][0] = engine->fb_memory[ch][1]; engine->fb_memory[ch][1] = o0;
                     int32_t bd_mod = (engine->algo[ch] == 0) ? (o0 >> 1) : 0;
-                    int32_t o1 = calc_op_internal(engine, b+1, bd_mod, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 0, 1);
+                    int32_t o1 = calc_op_internal(engine, b+1, bd_mod, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 0, 1, 1);
                     // BD: Operator 1 output is ignored when connect=1.
                     ch_out = o1 << 1;
                 } else if (ch == 7) {
-                    int32_t sd_out = calc_op_internal(engine, b+1, 0, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 1, 1);
-                    int32_t hh_out = calc_op_internal(engine, b+0, 0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 2, 1);
+                    int32_t sd_out = calc_op_internal(engine, b+1, 0, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 1, 1, 1);
+                    int32_t hh_out = calc_op_internal(engine, b+0, 0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 2, 1, 1);
                     ch_out = (sd_out + hh_out) << 1;
                 } else if (ch == 8) {
-                    int32_t tom_out = calc_op_internal(engine, b+0, 0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 0, 1);
-                    int32_t tc_out = calc_op_internal(engine, b+1, 0, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 2, 1);
+                    int32_t tom_out = calc_op_internal(engine, b+0, 0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 0, 1, 1);
+                    int32_t tc_out = calc_op_internal(engine, b+1, 0, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 2, 1, 1);
                     ch_out = (tom_out + tc_out) << 1;
                 }
             } else {
                 int32_t mod0 = fb_mod;
-                int32_t out0 = calc_op_internal(engine, b+0, mod0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 0, 1);
+                int32_t out0 = calc_op_internal(engine, b+0, mod0, engine->ops[b+0].pm_enable?ch_pm:0, engine->ops[b+0].am_enable?ch_am:0, 0, 1, 1);
                 engine->fb_memory[ch][0] = engine->fb_memory[ch][1];
                 engine->fb_memory[ch][1] = out0;
                 
                 engine->mem_value[ch] = out0;
                 
                 int32_t mod1 = (engine->algo[ch] & 1) == 0 ? (out0 >> 1) : 0;
-                int32_t out1 = calc_op_internal(engine, b+1, mod1, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 0, 1);
+                int32_t out1 = calc_op_internal(engine, b+1, mod1, engine->ops[b+1].pm_enable?ch_pm:0, engine->ops[b+1].am_enable?ch_am:0, 0, 1, 1);
                 
                 if ((engine->algo[ch] & 1) == 0) {
                     ch_out = out1 << 1;
@@ -1157,7 +1199,7 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
         }
     } else {
         int is_ym2151 = (engine->chip_type == CHIP_YM2151);
-        for (int ch = 0; ch < active_channels; ch++) {
+    for (int ch = 0; ch < active_channels; ch++) {
             int b = ch * 4; 
             if (engine->ops[b+0].env_state == EG_OFF && engine->ops[b+1].env_state == EG_OFF && 
                 engine->ops[b+2].env_state == EG_OFF && engine->ops[b+3].env_state == EG_OFF) continue;
@@ -1174,11 +1216,11 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
             // Hardware processes in order M1,M2,C1,C2. C1 is processed AFTER M2,
             // so M2 must use C1's output from the PREVIOUS sample (memory delay).
             // Signal flow algo 0: M1->C1->M2->C2  (C1->M2 path has 1-sample delay)
-            static const uint8_t opm_algo_mem_dst[8] = { 2, 2, 2, 3, 5, 2, 5, 5 };
-            static const uint8_t opm_algo_dst_m1[8]  = { 1, 5, 3, 1, 1, 5, 1, 4 };
-            static const uint8_t opm_algo_dst_m2[8]  = { 3, 3, 3, 3, 3, 4, 4, 4 };
-            static const uint8_t opm_algo_dst_c1[8]  = { 5, 5, 5, 5, 4, 4, 4, 4 };
-            static const uint8_t opm_algo_dst_c2[8]  = { 4, 4, 4, 4, 4, 4, 4, 4 };
+            static uint8_t opm_algo_mem_dst[8] = { 2, 2, 2, 3, 5, 2, 5, 5 };
+            static uint8_t opm_algo_dst_m1[8]  = { 1, 5, 3, 1, 1, 5, 1, 4 };
+            static uint8_t opm_algo_dst_m2[8]  = { 3, 3, 3, 3, 3, 4, 4, 4 };
+            static uint8_t opm_algo_dst_c1[8]  = { 5, 5, 5, 5, 4, 4, 4, 4 };
+            static uint8_t opm_algo_dst_c2[8]  = { 4, 4, 4, 4, 4, 4, 4, 4 };
 
             // OPN (YM2612/YM2608/YM2610/YM2203): algo diagram uses S1,S3,S2,S4 notation.
             // Slot1=M1, Slot3=M2, Slot2=C1, Slot4=C2 in hardware processing order.
@@ -1187,46 +1229,44 @@ void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *ou
             // Signal flow algo 0: M1->M2->C1->C2 (all immediate, no delay)
             // Special cases: algo 3,4 need M1->both M2 and C1 simultaneously;
             //                algo 5 needs M1->M2,C1,C2 simultaneously.
-            static const uint8_t opn_algo_mem_dst[8] = { 5, 5, 5, 5, 5, 5, 5, 5 };
-            static const uint8_t opn_algo_dst_m1[8]  = { 2, 1, 3, 2, 2, 2, 2, 4 };
-            static const uint8_t opn_algo_dst_m2[8]  = { 1, 1, 1, 1, 3, 4, 4, 4 };
-            static const uint8_t opn_algo_dst_c1[8]  = { 3, 3, 3, 3, 3, 4, 4, 4 };
-            static const uint8_t opn_algo_dst_c2[8]  = { 4, 4, 4, 4, 4, 4, 4, 4 };
+            static uint8_t opn_algo_mem_dst[8] = { 5, 5, 5, 5, 5, 5, 5, 5 };
+            static uint8_t opn_algo_dst_m1[8]  = { 2, 1, 3, 2, 2, 2, 2, 4 };
+            static uint8_t opn_algo_dst_m2[8]  = { 1, 1, 1, 1, 3, 4, 4, 4 };
+            static uint8_t opn_algo_dst_c1[8]  = { 3, 3, 3, 3, 3, 4, 4, 4 };
+            static uint8_t opn_algo_dst_c2[8]  = { 4, 4, 4, 4, 4, 4, 4, 4 };
 
-            const uint8_t *algo_mem_dst = is_ym2151 ? opm_algo_mem_dst : opn_algo_mem_dst;
-            const uint8_t *algo_dst_m1  = is_ym2151 ? opm_algo_dst_m1  : opn_algo_dst_m1;
-            const uint8_t *algo_dst_m2  = is_ym2151 ? opm_algo_dst_m2  : opn_algo_dst_m2;
-            const uint8_t *algo_dst_c1  = is_ym2151 ? opm_algo_dst_c1  : opn_algo_dst_c1;
-            const uint8_t *algo_dst_c2  = is_ym2151 ? opm_algo_dst_c2  : opn_algo_dst_c2;
+            uint8_t *algo_mem_dst = is_ym2151 ? opm_algo_mem_dst : opn_algo_mem_dst;
+            uint8_t *algo_dst_m1  = is_ym2151 ? opm_algo_dst_m1  : opn_algo_dst_m1;
+            uint8_t *algo_dst_m2  = is_ym2151 ? opm_algo_dst_m2  : opn_algo_dst_m2;
+            uint8_t *algo_dst_c1  = is_ym2151 ? opm_algo_dst_c1  : opn_algo_dst_c1;
+            uint8_t *algo_dst_c2  = is_ym2151 ? opm_algo_dst_c2  : opn_algo_dst_c2;
 
             int32_t bus[6] = {0};
             int algo = engine->algo[ch] & 7;
             bus[algo_mem_dst[algo]] = engine->mem_value[ch];
 
             int32_t mod0 = bus[0] + fb_mod;
-            int32_t out0 = calc_op_internal(engine, b+0, mod0, ch_pm, ch_am, 0, 0); // M1
+            int32_t out0 = calc_op_internal(engine, b+0, mod0, ch_pm, ch_am, 0, 0, !is_ym2151);
             engine->fb_memory[ch][0] = engine->fb_memory[ch][1];
             engine->fb_memory[ch][1] = out0;
             bus[algo_dst_m1[algo]] += out0;
             if (is_ym2151) {
                 if (algo == 5) { bus[1] += out0; bus[3] += out0; } // OPM algo 5
             } else {
-                // OPN: algos 3 and 4 need M1 to reach C1's bus (bus[1]) in addition to M2's bus (bus[2])
-                // OPN algo 5 needs M1 to reach C1 (bus[1]) and C2 (bus[3]) too
                 if (algo == 3 || algo == 4) { bus[1] += out0; }
                 if (algo == 5)              { bus[1] += out0; bus[3] += out0; }
             }
 
             int32_t mod1 = bus[2];
-            int32_t out1 = calc_op_internal(engine, b+1, mod1, ch_pm, ch_am, 0, 0); // M2
+            int32_t out1 = calc_op_internal(engine, b+1, mod1, ch_pm, ch_am, 0, 0, !is_ym2151);
             bus[algo_dst_m2[algo]] += out1;
 
             int32_t mod2 = bus[1];
-            int32_t out2 = calc_op_internal(engine, b+2, mod2, ch_pm, ch_am, 0, 0); // C1
+            int32_t out2 = calc_op_internal(engine, b+2, mod2, ch_pm, ch_am, 0, 0, !is_ym2151);
             bus[algo_dst_c1[algo]] += out2;
 
             int32_t mod3 = bus[3];
-            int32_t out3 = calc_op_internal(engine, b+3, mod3, ch_pm, ch_am, is_noise_ch ? 1 : 0, 0); // C2
+            int32_t out3 = calc_op_internal(engine, b+3, mod3, ch_pm, ch_am, is_noise_ch ? 1 : 0, 0, !is_ym2151);
             bus[algo_dst_c2[algo]] += out3;
 
             engine->mem_value[ch] = bus[5];
@@ -1260,8 +1300,23 @@ void fm_engine_register_write(FMSoundEngine *engine, uint16_t addr, uint8_t data
     // Unified entry point using projection maps
     if (engine->chip_type == CHIP_YM2151) {
         fm_engine_write_ym2151(engine, addr, data);
-    } else if (engine->chip_type == CHIP_YM2612) {
+    } else if (engine->chip_type == CHIP_YM2612 || engine->chip_type == CHIP_YM2203) {
         fm_engine_write_ym2612(engine, addr >> 8, addr & 0xFF, data);
+    } else if (engine->chip_type == CHIP_YM2608 || engine->chip_type == CHIP_YM2610) {
+        if (addr < 0x100) {
+            if (addr <= 0x0F) ssg_engine_write(&g_ssg_engine, addr, data);
+            else if (addr >= 0x10 && addr <= 0x1D) pcm_engine_write_opn_rhythm(&g_pcm_engine, addr, data);
+            else fm_engine_write_ym2612(engine, 0, addr, data);
+        } else {
+            uint8_t reg = addr & 0xFF;
+            if (reg >= 0x00 && reg <= 0x1C) {
+                pcm_engine_write_opn_adpcmb(&g_pcm_engine, reg, data);
+            } else if (reg >= 0x10 && reg <= 0x2F) {
+                pcm_engine_write_opn_adpcma(&g_pcm_engine, reg, data);
+            } else {
+                fm_engine_write_ym2612(engine, 1, reg, data);
+            }
+        }
     } else if (engine->chip_type == CHIP_YM2413) {
         // YM2413 OPLL routing
         int ch = addr & 0x0F;

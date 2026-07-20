@@ -30,6 +30,7 @@ static uint32_t calc_volume(uint8_t vol) {
 static void channel_init(struct mdx_adpcm_channel *ch) {
     memset(ch, 0, sizeof(*ch));
     ch->volume = calc_volume(15);
+    ch->pan = 3;
 }
 
 static int32_t channel_get_sample(struct mdx_adpcm_channel *ch) {
@@ -49,7 +50,7 @@ static int32_t channel_get_sample(struct mdx_adpcm_channel *ch) {
 
     sample = sample * 16;
     sample = (int32_t)ch->volume * sample / 32768;
-    sample = sample * 4; 
+    sample = sample * 8; 
     if (sample >  32767) sample =  32767;
     if (sample < -32767) sample = -32767;
     return sample;
@@ -95,14 +96,14 @@ int mdx_adpcm_set_freq(struct mdx_adpcm *driver, uint8_t channel, uint8_t freq) 
     return 0;
 }
 
-int mdx_adpcm_set_pan(struct mdx_adpcm *driver, uint8_t pan) {
-    driver->pan = pan & 0x03;
+int mdx_adpcm_set_pan(struct mdx_adpcm *driver, uint8_t channel, uint8_t pan) {
+    if (channel >= 8) return -1;
+    driver->channels[channel].pan = pan & 0x03;
     return 0;
 }
 
 int mdx_adpcm_init(struct mdx_adpcm *driver, int sample_rate) {
     (void)sample_rate;
-    driver->pan = 3;
     for (int i = 0; i < 8; i++) {
         channel_init(&driver->channels[i]);
     }
@@ -120,12 +121,12 @@ int mdx_adpcm_estimate(struct mdx_adpcm *driver, int buf_size) {
     return buf_size;
 }
 
-void mdx_adpcm_run(struct mdx_adpcm *driver, int32_t *out_buf, int buf_size) {
+void mdx_adpcm_tick(struct mdx_adpcm *driver, int32_t *l, int32_t *r) {
     for (int j = 0; j < 8; j++) {
         struct mdx_adpcm_channel *ch = &driver->channels[j];
         if (ch->data_len == 0 || ch->fin) continue;
-        for (int k = 0; k < buf_size; k++) {
-            out_buf[k] += channel_get_sample(ch);
-        }
+        int32_t sample = channel_get_sample(ch);
+        if (ch->pan & 0x02) *l += sample;
+        if (ch->pan & 0x01) *r += sample;
     }
 }

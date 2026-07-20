@@ -24,7 +24,7 @@ void mdx_fm_set_pan(struct mdx_fm *driver, int channel, uint8_t pan, uint8_t *v)
 void mdx_fm_set_noise_freq(struct mdx_fm *driver, int channel, int freq);
 void mdx_fm_load_voice(struct mdx_fm *driver, int channel, uint8_t *v, int opm_volume, int pan);
 void mdx_fm_load_lfo(struct mdx_fm *driver, int channel, uint8_t wave, uint8_t freq, uint8_t pmd, uint8_t amd);
-void mdx_fm_run(struct mdx_fm *driver, int32_t *out_buf, int num_samples);
+
 
 #ifdef __cplusplus
 }
