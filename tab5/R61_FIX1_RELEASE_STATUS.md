@@ -11,3 +11,4 @@ Target: M5Stack Tab5 / ESP32-P4
 - Runtime: VGM/MDX music played; intermittent severe click noise persists; reboot/power-state correlation suggested, not proven.
 - This revision also includes the [full Tab5 R61 FIX1 source ZIP](vgmM5_Tab5_R61_FIX1_source.zip), including a safe build-only script. **No verification has linked the M5Burner share-code image to the locally tested BIN.**
 - No sample music, logs with device identifiers, user-specific backup images, bootloaders, or partition-table flashing scripts included.
+- The archive's source and build-only scripts are also published as browsable files under [`tab5/firmware/src/`](firmware/src) and the `tab5/` directory; the legacy root `src/` is unchanged.
