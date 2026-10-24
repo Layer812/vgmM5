@@ -33,7 +33,7 @@
 - M5Unified：`e125e73f28b6b83e621e48df432af426bb2ff935`
 - M5GFX：`347a23274081a105cb9fc0fc3bbf0e15c78e79c3`（0.2.33）。PlatformIOの依存解決で0.2.34となる場合もあるため、LCDの差分は該当公式Git blobを検証して適用。
 - 実機でビルドされた**app-only** BINのSHA-256：`099d26838d9c84edc32eb1855489c725e8c5e897e749d29cab509abd140beede`。**このSHAはM5Burnerのシェア先BINを表すものではありません。**
-- Tab5版全ソースの保全済みR61 FIX1アーカイブは、**現時点でGitHubリポジトリには未配置**です。既存のルート `src/` はAtomS3R／Cardputer／CoreS3向けの旧系列であり、Tab5の実機ビルドを再現するためのソースとは同一ではありません。
+- **Tab5版の全ソース公開:** [R61 FIX1 の完全ソースZIP](vgmM5_Tab5_R61_FIX1_source.zip)（84個のファームウェアソース＋SHA-256検査付きビルド専用スクリプト）。ZIP内の `tab5/` を展開し、`RUN_THIS_TAB5_BUILD_ONLY.cmd` を実行します。既存のルート `src/` は旧機種用であり、Tab5の実機ビルドを再現するソースではありません。
 
 ### 権利と収録物
 楽曲データや第三者のゲーム／サウンドトラックは含まれていません。既存プロジェクトの[ライセンス・利用ライブラリ表記](../README.md#license)をご参照ください。Tab5版の出典・依存ライセンスについてはソース公開時にも個別に明記します。
@@ -52,4 +52,4 @@
 
 **Verification:** An ESP32-P4 native build and guarded app-only flash on one Tab5 succeeded. Locally built app image SHA-256: `099d26838d9c84edc32eb1855489c725e8c5e897e749d29cab509abd140beede` (not verified against the M5Burner download).
 
-**Source availability:** The full R61 FIX1 source archive is currently preserved outside this repository; the root `src/` directory is the earlier M5Stack edition, **not** the source used to build this Tab5 firmware. Full source publication is a separate step. Third-party code and media rights are not implied by the project's MIT notice.
+**Source availability:** [Download the full R61 FIX1 Tab5 source ZIP](vgmM5_Tab5_R61_FIX1_source.zip) (84 firmware source files plus source-hash checks and a build-only wrapper). Extract the `tab5/` folder and run `RUN_THIS_TAB5_BUILD_ONLY.cmd` on Windows with PlatformIO. The root `src/` directory remains the earlier M5Stack edition, not the Tab5 build. Third-party code and media rights are not implied by the project's MIT notice.

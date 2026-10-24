@@ -9,5 +9,5 @@ Target: M5Stack Tab5 / ESP32-P4
 - Built app `firmware.bin`: 868,576 bytes. SHA-256: `099d26838d9c84edc32eb1855489c725e8c5e897e749d29cab509abd140beede`.
 - Native compile: PASS. Device identity + app-only flashing: PASS.
 - Runtime: VGM/MDX music played; intermittent severe click noise persists; reboot/power-state correlation suggested, not proven.
-- This repository revision publishes documentation and the author-provided M5Burner share code; **it does not include the full Tab5 source archive nor a verified M5Burner firmware image**.
+- This revision also includes the [full Tab5 R61 FIX1 source ZIP](vgmM5_Tab5_R61_FIX1_source.zip), including a safe build-only script. **No verification has linked the M5Burner share-code image to the locally tested BIN.**
 - No sample music, logs with device identifiers, user-specific backup images, bootloaders, or partition-table flashing scripts included.
