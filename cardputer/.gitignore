@@ -1,0 +1,5 @@
+.pio/
+reports/
+VGMM5_CARDPUTER_BUILD_SEND_THIS.zip
+src/*.bin
+__pycache__/

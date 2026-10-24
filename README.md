@@ -86,6 +86,10 @@ CoreS3版はタッチパネル操作に対応しています。外部モジュ�
 - **再生中サムネイルのタップ**: 上半分で音量アップ、下半分で音量ダウン
 
 #### 💻 M5Stack Cardputer
+
+**[Cardputer v0.98 independent source/build guide](cardputer/README.md)** (preserves the original; online catalog requires separately supplied DB files).
+
+**[Cardputer v0.98 独立ソース・ビルド手順](cardputer/README.md)**（既存版を保護した別ディレクトリ。オンラインDB欠落時はローカル再生用ビルド）
 Cardputer版はMicroSDカード内のファイル再生に加え、オンラインモードでの再生に対応しています。
 
 **基本操作:**
