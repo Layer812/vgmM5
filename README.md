@@ -18,12 +18,12 @@ vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(MXDRV)ファイ�
 #### 対応デバイスと機能 (Supported Devices & Features)
 | 機能 (Features) \ デバイス (Device) | M5Stack AtomS3R (Echo) | M5Stack Cardputer | M5Stack CoreS3 | + [Module Audio](https://docs.m5stack.com/ja/module/Module-Audio) | [M5 TAB5](https://docs.m5stack.com/ja/core/Tab5) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **ステータス (Status)** | ✔️ 対応済 | ✔️ 対応済 | ✔️ 対応済 | ✔️ 対応済 | 🔮 予定 |
-| **VGM/VGZ 再生** | ✔️ | ✔️ | ✔️ | ✔️ | 🔮 |
-| **MDX 再生** | ✔️ | ✔️ | ✔️ | ✔️ | 🔮 |
-| **内蔵フラッシュ (USB Drive)** | ✔️ | - |  - |  - | 🔮 |
-| **MicroSD** | - | ✔️ | ✔️ | ✔️  | 🔮 |
-| **オンラインモード** | - | ✔️ | - | - | 🔮 |
+| **ステータス (Status)** | ✔️ 対応済 | ✔️ 対応済 | ✔️ 対応済 | ✔️ 対応済 | [✔️ R61 FIX1](tab5/README.md) ※注意事項 |
+| **VGM/VGZ 再生** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
+| **MDX 再生** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
+| **内蔵フラッシュ (USB Drive)** | ✔️ | - | - | - | - |
+| **MicroSD** | - | ✔️ | ✔️ | ✔️ | ✔️ |
+| **オンラインモード** | - | ✔️ | - | - | - |
 | **キーボード操作** | - | ✔️ | - | - | - |
 
 
@@ -49,6 +49,13 @@ vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(MXDRV)ファイ�
 ※ いくつかのチップのサウンドテストを経た安定板（v0.98）です。ソースは近日更新します。
 ※ ステータスが「対応済」となっていても、もし再生時に音がおかしい・違和感があると感じた場合は、曲名とおかしい点を優しく申告していただければ対応いたします！
 
+#### M5Stack Tab5版 (R61 FIX1)
+ESP32-P4採用のTab5に対応しました。VGM/VGZ・MDXのmicroSD再生、タッチ操作、JPEG/PNG/BMPカバー画像表示が利用できます。カバー画像の高速化は対象外です。
+
+**既知の問題:** 激しいクリックノイズが同じファームウェアで再発した報告があります。電源断後に正常再生へ戻った実例がありますが、原因はまだ特定できていません。過去の音声スケジューリング変更で根本解決したとは扱いません。長時間安定性も未保証です。
+
+詳しくは [Tab5版の説明と注意事項](tab5/README.md) をご覧ください。
+
 ### 特徴
 - **オンラインモード**: Wi-Fiに接続することで、VGM/VGZXファイルをダウンロードする手間なく、クラウドのファイルを指定して再生できます。
 - **MDX (MXDRV) フォーマット対応**: VGM形式に加えて、X68000で広く使われたMDX形式の再生にも対応しました。
@@ -58,6 +65,7 @@ vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(MXDRV)ファイ�
 ### インストール方法 (M5 Burner)
 手軽に試す場合は、M5 Burnerから以下のシェアコードでファームウェアを直接書き込めます。
 
+- **M5Stack Tab5用 シェアコード:** `rx5H5eOnM45ed4eX`（イメージSHAは独立未照合）
 - **M5Stack CoreS3用 シェアコード:** `HRmuTxOVO7iUxfeo`
 - **M5Stack Cardputer用 シェアコード:** `KxVPdM380FWTyMmC`
 - **M5Stack Atom Echo S3R用 シェアコード:** `zoSd8neRRq7ZQFjB`
@@ -108,12 +116,12 @@ vgmM5 is a VGM/VGZ and MDX (X68000) file player designed specifically for the M5
 
 | Features \ Device | M5Stack AtomS3R (Echo) | M5Stack Cardputer | M5Stack CoreS3 | + [Module Audio](https://docs.m5stack.com/ja/module/Module-Audio) | [M5 TAB5](https://docs.m5stack.com/ja/core/Tab5) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Status** | ✔️ Supported | ✔️ Supported | ✔️ Supported | ✔️ Supported | 🔮 Future |
-| **VGM/VGZ Playback** | ✔️ | ✔️ | ✔️ | ✔️ | 🔮 |
-| **MDX Playback** | ✔️ | ✔️ | ✔️ | ✔️ | 🔮 |
-| **Internal Flash (USB Drive)** | ✔️ | - |  - |  - |  🔮 |
-| **MicroSD** | - | ✔️ | ✔️ | ✔️ | 🔮 |
-| **Online Mode** | - | ✔️ | - |  - | 🔮 |
+| **Status** | ✔️ Supported | ✔️ Supported | ✔️ Supported | ✔️ Supported | [✔️ R61 FIX1](tab5/README.md) (known issue) |
+| **VGM/VGZ Playback** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
+| **MDX Playback** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
+| **Internal Flash (USB Drive)** | ✔️ | - | - | - | - |
+| **MicroSD** | - | ✔️ | ✔️ | ✔️ | ✔️ |
+| **Online Mode** | - | ✔️ | - | - | - |
 | **Keyboard Control** | - | ✔️ | - | - | - |
 
 #### Supported Sound Chips
@@ -121,6 +129,13 @@ vgmM5 is a VGM/VGZ and MDX (X68000) file player designed specifically for the M5
 
 *Note: This is a stable version (v0.98) after sound tests on various chips.*
 *Even if a chip is listed as "Supported," if you notice any strange sounds or something feels off during playback, please kindly report it (gently) with the song title and the issue, and I will address it!*
+
+#### M5Stack Tab5 edition (R61 FIX1)
+Supports ESP32-P4 Tab5 with VGM/VGZ and MDX playback from microSD, touch controls, and JPEG/PNG/BMP cover artwork. Cover-art performance optimization is intentionally not included.
+
+**Known issue:** Severe click/crackle noise has recurred on the *same firmware*. It disappeared after removing power in one observed case; the root cause remains unconfirmed. Earlier speaker scheduling changes are not a proven cure. Long-run audio stability remains unverified.
+
+See the [Tab5 documentation and safety notes](tab5/README.md).
 
 ### Features
 - **Online Mode (Jukebox)**: Connect via Wi-Fi to play VGM/VGZ files directly from the cloud without the need to download and save them to a MicroSD card.
@@ -131,6 +146,7 @@ vgmM5 is a VGM/VGZ and MDX (X68000) file player designed specifically for the M5
 ### Installation (via M5 Burner)
 For a quick and easy start, you can flash the firmware directly to your device using M5 Burner with the following share codes:
 
+- **M5Stack Tab5 Share Code:** `rx5H5eOnM45ed4eX` (image SHA not independently verified)
 - **M5Stack CoreS3 Share Code:** `HRmuTxOVO7iUxfeo`
 - **M5Stack Cardputer Share Code:** `KxVPdM380FWTyMmC`
 - **M5Stack Atom Echo S3R Share Code:** `zoSd8neRRq7ZQFjB`
