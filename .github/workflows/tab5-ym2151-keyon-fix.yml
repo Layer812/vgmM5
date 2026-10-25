@@ -1,4 +1,4 @@
-name: Tab5 R61 YM2151 KON D4 C1 D5 M2 native + host (NO FLASH)
+name: Tab5 R61 YM2151 KON map + phase reset native and host (NO FLASH)
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Verify change exactly KEY ON D4 C1 / D5 M2, protect other 83 R61 files
+      - name: Verify isolated YM2151 KON and phase reset; protect all original R61 sources
         shell: bash
         run: |
           set -euo pipefail
@@ -29,15 +29,21 @@ jobs:
           import hashlib,subprocess,json
           original=subprocess.check_output(['git','show','742d3143bfe845d99f8531f68eacf1e25f1dab1f:tab5/firmware/src/fm_engine.c'])
           current=Path('tab5/firmware/src/fm_engine.c').read_bytes()
-          changes=((b'if ((data >> 4) & 1) { // M2 (Slot 2)',
-                    b'if ((data >> 5) & 1) { // M2: physical slot 9, KON D5 ($20)'),
-                   (b'if ((data >> 5) & 1) { // C1 (Slot 3)',
-                    b'if ((data >> 4) & 1) { // C1: physical slot 17, KON D4 ($10)'))
-          test=original
-          for old,new in changes:
-              assert test.count(old)==1,(old,test.count(old))
-              test=test.replace(old,new,1)
-          assert current==test, 'SAFE STOP: FM source changed beyond two KEY ON conditions'
+          # Require a strictly isolated replacement of the original KON 0x08 function.
+          begin=b'    if (addr == 0x08) {'
+          after=b'    if (addr == 0x0F) {'
+          a=original.index(begin);b=original.index(after,a)
+          c=current.index(begin);d=current.index(after,c)
+          assert current[:c]==original[:a], 'unexpected change before KEY ON'
+          assert current[d:]==original[b:], 'unexpected change after KEY ON'
+          patch=current[c:d]
+          assert b'const uint8_t kon_bit[4] = { 3, 5, 4, 6 };' in patch
+          assert b'if (now_on && !p->key_on)' in patch
+          assert b'p->phase = 0u;' in patch
+          assert b'p->key_on = now_on;' in patch
+          expected_sha='d256b26c9e16703a392c8c4f4c6da3dbe2be5845'
+          actual_sha=subprocess.check_output(['git','hash-object','tab5/firmware/src/fm_engine.c'],text=True).strip()
+          assert actual_sha==expected_sha, (actual_sha,expected_sha)
           pins=json.loads(Path('tab5/PUBLIC_SOURCE_SHA256.json').read_text())
           checked=0
           for rel,h in pins.items():
@@ -48,7 +54,7 @@ jobs:
               checked+=1
           assert checked>=80
           assert b'1-sample delay' in current and b'opm_algo_mem_dst[8]' in current
-          print('PASS only two YM2151 KEY ON bit predicates modified; baseline',checked,'source pins protected')
+          print('PASS isolated YM2151 KEY ON bit mapping + edge-only phase reset; original',checked,'source pins protected')
           PY
       - name: Host compile authentic Tab5 FM (no device)
         shell: bash
@@ -71,7 +77,7 @@ jobs:
           if out/tab5_ym2151_baseline_host --test; then
             echo 'ERROR: baseline unexpectedly passes corrected KEY ON mapping';exit 1
           fi
-          echo 'PASS: original baseline reproduces KEY ON defect, fixed passes 56 cases'
+          echo 'PASS: original baseline reproduces mapping defect; corrected passes 56 mapping and 32 edge/phase checks'
       - name: Install pinned PlatformIO for native ESP32-P4 build
         shell: bash
         run: |
@@ -97,7 +103,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: tab5-ym2151-keyon-fix-native-and-host
+          name: tab5-ym2151-keyon-phase-fix-native-and-host
           path: |
             out/firmware.bin
             out/tab5_ym2151_baseline_host
