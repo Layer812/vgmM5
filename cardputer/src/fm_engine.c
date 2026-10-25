@@ -1099,27 +1099,24 @@ void fm_engine_write_ym2151(FMSoundEngine *engine, uint16_t addr, uint8_t data) 
         }
         return;
     }
-    if (addr == 0x08) { 
+    if (addr == 0x08) {
         int ch = data & 7;
-        if ((data >> 3) & 1) {
-            if (engine->ops[ch*4+0].env_state == EG_OFF) engine->ops[ch*4+0].env_level = EG_MAX;
-            engine->ops[ch*4+0].env_state = EG_ATTACK;
-        } else if (engine->ops[ch*4+0].env_state != EG_OFF) engine->ops[ch*4+0].env_state = EG_RELEASE;
-
-        if ((data >> 4) & 1) { // M2 (Slot 2)
-            if (engine->ops[ch*4+1].env_state == EG_OFF) engine->ops[ch*4+1].env_level = EG_MAX;
-            engine->ops[ch*4+1].env_state = EG_ATTACK;
-        } else if (engine->ops[ch*4+1].env_state != EG_OFF) engine->ops[ch*4+1].env_state = EG_RELEASE;
-
-        if ((data >> 5) & 1) { // C1 (Slot 3)
-            if (engine->ops[ch*4+2].env_state == EG_OFF) engine->ops[ch*4+2].env_level = EG_MAX;
-            engine->ops[ch*4+2].env_state = EG_ATTACK;
-        } else if (engine->ops[ch*4+2].env_state != EG_OFF) engine->ops[ch*4+2].env_state = EG_RELEASE;
-
-        if ((data >> 6) & 1) { // C2 (Slot 4)
-            if (engine->ops[ch*4+3].env_state == EG_OFF) engine->ops[ch*4+3].env_level = EG_MAX;
-            engine->ops[ch*4+3].env_state = EG_ATTACK;
-        } else if (engine->ops[ch*4+3].env_state != EG_OFF) engine->ops[ch*4+3].env_state = EG_RELEASE;
+        // Yamaha YM2151 register/physical order is M1, M2, C1, C2.
+        // KEY ON bit order differs: D3=M1, D4=C1, D5=M2, D6=C2.
+        // An already-held KEY ON must not restart envelope or phase.
+        static const uint8_t kon_bit[4] = { 3, 5, 4, 6 };
+        for (int op = 0; op < 4; ++op) {
+            OperatorState *p = &engine->ops[ch * 4 + op];
+            const uint8_t on = (data >> kon_bit[op]) & 1u;
+            if (on && !p->key_on) {
+                if (p->env_state == EG_OFF) p->env_level = EG_MAX;
+                p->phase = 0u;
+                p->env_state = EG_ATTACK;
+            } else if (!on && p->key_on && p->env_state != EG_OFF) {
+                p->env_state = EG_RELEASE;
+            }
+            p->key_on = on;
+        }
         return;
     }
     if (addr == 0x0F) {
