@@ -778,12 +778,12 @@ void fm_engine_write_ym2151(FMSoundEngine *engine, uint16_t addr, uint8_t data) 
             engine->ops[ch*4+0].env_state = EG_ATTACK;
         } else if (engine->ops[ch*4+0].env_state != EG_OFF) engine->ops[ch*4+0].env_state = EG_RELEASE;
 
-        if ((data >> 4) & 1) { // M2 (Slot 2)
+        if ((data >> 5) & 1) { // M2: physical slot 9, KON D5 ($20)
             if (engine->ops[ch*4+1].env_state == EG_OFF) engine->ops[ch*4+1].env_level = EG_MAX;
             engine->ops[ch*4+1].env_state = EG_ATTACK;
         } else if (engine->ops[ch*4+1].env_state != EG_OFF) engine->ops[ch*4+1].env_state = EG_RELEASE;
 
-        if ((data >> 5) & 1) { // C1 (Slot 3)
+        if ((data >> 4) & 1) { // C1: physical slot 17, KON D4 ($10)
             if (engine->ops[ch*4+2].env_state == EG_OFF) engine->ops[ch*4+2].env_level = EG_MAX;
             engine->ops[ch*4+2].env_state = EG_ATTACK;
         } else if (engine->ops[ch*4+2].env_state != EG_OFF) engine->ops[ch*4+2].env_state = EG_RELEASE;
