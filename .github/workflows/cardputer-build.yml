@@ -29,6 +29,11 @@ jobs:
       - name: Verify original Cardputer source lock and DB status
         run: python cardputer/tools/build_only.py --check-only
 
+      - name: Run host arithmetic regression with ASan and UBSan
+        run: |
+          cc -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer cardputer/tools/sound_arithmetic_host.c -lm -o /tmp/vgmm5_sound_arithmetic_host
+          ASAN_OPTIONS=detect_leaks=1 /tmp/vgmm5_sound_arithmetic_host
+
       - name: Compile Cardputer offline edition (never flash)
         run: python cardputer/tools/build_only.py
 

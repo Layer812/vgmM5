@@ -30,10 +30,29 @@ def check_sources():
     expected = manifest["source_git_blob_sha1"]
     if len(expected) != 45:
         raise RuntimeError("Source lock is incomplete; expected 45 files")
+    # Keep the baseline 45-file lock immutable. On an explicitly patched
+    # development branch, accept exactly two modified sources plus one header,
+    # each pinned by its Git blob SHA in a separate manifest.
+    patches = {}
+    patch_lock_path = ROOT / "SAFETY_PATCH_LOCK.json"
+    if patch_lock_path.is_file():
+        patch_lock = json.loads(patch_lock_path.read_text(encoding="utf-8"))
+        patches = patch_lock.get("patched_git_blob_sha1", {})
+        allowed = {"src/fm_engine.c", "src/pcm_engine.c", "src/sound_safe_math.h"}
+        if (patch_lock.get("base_commit") != "2e6f0f9f7ad7a3f5e5544cceb231e60f88cfff64" or set(patches) != allowed):
+            raise RuntimeError("Unexpected safety patch lock configuration")
+        for name in ("src/fm_engine.c", "src/pcm_engine.c"):
+            if patches[name] == expected[name]:
+                raise RuntimeError("Safety patch has no change: " + name)
     for name, sha in sorted(expected.items()):
         path = ROOT / name
-        if not path.is_file() or git_blob_sha(path.read_bytes()) != sha:
+        accepted = patches.get(name, sha)
+        if not path.is_file() or git_blob_sha(path.read_bytes()) != accepted:
             raise RuntimeError("SOURCE LOCK MISMATCH: " + name)
+    if patches:
+        path = ROOT / "src/sound_safe_math.h"
+        if not path.is_file() or git_blob_sha(path.read_bytes()) != patches["src/sound_safe_math.h"]:
+            raise RuntimeError("SOURCE LOCK MISMATCH: src/sound_safe_math.h")
     if git_blob_sha((ROOT / "partitions.csv").read_bytes()) != manifest["partitions_git_blob_sha1"]:
         raise RuntimeError("Original partition table changed")
     pio = (ROOT / "platformio.ini").read_text(encoding="utf-8")
@@ -47,7 +66,8 @@ def check_sources():
     for filename in FILES:
         if ("src/" + filename) not in pio:
             raise RuntimeError("Missing embedded DB reference: " + filename)
-    print("PASS: original Cardputer sources (45) and partition table are unchanged", flush=True)
+    print("PASS: Cardputer source lock (43 original + 2 pinned changes + 1 header)" if patches
+          else "PASS: original Cardputer sources (45) and partition table are unchanged", flush=True)
 
 
 def check_db(create):
@@ -118,7 +138,7 @@ def save_report(result):
     reports.mkdir(exist_ok=True)
     output = reports / "RESULT.json"
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    dest = Path("G:/VGMM5_CARDPUTER_BUILD_SEND_THIS.zip") if os.name == "nt" and Path("G:/").exists() \
+    dest = Path("F:/build/tmp/VGMM5_CARDPUTER_BUILD_SEND_THIS.zip") if os.name == "nt" and Path("F:/build/tmp").is_dir() \
         else ROOT / "VGMM5_CARDPUTER_BUILD_SEND_THIS.zip"
     image = ROOT / ".pio" / "build" / "m5stack-cardputer"
     with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as z:

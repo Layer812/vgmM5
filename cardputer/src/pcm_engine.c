@@ -1,5 +1,6 @@
 #include "pcm_engine.h"
 #include "fm_engine.h"
+#include "sound_safe_math.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -385,7 +386,7 @@ void pcm_engine_namco_write(PCMSoundEngine *engine, uint16_t addr, uint16_t data
                         
                         int16_t new_sample = 0;
                         if (ch->mode & 0x0008) new_sample = c352_mulaw_table[dt];
-                        else new_sample = (int16_t)((int8_t)dt) << 8;
+                        else new_sample = vgm_safe_signed_pcm_byte(dt);
                         
                         ch->last_sample = new_sample;
                         ch->prev_sample = new_sample;
@@ -463,10 +464,9 @@ void pcm_engine_namco_write(PCMSoundEngine *engine, uint16_t addr, uint16_t data
                     int16_t new_sample = 0;
                     if (ch->mode & 0x08) {
                         int16_t sdt = ((int8_t)dt) >> 3;
-                        if (sdt < 0) new_sample = (sdt << (dt & 7)) - c140_pcmtbl[dt & 7];
-                        else         new_sample = (sdt << (dt & 7)) + c140_pcmtbl[dt & 7];
+                        new_sample = vgm_safe_c140_companded(sdt, dt & 7, c140_pcmtbl[dt & 7]);
                     } else {
-                        new_sample = (int16_t)((int8_t)dt) << 8; // ★ C140 uncompressed PCM: correct shift from 4 to 8
+                        new_sample = vgm_safe_signed_pcm_byte(dt); // ★ C140 uncompressed PCM: correct shift from 4 to 8
                     }
                     ch->last_sample = new_sample;
                     ch->prev_sample = new_sample;
@@ -764,15 +764,14 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
                     if (v->mode & 0x0008) { // C352 MuLaw flag is bit 3 (0x0008)
                         new_sample = c352_mulaw_table[dt];
                     } else {
-                        new_sample = (int16_t)((int8_t)dt) << 8;
+                        new_sample = vgm_safe_signed_pcm_byte(dt);
                     }
                 } else {
                     if (v->mode & 0x08) {
                         int16_t sdt = ((int8_t)dt) >> 3;
-                        if (sdt < 0) new_sample = (sdt << (dt & 7)) - c140_pcmtbl[dt & 7];
-                        else         new_sample = (sdt << (dt & 7)) + c140_pcmtbl[dt & 7];
+                        new_sample = vgm_safe_c140_companded(sdt, dt & 7, c140_pcmtbl[dt & 7]);
                     } else {
-                        new_sample = (int16_t)((int8_t)dt) << 8; // ★ C140 uncompressed PCM: correct shift from 4 to 8
+                        new_sample = vgm_safe_signed_pcm_byte(dt); // ★ C140 uncompressed PCM: correct shift from 4 to 8
                     }
                 }
                 v->last_sample = new_sample;
