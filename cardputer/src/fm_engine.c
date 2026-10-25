@@ -75,6 +75,18 @@ static void init_tables() {
     }
     table_initialized = true;
 }
+/* Cardputer AUDIO_R1: retain v0.98 YM2151 synthesis coefficients.
+ * Out-of-range float-to-uint32_t conversion is undefined in C; the phase
+ * accumulator is a 32-bit modular ring. Preserve the original in-range cast
+ * and reduce only exceptional phase advances modulo 2^32. */
+static inline uint32_t ym2151_phase_advance_mod32(float advance) {
+    if (advance >= 0.0f && advance < 4294967296.0f) return (uint32_t)advance;
+    if (!isfinite(advance)) return 0u;
+    double rem = fmod((double)advance, 4294967296.0);
+    if (rem < 0.0) rem += 4294967296.0;
+    return (uint32_t)rem;
+}
+
 static void update_phase_step(FMSoundEngine *engine, int ch) {
     int kc = engine->kc[ch];
     int kf = engine->kf[ch] & 0x3F;
@@ -120,7 +132,7 @@ static void update_phase_step(FMSoundEngine *engine, int ch) {
         float dt2_offset = DT2_OFFSET_TAB[dt2 & 3] * engine->phase_step_factor * 0.5f;
         
         // 最終計算 (DT2は乗算ではなく加算)
-        engine->ops[idx].phase_step = (uint32_t)(step_f * m * detune_m + dt2_offset);
+        engine->ops[idx].phase_step = ym2151_phase_advance_mod32(step_f * m * detune_m + dt2_offset);
     }
 }
 

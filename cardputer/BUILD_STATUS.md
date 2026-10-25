@@ -9,3 +9,5 @@
 - Build compatibility correction: pin Espressif32 platform 6.13.0 (Arduino 2.0.17, ESP-IDF 4.4.7) without changing the 45 protected Cardputer source files. Build result for the pinned platform is pending CI.
 - Flash: **none**; no app-only/whole-flash script is included.
 - R61 FIX1 Tab5: unchanged and not used as the base for this snapshot.
+
+- AUDIO_R1 development branch: two guarded engine source modifications; native build pending, physical test not performed. The main-branch Cardputer v0.98 build already passed.

@@ -1,7 +1,7 @@
 {
   "origin": "Layer812/vgmM5",
   "original_source_commit": "3d99db84592f4dca77ab8ea93aa0a2e834d734bc",
-  "source_policy": "45 original source files copied byte-identically; no porting from Tab5",
+  "source_policy": "AUDIO_R1 development branch: 43 v0.98 source files unchanged; only YM2151 and C140/C352 safety arithmetic in fm_engine.c and pcm_engine.c",
   "source_git_blob_sha1": {
     "src/adpcm.c": "45f5a878878dcca14211dc54b0f3433cd875b43f",
     "src/adpcm.h": "057aba5a32df1c4272ca2c58f29b4519a9d95063",
@@ -10,7 +10,7 @@
     "src/composer_sort.hpp": "b46c4da0836d801c0a8559c942f685ab86e1dd6f",
     "src/filer.cpp": "2889ab81cd663eeec0d2d37962d6f29b4784a0ef",
     "src/filer.hpp": "9a1569a341be5cbad66a8d6ee4ca59a5e85e8de7",
-    "src/fm_engine.c": "2138ce5fa4f494730480fc30207bcd7d462883f5",
+    "src/fm_engine.c": "b85d88000de3b763ec86497b7d7d667874c87e03",
     "src/fm_engine.h": "59a723e9dab85a9c3b4758db6b5dd3aa13eff942",
     "src/lzx.c": "71557e47b304ed52f296540b3b06d5e1e767e806",
     "src/lzx.h": "5395ee3eebe67e1a0e2395b9a422e4d694b9ef90",
@@ -30,7 +30,7 @@
     "src/misakiSJIS.cpp": "3e4dc189423f4052e8f17789c954edbb6c59e735",
     "src/misakiSJIS.h": "80555d215cba8808c2e9ad3735d5b5fdec2ec539",
     "src/misakiSJISFontData.h": "fdfc28982282a6c82a4ff05e43b7b7451c17f52f",
-    "src/pcm_engine.c": "500b876d192d0e6efab7961b1ec5de7ebb0fe3fc",
+    "src/pcm_engine.c": "e47fcae9c7a78162b65b11a2cf33cea1827f363e",
     "src/pcm_engine.h": "8a2548ca4b8612b777d51c1ee7bbea68bf9b3ee8",
     "src/pdx.h": "02b5e6e9233d5eecd9f2506cafbcab35ae2042ba",
     "src/psg_engine.c": "c2930e1160b9bd05c65d37f9dd9db466596a4ff8",
@@ -58,5 +58,17 @@
     "composers.bin",
     "systems.bin"
   ],
-  "note": "The six DB binary files were absent from the original repository. build_only.py generates one-byte empty records for offline-only builds when none exist, and never modifies provided DB files."
+  "note": "The six DB binary files were absent from the original repository. build_only.py generates one-byte empty records for offline-only builds when none exist, and never modifies provided DB files.",
+  "audio_r1": {
+    "baseline_main": "2e6f0f9f7ad7a3f5e5544cceb231e60f88cfff64",
+    "original_fm_git_blob": "2138ce5fa4f494730480fc30207bcd7d462883f5",
+    "original_pcm_git_blob": "500b876d192d0e6efab7961b1ec5de7ebb0fe3fc",
+    "modified_files": [
+      "src/fm_engine.c",
+      "src/pcm_engine.c"
+    ],
+    "host_checks": "Clang UBSan arithmetic: 212370 normal phase, 3479 wrapped phase, 2048 PCM cases; no mismatches",
+    "validation": "Native build pending (GitHub Actions). Physical playback not tested.",
+    "note": "No imported Tab5 DT1/DT2 pitch parameters; original Cardputer synthesis and speaker pipeline otherwise unchanged."
+  }
 }
