@@ -25,7 +25,7 @@ jobs:
           base='0f311eb3a2a2fa690a9665cb2f8025c61c622970'
           def old(path): return subprocess.check_output(['git','show',base+':'+path]).decode()
           changed=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
-          wanted={'platformio.ini','src/fm_engine.c','src/pcm_engine.c','src/voice.cpp','.github/workflows/atom-echo-s3r-r6-native.yml'}
+          wanted={'platformio.ini','src/fm_engine.c','src/pcm_engine.c','src/voice.cpp','atoms3r/tests/usb_msc_backend_host.cpp','.github/workflows/atom-echo-s3r-r6-native.yml'}
           assert changed==wanted,(changed-wanted,wanted-changed)
           a=Path('platformio.ini').read_text()
           assert a.split('[env:m5stack-cardputer]',1)[1]==old('platformio.ini').split('[env:m5stack-cardputer]',1)[1]
@@ -46,15 +46,68 @@ jobs:
           s=s.replace('// CoreS3 signed PCM safety only','// CoreS3 and Atom Echo S3R signed PCM safety')
           assert Path('src/pcm_engine.c').read_text()==s,'PCM non-Atom changes'
           original=old('src/voice.cpp')
-          prefix='    MSC.mediaPresent(true);\n    MSC.begin(sector_count, sector_size);\n//    update_namco_volumes(engine, ch);\n    \n    Serial.println("USB Drive Mode Ready.");'
-          replacement='    MSC.mediaPresent(true);\n    MSC.begin(sector_count, sector_size);\n\n    // When the boot button is held, enter_usb_mode() never returns:\n    // USB.begin() in the normal setup path is therefore unreachable.\n    // Start TinyUSB *after* the MSC LUN has been registered.\n    USB.begin();\n\n    Serial.println("USB Drive Mode Ready.");'
-          assert original.count(prefix)==1
-          v=Path('src/voice.cpp').read_text()
-          assert v==original.replace(prefix,replacement),'USB/UI other behavior changed'
-          usb=v.split('void enter_usb_mode()',1)[1].split('#endif // IS_ATOMS3',1)[0]
-          assert usb.index('MSC.begin(sector_count, sector_size)')<usb.index('    USB.begin();')<usb.rindex('    while(1)')
-          print('PASS root FM and PCM restricted to Atom; CoreS3/Cardputer/Tab5, audio pins, USB FS partition unchanged')
+          updated=Path('src/voice.cpp').read_text()
+          def no_msc_body(x):
+              start=x.index('// AtomS3 USB Drive Logic')
+              end=x.index('#endif // IS_ATOMS3',start)+len('#endif // IS_ATOMS3')
+              return x[:start] + x[end:]
+          old_normal=no_msc_body(original)
+          new_normal=no_msc_body(updated)
+          early=('''#if defined(IS_ATOMS3)
+    // Detect boot-held USB drive BEFORE creating audio tasks or mounting FFat.
+    // It is not safe for the firmware and the USB host to own the same FAT.
+    delay(100);
+    M5.update();
+    if (M5.BtnA.isPressed()) {
+        enter_usb_mode(); // never returns
+    }
+#endif
+''')
+          assert new_normal.count(early)==1
+          new_normal=new_normal.replace(early,'')
+          old_late=('''        // 起動直後のピン状態が安定し、M5.update()が正確にボタンを読めるように少し待機
+        delay(100);
+        M5.update();
+        
+        if (M5.BtnA.isPressed()) {
+            Serial.println("Entering USB mode...");
+            enter_usb_mode();
+        }
+        USB.begin();''')
+          new_late=('''        // Boot-held MSC selection has already been handled before audio init.
+        // Normal playback can use the existing CDC path.
+        USB.begin();''')
+          assert new_normal.count(new_late)==1
+          new_normal=new_normal.replace(new_late,old_late)
+          assert new_normal==old_normal,'Changes outside USB mode/Atom setup'
+          usb=updated.split('void enter_usb_mode()',1)[1].split('#endif // IS_ATOMS3',1)[0]
+          assert 'FFat.begin(false)' in usb and 'FFat.begin(true)' not in usb, 'USB autoformat prohibited'
+          assert 'MSC.isWritable(true);' in usb
+          assert usb.index('MSC.begin(s_msc_block_count')<usb.index('USB.begin();')<usb.index('for (;;) {'), 'USB startup before mode loop'
+          assert 'M5.BtnA.wasPressed()' not in usb and 'M5.BtnA.pressedFor(2500)' in usb
+          assert 'wl_read(s_wl_handle, base, s_msc_write_sector, sector)' in updated
+          assert 'wl_erase_range(s_wl_handle, base, sector)' in updated
+          assert 'wl_write(s_wl_handle, base, s_msc_write_sector, sector)' in updated
+          assert 'if (!MSC.begin' in usb and 'if (!USB.begin())' in usb
+          assert updated.index('enter_usb_mode(); // never returns')<updated.index('vgm_engine_init();')
+          print('PASS root FM/PCM isolated, no non-USB code changes, MSC before audio tasks, restart only intentional long hold, no autoformat')
           PY
+      - name: Exercise real MSC callbacks with simulated NOR and WL (512B/4096B)
+        run: |
+          set -euo pipefail
+          mkdir -p atoms3r/reports
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('src/voice.cpp').read_text()
+          start=s.index('USBMSC MSC;')
+          end=s.index('void enter_usb_mode()',start)
+          callback=s[start:end]
+          assert callback.count('static int32_t onWrite')==1
+          assert callback.count('static int32_t onRead')==1
+          Path('atoms3r/reports/usb_msc_callbacks.inc').write_text(callback)
+          PY
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer atoms3r/tests/usb_msc_backend_host.cpp -o /tmp/atom_usb_msc_host
+          ASAN_OPTIONS=detect_leaks=1 /tmp/atom_usb_msc_host
       - name: Actual YM2151 R6 KEY ON 56 + phase edges 32 host tests
         run: |
           set -euo pipefail
