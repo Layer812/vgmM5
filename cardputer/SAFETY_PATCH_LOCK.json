@@ -1,0 +1,10 @@
+{
+  "format": "vgmM5-cardputer-arithmetic-patch-v1",
+  "base_commit": "2e6f0f9f7ad7a3f5e5544cceb231e60f88cfff64",
+  "description": "Only Cardputer YM2151 phase conversion and C140/C352 signed PCM arithmetic are modified. Baseline SOURCE_LOCK.json is preserved.",
+  "patched_git_blob_sha1": {
+    "src/fm_engine.c": "fa54d472d9444fce3c9a5f6541b8880bb8f2a31f",
+    "src/pcm_engine.c": "27d352697c87969e6378aa12db0d2a8aa8469eac",
+    "src/sound_safe_math.h": "4afd9666ac9a0b524322aec8be06110bf9f77d60"
+  }
+}

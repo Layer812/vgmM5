@@ -1,6 +1,7 @@
 #include "fm_engine.h"
 #include "ssg_engine.h"
 #include "pcm_engine.h"
+#include "sound_safe_math.h"
 #include <string.h>
 #include <math.h>
 
@@ -120,7 +121,8 @@ static void update_phase_step(FMSoundEngine *engine, int ch) {
         float dt2_offset = DT2_OFFSET_TAB[dt2 & 3] * engine->phase_step_factor * 0.5f;
         
         // 最終計算 (DT2は乗算ではなく加算)
-        engine->ops[idx].phase_step = (uint32_t)(step_f * m * detune_m + dt2_offset);
+        const float phase_step = step_f * m * detune_m + dt2_offset;
+        engine->ops[idx].phase_step = vgm_safe_ym2151_phase_step(phase_step);
     }
 }
 
