@@ -1099,6 +1099,28 @@ void fm_engine_write_ym2151(FMSoundEngine *engine, uint16_t addr, uint8_t data) 
         }
         return;
     }
+#if defined(IS_CORES3)
+    // CoreS3/Module Audio: Yamaha YM2151 KEY ON hardware bits are
+    // M1(D3), C1(D4), M2(D5), C2(D6) while the physical slot order
+    // remains M1, M2, C1, C2. On an OFF->ON edge, reset phase once.
+    if (addr == 0x08) {
+        const int ch = data & 7;
+        static const uint8_t kon_bit[4] = { 3, 5, 4, 6 };
+        for (int op = 0; op < 4; ++op) {
+            OperatorState *p = &engine->ops[ch * 4 + op];
+            const uint8_t on = (data >> kon_bit[op]) & 1u;
+            if (on && !p->key_on) {
+                if (p->env_state == EG_OFF) p->env_level = EG_MAX;
+                p->phase = 0u;
+                p->env_state = EG_ATTACK;
+            } else if (!on && p->key_on && p->env_state != EG_OFF) {
+                p->env_state = EG_RELEASE;
+            }
+            p->key_on = on;
+        }
+        return;
+    }
+#else
     if (addr == 0x08) { 
         int ch = data & 7;
         if ((data >> 3) & 1) {
@@ -1122,6 +1144,7 @@ void fm_engine_write_ym2151(FMSoundEngine *engine, uint16_t addr, uint8_t data) 
         } else if (engine->ops[ch*4+3].env_state != EG_OFF) engine->ops[ch*4+3].env_state = EG_RELEASE;
         return;
     }
+#endif
     if (addr == 0x0F) {
         engine->noise_enable = (data >> 7) & 1;
         uint8_t n_freq_reg = data & 0x1F;
