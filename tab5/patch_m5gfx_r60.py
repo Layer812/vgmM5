@@ -19,14 +19,12 @@ FILE_B=LIB/'src'/'lgfx'/'v1'/'platforms'/'esp32p4'/'Panel_DSI.inl'
 # .pio/libdeps/.../M5GFX was the OFFICIAL M5GFX 0.2.34 release, not 0.2.33.
 # Preserve fail-closed checks, but accept precisely these two GitHub-verified
 # full-file upstream blob identities; never accept a generic version range.
-PINNED_COMMIT='347a23274081a105cb9fc0fc3bbf0e15c78e79c3'
+# Experimental Tab5 dependency only; original R60 panel timings unchanged.
+# Upstream M5GFX 0.2.35 has exact same patch anchors/blobs as 0.2.34.
+PINNED_COMMIT='65c816a38386062d2c3dc47d41237a9083acbc75'
 UPSTREAM_M5GFX={
- '0.2.33': {
-   'commit': '347a23274081a105cb9fc0fc3bbf0e15c78e79c3',
-   'M5GFX_cpp_blob': '483c2c52ca94c25305e4a6b9277afd6e95176dea',
- },
- '0.2.34': {
-   'commit': 'a8ebd7bdaae2e9bdc2f3c69c25b83a84d819af72',
+ '0.2.35': {
+   'commit': '65c816a38386062d2c3dc47d41237a9083acbc75',
    'M5GFX_cpp_blob': '04736f74649d9c14146b6d9ddca871c301546b0d',
  },
 }
@@ -195,8 +193,7 @@ def apply():
  candidates=[label for label,item in UPSTREAM_M5GFX.items() if item['M5GFX_cpp_blob']==main_blob]
  req(len(candidates)==1,
      'M5GFX.cpp unexpected original Git blob '+main_blob+
-     '; allowed 0.2.33='+UPSTREAM_M5GFX['0.2.33']['M5GFX_cpp_blob']+
-     ' or 0.2.34='+UPSTREAM_M5GFX['0.2.34']['M5GFX_cpp_blob'])
+     '; required 0.2.35='+UPSTREAM_M5GFX['0.2.35']['M5GFX_cpp_blob'])
  resolved_release=candidates[0]
  dsi_blob=git_blob(dat_b)
  req(dsi_blob==PANEL_DSI_BLOB,
