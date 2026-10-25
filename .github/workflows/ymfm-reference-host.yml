@@ -1,0 +1,39 @@
+name: Build standalone ymfm reference renderer (no song uploads)
+
+on:
+  push:
+    branches:
+      - tools/ymfm-reference-host-20261025
+    paths:
+      - .github/workflows/ymfm-reference-host.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Obtain upstream BSD-licensed ymfm
+        run: |
+          git clone --quiet --depth 1 https://github.com/aaronsgiles/ymfm.git upstream-ymfm
+          git -C upstream-ymfm rev-parse HEAD | tee YMFM_UPSTREAM_COMMIT.txt
+      - name: Compile original vgmrender host program
+        run: |
+          cd upstream-ymfm/examples/vgmrender
+          g++ --std=c++14 -O2 -I../../src vgmrender.cpp em_inflate.cpp ../../src/ymfm_misc.cpp ../../src/ymfm_opl.cpp ../../src/ymfm_opm.cpp ../../src/ymfm_opn.cpp ../../src/ymfm_adpcm.cpp ../../src/ymfm_pcm.cpp ../../src/ymfm_ssg.cpp -o vgmrender
+          file vgmrender
+      - name: Preserve executable and license
+        run: |
+          mkdir -p out
+          cp upstream-ymfm/examples/vgmrender/vgmrender out/vgmrender
+          cp YMFM_UPSTREAM_COMMIT.txt out/
+          cp upstream-ymfm/LICENSE out/LICENSE-ymfm.txt
+          sha256sum out/vgmrender | tee out/renderer_sha256.txt
+      - name: Upload Linux host-only reference renderer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ymfm-reference-vgmrender-linux-x64
+          path: out/
+          retention-days: 5
