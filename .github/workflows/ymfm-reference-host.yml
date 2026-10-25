@@ -15,6 +15,10 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
+      - name: Check out exact Cardputer R2 source for offline comparison
+        uses: actions/checkout@v4
+        with:
+          ref: cardputer/ym2151-dt2-r2
       - name: Obtain upstream BSD-licensed ymfm
         run: |
           git clone --quiet --depth 1 https://github.com/aaronsgiles/ymfm.git upstream-ymfm
@@ -31,6 +35,8 @@ jobs:
           cp YMFM_UPSTREAM_COMMIT.txt out/
           cp upstream-ymfm/LICENSE out/LICENSE-ymfm.txt
           sha256sum out/vgmrender | tee out/renderer_sha256.txt
+          mkdir -p out/cardputer-src
+          cp cardputer/src/fm_engine.c cardputer/src/fm_engine.h cardputer/src/ssg_engine.h cardputer/src/pcm_engine.h cardputer/src/sound_safe_math.h out/cardputer-src/
       - name: Upload Linux host-only reference renderer
         uses: actions/upload-artifact@v4
         with:
