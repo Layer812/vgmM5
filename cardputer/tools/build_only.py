@@ -56,8 +56,17 @@ def check_sources():
     if git_blob_sha((ROOT / "partitions.csv").read_bytes()) != manifest["partitions_git_blob_sha1"]:
         raise RuntimeError("Original partition table changed")
     pio = (ROOT / "platformio.ini").read_text(encoding="utf-8")
+    # This is a separate dependency-only Cardputer R6 experiment.
+    # Reject unpinned upstream libraries and preserve original stable 0.2.14 branch.
+    if "Cardputer R6: experimental M5Unified0.2.28" in pio:
+        unified = "https://github.com/M5Stack/M5Unified.git#368ad60807161625aa65baad37a4a3af2a7eccea"
+        gfx = "https://github.com/M5Stack/M5GFX.git#65c816a38386062d2c3dc47d41237a9083acbc75"
+        if pio.count(unified)!=1 or pio.count(gfx)!=1 or "m5stack/M5Unified@0.2.14" in pio:
+            raise RuntimeError("Cardputer unified028 exact pinned versions required")
+    else:
+        unified = "m5stack/M5Unified@0.2.14"
     for required in ("[env:m5stack-cardputer]", "board = m5stack-stamps3",
-                     "m5stack/M5Unified@0.2.14", "m5stack/M5Cardputer@^1.1.1",
+                     unified, "m5stack/M5Cardputer@^1.1.1",
                      "platform = espressif32 @ 6.13.0",
                      "board_build.partitions = partitions.csv",
                      "board_build.embed_txtfiles ="):

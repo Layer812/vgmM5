@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Check out protected source snapshot
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Python
         uses: actions/setup-python@v5
@@ -33,6 +35,48 @@ jobs:
         run: |
           cc -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer cardputer/tools/sound_arithmetic_host.c -lm -o /tmp/vgmm5_sound_arithmetic_host
           ASAN_OPTIONS=detect_leaks=1 /tmp/vgmm5_sound_arithmetic_host
+
+      - name: Audit Cardputer R5 source + Yamaha KON/phase changes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          original=subprocess.check_output(['git','show','8ab06296e1b133351376b67d73cf7c0416334539:cardputer/src/fm_engine.c'])
+          updated=Path('cardputer/src/fm_engine.c').read_bytes()
+          first=b'    if (addr == 0x08) {'
+          next_=b'    if (addr == 0x0F) {'
+          a=original.index(first,original.index(b'void fm_engine_write_ym2151('))
+          b=original.index(next_,a)
+          c=updated.index(first,updated.index(b'void fm_engine_write_ym2151('))
+          d=updated.index(next_,c)
+          assert original[:a]==updated[:c] and original[b:]==updated[d:], 'Non-KON R5 FM regression'
+          patch=updated[c:d]
+          assert b'kon_bit[4] = { 3, 5, 4, 6 }' in patch
+          assert b'if (on && !p->key_on)' in patch and b'p->phase = 0u' in patch
+          print('PASS: old R5 FM outside YM2151 KON handler byte-identical')
+          PY
+
+      - name: Cardputer YM2151 KON mapping + phase edge host regressions
+        run: |
+          set -euo pipefail
+          mkdir -p cardputer/reports/shims
+          printf '#pragma once\n#define IRAM_ATTR\n#define DRAM_ATTR\n' > cardputer/reports/shims/esp_attr.h
+          : > cardputer/reports/shims/esp_partition.h
+          : > cardputer/reports/shims/esp_spi_flash.h
+          git show 8ab06296e1b133351376b67d73cf7c0416334539:cardputer/src/fm_engine.c > cardputer/reports/fm_engine_R5.c
+          for kind in R5 R6; do
+            source="cardputer/reports/fm_engine_R5.c"
+            if [ "$kind" = R6 ]; then source="cardputer/src/fm_engine.c"; fi
+            gcc -std=gnu11 -O2 -ffunction-sections -fdata-sections -Icardputer/reports/shims -Icardputer/src -c "$source" -o "cardputer/reports/fm_${kind}.o"
+            gcc -std=gnu11 -O2 -ffunction-sections -fdata-sections -Icardputer/reports/shims -Icardputer/src -c cardputer/tools/ym2151_kon_phase_host.c -o "cardputer/reports/test_${kind}.o"
+            gcc -Wl,--gc-sections "cardputer/reports/fm_${kind}.o" "cardputer/reports/test_${kind}.o" -lm -o "cardputer/reports/cardputer_ym2151_${kind}_host"
+          done
+          cardputer/reports/cardputer_ym2151_R6_host --test
+          if cardputer/reports/cardputer_ym2151_R5_host --test 2>cardputer/reports/R5_expected_failure.txt; then
+            echo "FAIL: old R5 unexpectedly passes Yamaha KON reference"; exit 1
+          fi
+          grep -q 'KON FAIL' cardputer/reports/R5_expected_failure.txt
+          echo "PASS: R5 defect reproduced; R6 KON map and edge/phase tests passed"
 
       - name: Compile Cardputer offline edition (never flash)
         run: python cardputer/tools/build_only.py
