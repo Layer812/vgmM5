@@ -771,27 +771,25 @@ void fm_engine_init(FMSoundEngine *engine, uint32_t sample_rate, uint32_t clock,
 
 static uint8_t YM2151_OP_MAP[4] = { 0, 1, 2, 3 }; // M1(0), M2(1), C1(2), C2(3)
 void fm_engine_write_ym2151(FMSoundEngine *engine, uint16_t addr, uint8_t data) {
-    if (addr == 0x08) { 
-        int ch = data & 7;
-        if ((data >> 3) & 1) {
-            if (engine->ops[ch*4+0].env_state == EG_OFF) engine->ops[ch*4+0].env_level = EG_MAX;
-            engine->ops[ch*4+0].env_state = EG_ATTACK;
-        } else if (engine->ops[ch*4+0].env_state != EG_OFF) engine->ops[ch*4+0].env_state = EG_RELEASE;
-
-        if ((data >> 4) & 1) { // M2 (Slot 2)
-            if (engine->ops[ch*4+1].env_state == EG_OFF) engine->ops[ch*4+1].env_level = EG_MAX;
-            engine->ops[ch*4+1].env_state = EG_ATTACK;
-        } else if (engine->ops[ch*4+1].env_state != EG_OFF) engine->ops[ch*4+1].env_state = EG_RELEASE;
-
-        if ((data >> 5) & 1) { // C1 (Slot 3)
-            if (engine->ops[ch*4+2].env_state == EG_OFF) engine->ops[ch*4+2].env_level = EG_MAX;
-            engine->ops[ch*4+2].env_state = EG_ATTACK;
-        } else if (engine->ops[ch*4+2].env_state != EG_OFF) engine->ops[ch*4+2].env_state = EG_RELEASE;
-
-        if ((data >> 6) & 1) { // C2 (Slot 4)
-            if (engine->ops[ch*4+3].env_state == EG_OFF) engine->ops[ch*4+3].env_level = EG_MAX;
-            engine->ops[ch*4+3].env_state = EG_ATTACK;
-        } else if (engine->ops[ch*4+3].env_state != EG_OFF) engine->ops[ch*4+3].env_state = EG_RELEASE;
+    if (addr == 0x08) {
+        const int ch = data & 7;
+        // YM2151 physical slot/parameter order: M1, M2, C1, C2.
+        // Yamaha KON bit order differs: D3=M1, D4=C1, D5=M2, D6=C2.
+        // A held KEY ON must not re-trigger EG_ATTACK or phase every write.
+        // Reset operator phase only on the actual off->on transition.
+        static const uint8_t kon_bit[4] = { 3, 5, 4, 6 };
+        for (int op = 0; op < 4; ++op) {
+            OperatorState *p = &engine->ops[ch * 4 + op];
+            const uint8_t now_on = (data >> kon_bit[op]) & 1u;
+            if (now_on && !p->key_on) {
+                if (p->env_state == EG_OFF) p->env_level = EG_MAX;
+                p->phase = 0u;
+                p->env_state = EG_ATTACK;
+            } else if (!now_on && p->key_on && p->env_state != EG_OFF) {
+                p->env_state = EG_RELEASE;
+            }
+            p->key_on = now_on;
+        }
         return;
     }
     if (addr == 0x0F) {
