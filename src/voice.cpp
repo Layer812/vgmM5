@@ -120,8 +120,12 @@ void enter_usb_mode() {
     MSC.onWrite(onWrite);
     MSC.mediaPresent(true);
     MSC.begin(sector_count, sector_size);
-//    update_namco_volumes(engine, ch);
-    
+
+    // When the boot button is held, enter_usb_mode() never returns:
+    // USB.begin() in the normal setup path is therefore unreachable.
+    // Start TinyUSB *after* the MSC LUN has been registered.
+    USB.begin();
+
     Serial.println("USB Drive Mode Ready.");
     while(1) {
         M5.update();
