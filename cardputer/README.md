@@ -27,7 +27,7 @@ cardputer\RUN_THIS_CARDPUTER_BUILD_ONLY.cmd
 
 - 45ソースファイルと元のパーティション定義のGit Blob SHA-1を `SOURCE_LOCK.json` で固定。
 - Tab5のR61用演算修正・Speaker・LCD初期化はCardputerへ**移植していません**。
-- 本環境ではPlatformIOのESP32-S3ツールチェーンを実行できていないため、**ネイティブビルドPASS・実機再生PASSは主張しません**。旧Cardputer版のM5Burner用コード `KxVPdM380FWTyMmC` は今回生成したBINと同一とは確認できていません。
+- **ESP32-S3ネイティブビルドPASS（2026-10-25）:** GitHub Actions [実行40148553881](https://github.com/Layer812/vgmM5/actions/runs/40148553881)でArduino 2.0.17／Espressif32 6.13.0にてコンパイル成功。ローカルSD再生用の空DB6個を使用。BINは1,240,480バイト、SHA-256：`9ebc9d4004947b3708943b72724fd5371ec030f68755c15fe12dd223347a64a7`。RAM 49.4%、Flash 19.9%。**実機再生は未確認・書込なし。** M5Burnerの配布イメージとの同一性も未確認。
 - `RUN_THIS_CARDPUTER_BUILD_ONLY.cmd` はビルド専用。フラッシュや既存機の消去は行いません。
 
 旧Cardputer版に合わせ、**Espressif32プラットフォーム6.13.0／Arduino 2.0.17に固定**しました。2026年の最新8.0.0／Arduino 3.3.12では旧Flash mmap APIが変更され、元コードのままではコンパイルできなかったためです。`env:m5stack-cardputer` は維持しています。音源共通化や新しいArduino/ESP-IDFへのアップグレードは将来の別作業です。
@@ -40,4 +40,4 @@ Run `cardputer\RUN_THIS_CARDPUTER_BUILD_ONLY.cmd` on Windows with PlatformIO Cor
 
 The original project referenced six embedded online-catalogue `.bin` files which were **not in the repository**. If none are present, the build runner generates six one-byte empty files, allowing an **offline/local microSD build** but leaving **Online catalogue mode empty/unusable**. To use the full online catalogue, supply all six valid DB files that you are entitled to use. Incomplete or mixed DB sets fail validation, and provided DB contents are not fully audited. Never commit proprietary datasets.
 
-The build platform is pinned to **Espressif32 6.13.0 / Arduino 2.0.17**, since unpinned 8.0.0 / Arduino 3.3.12 failed on the original Flash mmap API. Source hashes and the partition layout are protected by `SOURCE_LOCK.json`. No Cardputer native compile or hardware playback has been verified in this environment; do not infer that the previously distributed M5Burner binary is bit-identical to a new build. Third-party source licensing and external media rights remain governed by their original terms.
+The build platform is pinned to **Espressif32 6.13.0 / Arduino 2.0.17**, since unpinned 8.0.0 / Arduino 3.3.12 failed on the original Flash mmap API. Source hashes and the partition layout are protected by `SOURCE_LOCK.json`. Native ESP32-S3 compilation **PASS** on [GitHub Actions run 40148553881](https://github.com/Layer812/vgmM5/actions/runs/40148553881) with Arduino 2.0.17, offline placeholders and no flash. BIN SHA-256: `9ebc9d4004947b3708943b72724fd5371ec030f68755c15fe12dd223347a64a7`. Hardware playback is **not yet verified**; do not infer that the previously distributed M5Burner binary is bit-identical to a new build. Third-party source licensing and external media rights remain governed by their original terms.
