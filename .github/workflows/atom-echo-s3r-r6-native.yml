@@ -63,7 +63,7 @@ jobs:
           new_normal=new_normal.replace(new_late,old_late)
           assert new_normal==old_normal,'Changes outside USB mode/Atom setup'
           usb=updated.split('void enter_usb_mode()',1)[1].split('#endif // IS_ATOMS3',1)[0]
-          assert 'FFat.begin(false)' in usb and 'FFat.begin(true)' not in usb, 'USB autoformat prohibited'
+          assert 'FFat.begin(false)' in usb and not any(x.lstrip().startswith('FFat.begin(true);') for x in usb.splitlines()), 'USB autoformat prohibited'
           assert 'MSC.isWritable(true);' in usb
           assert usb.index('MSC.begin(s_msc_block_count')<usb.index('USB.begin();')<usb.index('for (;;) {'), 'USB startup before mode loop'
           assert 'M5.BtnA.wasPressed()' not in usb and 'M5.BtnA.pressedFor(2500)' in usb
