@@ -172,7 +172,7 @@ void enter_usb_mode() {
     MSC.onStartStop(onStartStop);
     MSC.onRead(onRead);
     MSC.onWrite(onWrite);
-    MSC.isWritable(true);
+    // Arduino 2.0.17 USBMSC is writable by default (no isWritable API).
     MSC.mediaPresent(true);
     if (!MSC.begin(s_msc_block_count, (uint16_t)s_msc_sector_size)) {
         Serial.println("[USBMSC] MSC.begin FAILED");
