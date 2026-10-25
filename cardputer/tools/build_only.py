@@ -39,6 +39,7 @@ def check_sources():
     pio = (ROOT / "platformio.ini").read_text(encoding="utf-8")
     for required in ("[env:m5stack-cardputer]", "board = m5stack-stamps3",
                      "m5stack/M5Unified@0.2.14", "m5stack/M5Cardputer@^1.1.1",
+                     "platform = espressif32 @ 6.13.0",
                      "board_build.partitions = partitions.csv",
                      "board_build.embed_txtfiles ="):
         if required not in pio:

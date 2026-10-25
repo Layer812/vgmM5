@@ -30,7 +30,7 @@ cardputer\RUN_THIS_CARDPUTER_BUILD_ONLY.cmd
 - 本環境ではPlatformIOのESP32-S3ツールチェーンを実行できていないため、**ネイティブビルドPASS・実機再生PASSは主張しません**。旧Cardputer版のM5Burner用コード `KxVPdM380FWTyMmC` は今回生成したBINと同一とは確認できていません。
 - `RUN_THIS_CARDPUTER_BUILD_ONLY.cmd` はビルド専用。フラッシュや既存機の消去は行いません。
 
-依存バージョン・環境名は従来の `env:m5stack-cardputer` を維持しています。音源共通化や新しいArduino/ESP-IDFへのアップグレードは将来の別作業です。
+旧Cardputer版に合わせ、**Espressif32プラットフォーム6.13.0／Arduino 2.0.17に固定**しました。2026年の最新8.0.0／Arduino 3.3.12では旧Flash mmap APIが変更され、元コードのままではコンパイルできなかったためです。`env:m5stack-cardputer` は維持しています。音源共通化や新しいArduino/ESP-IDFへのアップグレードは将来の別作業です。
 
 ## English
 
@@ -40,4 +40,4 @@ Run `cardputer\RUN_THIS_CARDPUTER_BUILD_ONLY.cmd` on Windows with PlatformIO Cor
 
 The original project referenced six embedded online-catalogue `.bin` files which were **not in the repository**. If none are present, the build runner generates six one-byte empty files, allowing an **offline/local microSD build** but leaving **Online catalogue mode empty/unusable**. To use the full online catalogue, supply all six valid DB files that you are entitled to use. Incomplete or mixed DB sets fail validation, and provided DB contents are not fully audited. Never commit proprietary datasets.
 
-Source hashes and the partition layout are protected by `SOURCE_LOCK.json`. No Cardputer native compile or hardware playback has been verified in this environment; do not infer that the previously distributed M5Burner binary is bit-identical to a new build. Third-party source licensing and external media rights remain governed by their original terms.
+The build platform is pinned to **Espressif32 6.13.0 / Arduino 2.0.17**, since unpinned 8.0.0 / Arduino 3.3.12 failed on the original Flash mmap API. Source hashes and the partition layout are protected by `SOURCE_LOCK.json`. No Cardputer native compile or hardware playback has been verified in this environment; do not infer that the previously distributed M5Burner binary is bit-identical to a new build. Third-party source licensing and external media rights remain governed by their original terms.
