@@ -48,7 +48,8 @@ jobs:
           original=old('src/voice.cpp')
           updated=Path('src/voice.cpp').read_text()
           def no_msc_body(x):
-              start=x.index('// AtomS3 USB Drive Logic')
+              start=x.rfind('// Atom',0,x.index('USBMSC MSC;'))
+              assert start>=0
               end=x.index('#endif // IS_ATOMS3',start)+len('#endif // IS_ATOMS3')
               return x[:start] + x[end:]
           old_normal=no_msc_body(original)
