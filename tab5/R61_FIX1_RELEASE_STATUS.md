@@ -1,14 +1,22 @@
-# Tab5 R61 FIX1 — release status
+# vgmM5 Tab5 — リリース情報
 
-Release date: 2026-10-25 (JST)  
-Target: M5Stack Tab5 / ESP32-P4
+**更新日：2026年10月25日**  
+**対象：M5Stack Tab5（ESP32-P4）**
 
-- Reference source: VGMM5_R61_R58_SPEAKER_R60_LCD_FIX1 (229 source-pinned files in preserved package).
-- Source archive SHA-256: `904ce8928cfc49964aabefbcdec3e69535a4486454e9f143380b0510294feb82`.
-- Native-build/flash report archive SHA-256: `935939abefd083b0246e99eebfe2f6c878f9f2e621b5ec30b43d86c58204bf0a`.
-- Built app `firmware.bin`: 868,576 bytes. SHA-256: `099d26838d9c84edc32eb1855489c725e8c5e897e749d29cab509abd140beede`.
-- Native compile: PASS. Device identity + app-only flashing: PASS.
-- Runtime: VGM/MDX music played; intermittent severe click noise persists; reboot/power-state correlation suggested, not proven.
-- This revision also includes the [full Tab5 R61 FIX1 source ZIP](vgmM5_Tab5_R61_FIX1_source.zip), including a safe build-only script. **No verification has linked the M5Burner share-code image to the locally tested BIN.**
-- No sample music, logs with device identifiers, user-specific backup images, bootloaders, or partition-table flashing scripts included.
-- The archive's source and build-only scripts are also published as browsable files under [`tab5/firmware/src/`](firmware/src) and the `tab5/` directory; the legacy root `src/` is unchanged.
+## 公開版
+
+M5Burnerシェアコード：**`8i9Cp1C6ufGpGC5J`**
+
+今回の更新は、**新しいM5Unified（0.2.28）・M5GFX（0.2.35）への対応**と、**YM2151を含む一部音源処理の修正・改善**です。Tab5実機で再生と音質を確認しています。
+
+- 最新Tab5ソース：[firmware/src/](firmware/src/) / [GitHub安定版](https://github.com/Layer812/vgmM5/tree/stable/tab5-r61-ym2151-unified028-20261025)
+- ESP32-P4ネイティブビルド：[GitHub Actions PASS](https://github.com/Layer812/vgmM5/actions/runs/40199799670)
+- GitHubビルドBINのSHA-256：`ea03ec333db0a220fe4f497130bd0f493ed489d7c651766bddb6f3491ad722fb`
+
+M5Burner配信BINとGitHubビルドBINのハッシュ一致は未照合です。
+
+## 旧版の保管
+
+[R61 FIX1のソースZIP](vgmM5_Tab5_R61_FIX1_source.zip)と旧ビルド専用スクリプトは、履歴として残しています。これらは**現行版の依存ライブラリを使用するものではありません**。
+
+他機種のソースやファームウェアは、今回のTab5公開情報更新の対象外です。
