@@ -41,6 +41,24 @@ int main(void) {
     assert(vgm_safe_ym2151_phase_step(INFINITY) == 0u);
     assert(vgm_safe_ym2151_phase_step(NAN) == 0u);
     assert(vgm_safe_ym2151_phase_step(-1.0f) == 0u);
+    // Official YM2151 DT2 is measured in 1/64 of a semitone, not Hz.
+    const int dt2_units[4] = {0, 384, 500, 608};
+    for (int dt2 = 0; dt2 < 4; ++dt2) {
+        const double ratio = pow(2.0, (double)dt2_units[dt2] / 768.0);
+        for (int i = 1; i <= 2048; ++i) {
+            const float input = (float)i * 0.75f;
+            const float got = vgm_ym2151_apply_dt2(input, (uint8_t)dt2);
+            const float expected = (float)((double)input * ratio);
+            assert(fabsf(got - expected) < 0.0003f);
+            if (dt2 == 0) assert(got == input); // R1 unchanged path
+        }
+        // The same DT2 ratio must apply across octaves; the old constant
+        // addition erroneously changed the interval with the base note.
+        const float low = vgm_ym2151_apply_dt2(220.0f, (uint8_t)dt2);
+        const float high = vgm_ym2151_apply_dt2(880.0f, (uint8_t)dt2);
+        assert(fabsf(high - 4.0f * low) < 0.001f);
+    }
+    puts("PASS: YM2151 DT2 pitch ratios and normal-notes R1 parity (ASan/UBSan)");
     puts("PASS: YM2151 normal/wrapped phases, C140/C352 sample decode (ASan/UBSan)");
     return 0;
 }

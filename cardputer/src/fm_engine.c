@@ -114,14 +114,12 @@ static void update_phase_step(FMSoundEngine *engine, int ch) {
         static const float DT1_TAB[8] = { 1.0f, 1.002f, 1.004f, 1.006f, 1.0f, 0.998f, 0.996f, 0.994f };
         float detune_m = DT1_TAB[dt1 & 7];
 
-        // DT2 (実機仕様に基づく加算オフセット)
-        int dt2 = engine->ops[idx].dt2;
-        // MAME等の解析に基づく加算値（位相ステップのスケールに合わせる）
-        static const float DT2_OFFSET_TAB[4] = { 0.0f, 384.0f, 500.0f, 608.0f }; 
-        float dt2_offset = DT2_OFFSET_TAB[dt2 & 3] * engine->phase_step_factor * 0.5f;
-        
-        // 最終計算 (DT2は乗算ではなく加算)
-        const float phase_step = step_f * m * detune_m + dt2_offset;
+        // YM2151 DT2 is a pitch offset (+600/+781.25/+950 cents),
+        // not a fixed Hz/phase-step addition. It scales with the note.
+        // DT2=0 bypasses multiplication to preserve R1's normal notes.
+        const float phase_step = vgm_ym2151_apply_dt2(
+            step_f * m * detune_m, engine->ops[idx].dt2
+        );
         engine->ops[idx].phase_step = vgm_safe_ym2151_phase_step(phase_step);
     }
 }
