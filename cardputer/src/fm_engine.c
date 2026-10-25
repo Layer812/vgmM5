@@ -1755,10 +1755,10 @@ inline int32_t calc_op_ym2151_internal(
     // YM2151で確定する条件の簡約化:
     // - active_phase_step は常に op->phase_step
     // - pm_amount 加算は元の汎用OPN計算式を維持
-    // - modulation *= 2
+    // - YM2151 operator output is 2x the native 13-bit value; no additional x2
     uint32_t active_phase_step = op->phase_step;
     
-    modulation *= 2;
+    // The 12-bit phase domain is already matched by the 14-bit output level.
     if (pm_amount != 0) {
         active_phase_step += (((int32_t)(active_phase_step >> 10)) * pm_amount) >> 3;
     }
