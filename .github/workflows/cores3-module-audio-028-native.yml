@@ -1,0 +1,107 @@
+name: CoreS3 Module Audio M5Unified 0.2.28 YM2151 candidate (NO FLASH)
+
+on:
+  push:
+    branches:
+      - dev/cores3-module-audio-unified028-20261025
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Protect core program and external Module Audio path
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          base='1645a693941321ce460239bc39d296d60952f4a3'
+          changed=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          allowed={'platformio.ini','src/fm_engine.c','cores3/tests/ym2151_kon_phase_host.c','.github/workflows/cores3-module-audio-028-native.yml'}
+          assert changed==allowed,changed
+          old=subprocess.check_output(['git','show',base+':src/fm_engine.c'])
+          new=Path('src/fm_engine.c').read_bytes()
+          needle=b'    if (addr == 0x08) {'
+          end=b'    if (addr == 0x0F) {'
+          st=old.index(needle,old.index(b'void fm_engine_write_ym2151('))
+          en=old.index(end,st)
+          st2=new.index(b'#if defined(IS_CORES3)',new.index(b'void fm_engine_write_ym2151('))
+          en2=new.index(end,st2)
+          expected=new[st2:en2]
+          assert old[:st]==new[:st2] and old[en:]==new[en2:]
+          assert b'kon_bit[4] = { 3, 5, 4, 6 }' in expected
+          assert b'if (on && !p->key_on)' in expected and b'p->phase = 0u;' in expected
+          assert b'#else\n'+old[st:en].rstrip(b'\n')+b'\n#endif\n' in expected, 'unprotected other boards'
+          old_cfg=subprocess.check_output(['git','show',base+':platformio.ini']).decode()
+          cfg=Path('platformio.ini').read_text()
+          pre=cfg.split('[env:m5stack-cores3]')[0]
+          pre_old=old_cfg.split('[env:m5stack-cores3]')[0]
+          assert pre.startswith(pre_old)
+          assert 'https://github.com/M5Stack/M5Unified.git#368ad60807161625aa65baad37a4a3af2a7eccea' in cfg
+          assert 'https://github.com/M5Stack/M5GFX.git#65c816a38386062d2c3dc47d41237a9083acbc75' in cfg
+          assert Path('src/vgm_engine.cpp').read_bytes()==subprocess.check_output(['git','show',base+':src/vgm_engine.cpp'])
+          print('PASS exact CoreS3-only YM2151 change; Module Audio I2S/ES8388 playback untouched; other boards source preserved')
+          PY
+      - name: Actual CoreS3 FM host KEY ON / phase edge tests
+        run: |
+          set -euo pipefail
+          mkdir -p cores3/reports/shims
+          printf '#pragma once\n#define IRAM_ATTR\n#define DRAM_ATTR\n' > cores3/reports/shims/esp_attr.h
+          : > cores3/reports/shims/esp_partition.h
+          : > cores3/reports/shims/esp_spi_flash.h
+          for kind in original cores3; do
+            def=''
+            if [ "$kind" = cores3 ]; then def="-DIS_CORES3=1"; fi
+            gcc -std=gnu11 -O2 -ffunction-sections -fdata-sections -Icores3/reports/shims -Isrc $def -c src/fm_engine.c -o cores3/reports/fm_${kind}.o
+            gcc -std=gnu11 -O2 -ffunction-sections -fdata-sections -Icores3/reports/shims -Isrc $def -c cores3/tests/ym2151_kon_phase_host.c -o cores3/reports/test_${kind}.o
+            gcc -Wl,--gc-sections cores3/reports/fm_${kind}.o cores3/reports/test_${kind}.o -lm -o cores3/reports/fm_${kind}_test
+          done
+          cores3/reports/fm_cores3_test --test
+          if cores3/reports/fm_original_test --test 2>cores3/reports/original_expected_failure.log;then echo 'baseline unexpectedly passed';exit 1;fi
+          grep -q 'KON FAIL' cores3/reports/original_expected_failure.log
+          echo 'PASS 56 KON mapping + 32 phase-edge cases CoreS3, old path correctly fails'
+      - name: Install ESP32-S3 native build platform
+        run: |
+          python -m pip install --disable-pip-version-check platformio
+          pio pkg install -e m5stack-cores3
+      - name: Validate pin versions
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.pio/libdeps/m5stack-cores3')
+          m=(p/'M5Unified'/'library.properties').read_text()
+          g=(p/'M5GFX'/'library.properties').read_text()
+          assert 'version=0.2.28' in m,m
+          assert 'version=0.2.35' in g,g
+          print('PASS M5Unified 0.2.28 / M5GFX 0.2.35')
+          PY
+      - name: Build real CoreS3 firmware without flashing
+        run: pio run -e m5stack-cores3
+      - name: Validate native CoreS3 image
+        run: |
+          mkdir -p cores3/artifacts
+          python - <<'PY'
+          import hashlib,shutil
+          from pathlib import Path
+          p=Path('.pio/build/m5stack-cores3/firmware.bin')
+          assert p.is_file() and 100000<p.stat().st_size<0x800000 and p.read_bytes()[:1]==b'\xe9'
+          shutil.copyfile(p,'cores3/artifacts/firmware.bin')
+          print('PASS',p.stat().st_size,'bytes, SHA256',hashlib.sha256(p.read_bytes()).hexdigest())
+          PY
+          sha256sum cores3/artifacts/firmware.bin > cores3/artifacts/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: vgmM5-CoreS3-ModuleAudio-Unified028-native-no-flash
+          path: cores3/artifacts/
+          retention-days: 14

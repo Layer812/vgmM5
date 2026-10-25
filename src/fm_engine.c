@@ -1,4 +1,7 @@
 #include "fm_engine.h"
+#if defined(IS_CORES3)
+#include "sound_safe_math.h" // Cardputer R5 verified helpers, CoreS3 only
+#endif
 #include "ssg_engine.h"
 #include "pcm_engine.h"
 #include <string.h>
@@ -77,7 +80,11 @@ static void init_tables() {
 }
 static void update_phase_step(FMSoundEngine *engine, int ch) {
     int kc = engine->kc[ch];
+#if defined(IS_CORES3)
+    int kf = vgm_ym2151_decode_kf(engine->kf[ch]); // Yamaha KF bits D7..D2
+#else
     int kf = engine->kf[ch] & 0x3F;
+#endif
 
     int note = kc & 0x0F;
     int octave = (kc >> 4) & 0x07;
@@ -113,6 +120,12 @@ static void update_phase_step(FMSoundEngine *engine, int ch) {
         static const float DT1_TAB[8] = { 1.0f, 1.002f, 1.004f, 1.006f, 1.0f, 0.998f, 0.996f, 0.994f };
         float detune_m = DT1_TAB[dt1 & 7];
 
+#if defined(IS_CORES3)
+        // Cardputer R5: YM2151 DT2 is a *pitch ratio*, not a fixed phase offset.
+        const float phase_step = vgm_ym2151_apply_dt2(
+            step_f * m * detune_m, engine->ops[idx].dt2);
+        engine->ops[idx].phase_step = vgm_safe_ym2151_phase_step(phase_step);
+#else
         // DT2 (実機仕様に基づく加算オフセット)
         int dt2 = engine->ops[idx].dt2;
         // MAME等の解析に基づく加算値（位相ステップのスケールに合わせる）
@@ -121,6 +134,7 @@ static void update_phase_step(FMSoundEngine *engine, int ch) {
         
         // 最終計算 (DT2は乗算ではなく加算)
         engine->ops[idx].phase_step = (uint32_t)(step_f * m * detune_m + dt2_offset);
+#endif
     }
 }
 
@@ -1099,6 +1113,28 @@ void fm_engine_write_ym2151(FMSoundEngine *engine, uint16_t addr, uint8_t data) 
         }
         return;
     }
+#if defined(IS_CORES3)
+    // CoreS3/Module Audio: Yamaha YM2151 KEY ON hardware bits are
+    // M1(D3), C1(D4), M2(D5), C2(D6) while the physical slot order
+    // remains M1, M2, C1, C2. On an OFF->ON edge, reset phase once.
+    if (addr == 0x08) {
+        const int ch = data & 7;
+        static const uint8_t kon_bit[4] = { 3, 5, 4, 6 };
+        for (int op = 0; op < 4; ++op) {
+            OperatorState *p = &engine->ops[ch * 4 + op];
+            const uint8_t on = (data >> kon_bit[op]) & 1u;
+            if (on && !p->key_on) {
+                if (p->env_state == EG_OFF) p->env_level = EG_MAX;
+                p->phase = 0u;
+                p->env_state = EG_ATTACK;
+            } else if (!on && p->key_on && p->env_state != EG_OFF) {
+                p->env_state = EG_RELEASE;
+            }
+            p->key_on = on;
+        }
+        return;
+    }
+#else
     if (addr == 0x08) { 
         int ch = data & 7;
         if ((data >> 3) & 1) {
@@ -1122,6 +1158,7 @@ void fm_engine_write_ym2151(FMSoundEngine *engine, uint16_t addr, uint8_t data) 
         } else if (engine->ops[ch*4+3].env_state != EG_OFF) engine->ops[ch*4+3].env_state = EG_RELEASE;
         return;
     }
+#endif
     if (addr == 0x0F) {
         engine->noise_enable = (data >> 7) & 1;
         uint8_t n_freq_reg = data & 0x1F;
@@ -1755,10 +1792,12 @@ inline int32_t calc_op_ym2151_internal(
     // YM2151で確定する条件の簡約化:
     // - active_phase_step は常に op->phase_step
     // - pm_amount 加算は元の汎用OPN計算式を維持
-    // - modulation *= 2
+    // - CoreS3: preserve Cardputer R5 phase-domain modulation without extra x2
     uint32_t active_phase_step = op->phase_step;
     
+#if !defined(IS_CORES3)
     modulation *= 2;
+#endif
     if (pm_amount != 0) {
         active_phase_step += (((int32_t)(active_phase_step >> 10)) * pm_amount) >> 3;
     }
