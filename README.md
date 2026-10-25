@@ -18,7 +18,7 @@ vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(MXDRV)ファイ�
 #### 対応デバイスと機能 (Supported Devices & Features)
 | 機能 (Features) \ デバイス (Device) | M5Stack AtomS3R (Echo) | M5Stack Cardputer | M5Stack CoreS3 | + [Module Audio](https://docs.m5stack.com/ja/module/Module-Audio) | [M5 TAB5](https://docs.m5stack.com/ja/core/Tab5) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **ステータス (Status)** | ✔️ 対応済 | ✔️ 対応済 | [✔️ R6安定版](cores3/README.md) | [✔️ R6安定版](cores3/README.md) | [✔️ 安定版](tab5/README.md) |
+| **ステータス (Status)** | ✔️ 対応済 | [✔️ R6公開版](cardputer/README.md) | [✔️ R6安定版](cores3/README.md) | [✔️ R6安定版](cores3/README.md) | [✔️ 安定版](tab5/README.md) |
 | **VGM/VGZ 再生** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **MDX 再生** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **内蔵フラッシュ (USB Drive)** | ✔️ | - | - | - | - |
@@ -46,8 +46,13 @@ vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(MXDRV)ファイ�
 | **Namco C140** | ✔️ 対応済 (Supported |
 | **Namco C352** | ✔️ 対応済 (Supported) |
 
-※ 元のv0.98系に加え、CoreS3とTab5では更新版のソースを公開しています。
+※ 従来のv0.98系に加え、Cardputer R6・CoreS3 R6・Tab5の更新版ソースを公開しています。
 ※ ステータスが「対応済」となっていても、もし再生時に音がおかしい・違和感があると感じた場合は、曲名とおかしい点を優しく申告していただければ対応いたします！
+
+#### M5Stack Cardputer版（2026年10月26日 更新）
+新しいM5Unified 0.2.28／M5GFX 0.2.35に対応し、YM2151の発音・位相など音源処理を修正しました。R6のESP32-S3ネイティブビルドと回帰テストはPASSしています。
+
+M5Burnerシェアコード：`rqz95QwaAsM6bN3O`（作者提供）。[Cardputer版の説明](cardputer/README.md)をご覧ください。
 
 #### M5Stack CoreS3版（2026年10月26日 更新）
 Module Audio（ES8388）を接続した場合と、接続せず内蔵スピーカーを使用した場合の**両方で実機動作を確認**しました。
@@ -74,7 +79,7 @@ ESP32-P4採用のTab5に対応。VGM/VGZ・MDXのmicroSD再生、タッチ操作
 
 - **M5Stack Tab5用 シェアコード:** `8i9Cp1C6ufGpGC5J`
 - **M5Stack CoreS3用 シェアコード:** `wEBeKwOKFsqAmlsu`（Module Audioあり・なし共通）
-- **M5Stack Cardputer用 シェアコード:** `KxVPdM380FWTyMmC`
+- **M5Stack Cardputer用 シェアコード:** `rqz95QwaAsM6bN3O`
 - **M5Stack Atom Echo S3R用 シェアコード:** `zoSd8neRRq7ZQFjB`
 
 ---
@@ -94,7 +99,7 @@ CoreS3版はタッチパネル操作と内蔵スピーカー再生に対応し�
 
 #### 💻 M5Stack Cardputer
 
-**[Cardputer v0.98 独立ソース・ビルド手順](cardputer/README.md)**（ネイティブビルドPASS・実機未確認）（既存版を保護した別ディレクトリ。オンラインDB欠落時はローカル再生用ビルド）
+**[Cardputer R6 ソース・ビルド手順](cardputer/README.md)**（ESP32-S3ネイティブビルドPASS。オンラインDBを同梱しない場合はローカル再生用ビルド）
 Cardputer版はMicroSDカード内のファイル再生に加え、オンラインモードでの再生に対応しています。
 
 **基本操作:**
@@ -125,7 +130,7 @@ vgmM5 is a VGM/VGZ and MDX (X68000) file player designed specifically for the M5
 
 | Features \ Device | M5Stack AtomS3R (Echo) | M5Stack Cardputer | M5Stack CoreS3 | + [Module Audio](https://docs.m5stack.com/ja/module/Module-Audio) | [M5 TAB5](https://docs.m5stack.com/ja/core/Tab5) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Status** | ✔️ Supported | ✔️ Supported | [✔️ R6 Stable](cores3/README.md) | [✔️ R6 Stable](cores3/README.md) | [✔️ Stable](tab5/README.md) |
+| **Status** | ✔️ Supported | [✔️ R6 Published](cardputer/README.md) | [✔️ R6 Stable](cores3/README.md) | [✔️ R6 Stable](cores3/README.md) | [✔️ Stable](tab5/README.md) |
 | **VGM/VGZ Playback** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **MDX Playback** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **Internal Flash (USB Drive)** | ✔️ | - | - | - | - |
@@ -136,8 +141,13 @@ vgmM5 is a VGM/VGZ and MDX (X68000) file player designed specifically for the M5
 #### Supported Sound Chips
 *(Please refer to the Supported Sound Chips table in the Japanese section above)*
 
-*Note: Updated CoreS3 and Tab5 source editions are available alongside the original v0.98 implementation.*
+*Note: Updated Cardputer R6, CoreS3 R6 and Tab5 sources are available alongside the original v0.98 implementation.*
 *Even if a chip is listed as "Supported," if you notice any strange sounds or something feels off during playback, please kindly report it (gently) with the song title and the issue, and I will address it!*
+
+#### M5Stack Cardputer edition (updated October 26, 2026)
+Updated to M5Unified 0.2.28 and M5GFX 0.2.35, with YM2151 note-on and phase corrections. The R6 native ESP32-S3 build and host regression tests passed.
+
+M5Burner share code: `rqz95QwaAsM6bN3O` (author-supplied). See the [Cardputer documentation](cardputer/README.md).
 
 #### M5Stack CoreS3 edition (updated October 26, 2026)
 Verified on real CoreS3 hardware **with and without the external Module Audio (ES8388)**, using the internal speaker when no module is attached.
@@ -164,7 +174,7 @@ For a quick and easy start, you can flash the firmware directly to your device u
 
 - **M5Stack Tab5 Share Code:** `8i9Cp1C6ufGpGC5J`
 - **M5Stack CoreS3 Share Code:** `wEBeKwOKFsqAmlsu` (with or without Module Audio)
-- **M5Stack Cardputer Share Code:** `KxVPdM380FWTyMmC`
+- **M5Stack Cardputer Share Code:** `rqz95QwaAsM6bN3O`
 - **M5Stack Atom Echo S3R Share Code:** `zoSd8neRRq7ZQFjB`
 ---
 
@@ -183,7 +193,7 @@ The CoreS3 R6 version supports touch input and the built-in speaker, with option
 
 #### 💻 M5Stack Cardputer
 
-**[Cardputer v0.98 independent source/build guide](cardputer/README.md)** (preserves the original; online catalog requires separately supplied DB files).
+**[Cardputer R6 source/build guide](cardputer/README.md)** (offline/native build PASS; online catalog requires separately supplied DB files).
 The Cardputer version plays files directly from a MicroSD card and supports streaming via Online Mode.
 
 **Basic Controls:**
