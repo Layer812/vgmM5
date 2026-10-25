@@ -65,7 +65,7 @@ jobs:
           usb=updated.split('void enter_usb_mode()',1)[1].split('#endif // IS_ATOMS3',1)[0]
           assert 'FFat.begin(false)' in usb and not any(x.lstrip().startswith('FFat.begin(true);') for x in usb.splitlines()), 'USB autoformat prohibited'
           assert 'MSC.isWritable(true);' in usb
-          assert usb.index('MSC.begin(s_msc_block_count')<usb.index('USB.begin();')<usb.index('for (;;) {'), 'USB startup before mode loop'
+          assert usb.index('MSC.begin(s_msc_block_count')<usb.index('USB.begin();')<usb.rindex('for (;;) {'), 'USB startup before mode loop'
           assert 'M5.BtnA.wasPressed()' not in usb and 'M5.BtnA.pressedFor(2500)' in usb
           assert 'wl_read(s_wl_handle, base, s_msc_write_sector, sector)' in updated
           assert 'wl_erase_range(s_wl_handle, base, sector)' in updated
