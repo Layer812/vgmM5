@@ -53,30 +53,11 @@ jobs:
               return x[:start] + x[end:]
           old_normal=no_msc_body(original)
           new_normal=no_msc_body(updated)
-          early=('''#if defined(IS_ATOMS3)
-    // Detect boot-held USB drive BEFORE creating audio tasks or mounting FFat.
-    // It is not safe for the firmware and the USB host to own the same FAT.
-    delay(100);
-    M5.update();
-    if (M5.BtnA.isPressed()) {
-        enter_usb_mode(); // never returns
-    }
-#endif
-''')
+          early="#if defined(IS_ATOMS3)\n    // Detect boot-held USB drive BEFORE creating audio tasks or mounting FFat.\n    // It is not safe for the firmware and the USB host to own the same FAT.\n    delay(100);\n    M5.update();\n    if (M5.BtnA.isPressed()) {\n        enter_usb_mode(); // never returns\n    }\n#endif\n"
           assert new_normal.count(early)==1
           new_normal=new_normal.replace(early,'')
-          old_late=('''        // 起動直後のピン状態が安定し、M5.update()が正確にボタンを読めるように少し待機
-        delay(100);
-        M5.update();
-        
-        if (M5.BtnA.isPressed()) {
-            Serial.println("Entering USB mode...");
-            enter_usb_mode();
-        }
-        USB.begin();''')
-          new_late=('''        // Boot-held MSC selection has already been handled before audio init.
-        // Normal playback can use the existing CDC path.
-        USB.begin();''')
+          old_late="        // 起動直後のピン状態が安定し、M5.update()が正確にボタンを読めるように少し待機\n        delay(100);\n        M5.update();\n        \n        if (M5.BtnA.isPressed()) {\n            Serial.println(\"Entering USB mode...\");\n            enter_usb_mode();\n        }\n        USB.begin();"
+          new_late="        // Boot-held MSC selection has already been handled before audio init.\n        // Normal playback can use the existing CDC path.\n        USB.begin();"
           assert new_normal.count(new_late)==1
           new_normal=new_normal.replace(new_late,old_late)
           assert new_normal==old_normal,'Changes outside USB mode/Atom setup'
