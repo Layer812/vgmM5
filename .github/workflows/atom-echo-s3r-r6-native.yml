@@ -1,0 +1,115 @@
+name: Atom Echo S3R R6 audio+Unified028+USBMSC (NO FLASH)
+on:
+  push:
+    branches:
+      - dev/atom-echo-s3r-r6-unified028-usb-20261026
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  atom-r6-native:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Protect other devices, audio I2S, FFat and USB startup
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          base='0f311eb3a2a2fa690a9665cb2f8025c61c622970'
+          def old(path): return subprocess.check_output(['git','show',base+':'+path]).decode()
+          changed=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          wanted={'platformio.ini','src/fm_engine.c','src/pcm_engine.c','src/voice.cpp','.github/workflows/atom-echo-s3r-r6-native.yml'}
+          assert changed==wanted,(changed-wanted,wanted-changed)
+          a=Path('platformio.ini').read_text()
+          assert a.split('[env:m5stack-cardputer]',1)[1]==old('platformio.ini').split('[env:m5stack-cardputer]',1)[1]
+          assert 'espressif32 @ 6.13.0' in a.split('[env:m5stack-cardputer]')[0]
+          assert 'M5Unified.git#368ad60807161625aa65baad37a4a3af2a7eccea' in a
+          assert 'M5GFX.git#65c816a38386062d2c3dc47d41237a9083acbc75' in a
+          for path in ('src/vgm_engine.cpp','src/mdx_engine.cpp','src/mdx_fm.c','src/sound_safe_math.h','partitions_atoms3.csv','partitions.csv'):
+              assert Path(path).read_text()==old(path),path
+          assert 'app0,       app,  ota_0,   0x10000,  0x300000,' in old('partitions_atoms3.csv')
+          assert 'ffat,       data, fat,     0x510000, 0x2F0000,' in old('partitions_atoms3.csv')
+          s=old('src/fm_engine.c')
+          s=s.replace('#if defined(IS_CORES3)', '#if defined(IS_CORES3) || defined(IS_ATOMS3)')
+          s=s.replace('#if !defined(IS_CORES3)', '#if !defined(IS_CORES3) && !defined(IS_ATOMS3)')
+          s=s.replace('// Cardputer R5 verified helpers, CoreS3 only','// Cardputer R5 verified helpers, CoreS3 and Atom Echo S3R')
+          assert Path('src/fm_engine.c').read_text()==s,'FM non-Atom changes'
+          s=old('src/pcm_engine.c')
+          s=s.replace('#if defined(IS_CORES3)', '#if defined(IS_CORES3) || defined(IS_ATOMS3)')
+          s=s.replace('// CoreS3 signed PCM safety only','// CoreS3 and Atom Echo S3R signed PCM safety')
+          assert Path('src/pcm_engine.c').read_text()==s,'PCM non-Atom changes'
+          original=old('src/voice.cpp')
+          prefix='    MSC.mediaPresent(true);\n    MSC.begin(sector_count, sector_size);\n//    update_namco_volumes(engine, ch);\n    \n    Serial.println("USB Drive Mode Ready.");'
+          replacement='    MSC.mediaPresent(true);\n    MSC.begin(sector_count, sector_size);\n\n    // When the boot button is held, enter_usb_mode() never returns:\n    // USB.begin() in the normal setup path is therefore unreachable.\n    // Start TinyUSB *after* the MSC LUN has been registered.\n    USB.begin();\n\n    Serial.println("USB Drive Mode Ready.");'
+          assert original.count(prefix)==1
+          v=Path('src/voice.cpp').read_text()
+          assert v==original.replace(prefix,replacement),'USB/UI other behavior changed'
+          usb=v.split('void enter_usb_mode()',1)[1].split('#endif // IS_ATOMS3',1)[0]
+          assert usb.index('MSC.begin(sector_count, sector_size)')<usb.index('    USB.begin();')<usb.index('    while(1)')
+          print('PASS root FM and PCM restricted to Atom; CoreS3/Cardputer/Tab5, audio pins, USB FS partition unchanged')
+          PY
+      - name: Actual YM2151 R6 KEY ON 56 + phase edges 32 host tests
+        run: |
+          set -euo pipefail
+          mkdir -p atoms3r/reports/shims
+          printf '#pragma once\n#define IRAM_ATTR\n#define DRAM_ATTR\n' > atoms3r/reports/shims/esp_attr.h
+          : > atoms3r/reports/shims/esp_partition.h
+          : > atoms3r/reports/shims/esp_spi_flash.h
+          for kind in old atom; do
+            flag=''
+            if [ "$kind" = atom ]; then flag='-DIS_ATOMS3=1'; fi
+            gcc -std=gnu11 -O2 -ffunction-sections -fdata-sections -Iatoms3r/reports/shims -Isrc $flag -c src/fm_engine.c -o atoms3r/reports/fm_$kind.o
+            gcc -std=gnu11 -O2 -ffunction-sections -fdata-sections -Iatoms3r/reports/shims -Isrc $flag -c cores3/tests/ym2151_kon_phase_host.c -o atoms3r/reports/test_$kind.o
+            gcc -Wl,--gc-sections atoms3r/reports/fm_$kind.o atoms3r/reports/test_$kind.o -lm -o atoms3r/reports/ym2151_$kind
+          done
+          atoms3r/reports/ym2151_atom --test
+          if atoms3r/reports/ym2151_old --test 2>atoms3r/reports/R5_expected_failure.txt;then exit 1; fi
+          grep -q 'KON FAIL' atoms3r/reports/R5_expected_failure.txt
+          echo 'PASS 88 actual Atom FM regression cases'
+      - name: YM2151 pitch/routing and PCM safe-math host ASan/UBSan
+        run: |
+          gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer cores3/tests/sound_arithmetic_host.c -lm -o /tmp/atoms3r_math
+          ASAN_OPTIONS=detect_leaks=1 /tmp/atoms3r_math
+      - name: Install pinned PlatformIO dependencies
+        run: |
+          python -m pip install --disable-pip-version-check platformio
+          pio pkg install -e m5stack-atoms3
+      - name: Verify actual Unified 0.2.28 GFX 0.2.35
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          base=Path('.pio/libdeps/m5stack-atoms3')
+          assert 'version=0.2.28' in (base/'M5Unified'/'library.properties').read_text()
+          assert 'version=0.2.35' in (base/'M5GFX'/'library.properties').read_text()
+          print('PASS exact vendor pins')
+          PY
+      - name: Build actual Atom Echo S3R ESP32-S3 app without device flash
+        run: pio run -e m5stack-atoms3
+      - name: Verify app image and archive
+        run: |
+          mkdir -p atoms3r/artifacts
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil,hashlib,json
+          src=Path('.pio/build/m5stack-atoms3/firmware.bin')
+          b=src.read_bytes()
+          assert 100000<len(b)<0x300000 and b[0]==0xe9 and int.from_bytes(b[12:14],'little')==9
+          shutil.copy2(src,'atoms3r/artifacts/firmware.bin')
+          report=dict(target='Atom Echo S3R ESP32-S3',chip_id=9,app_offset='0x10000',app_size='0x300000',firmware_size=len(b),sha256=hashlib.sha256(b).hexdigest(),native_build='PASS',flash='NOT PERFORMED',usb='startup code fix, pending real device acceptance')
+          Path('atoms3r/artifacts/RESULT.json').write_text(json.dumps(report,indent=2)+'\n')
+          print('PASS',report)
+          PY
+          sha256sum atoms3r/artifacts/firmware.bin > atoms3r/artifacts/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: vgmM5-AtomEchoS3R-R6-Unified028-USBMSC-native-NOFLASH
+          path: atoms3r/artifacts/
+          retention-days: 14
