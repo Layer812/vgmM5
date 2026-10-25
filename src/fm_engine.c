@@ -1,6 +1,6 @@
 #include "fm_engine.h"
-#if defined(IS_CORES3)
-#include "sound_safe_math.h" // Cardputer R5 verified helpers, CoreS3 only
+#if defined(IS_CORES3) || defined(IS_ATOMS3)
+#include "sound_safe_math.h" // Cardputer R5 verified helpers, CoreS3 and Atom Echo S3R
 #endif
 #include "ssg_engine.h"
 #include "pcm_engine.h"
@@ -80,7 +80,7 @@ static void init_tables() {
 }
 static void update_phase_step(FMSoundEngine *engine, int ch) {
     int kc = engine->kc[ch];
-#if defined(IS_CORES3)
+#if defined(IS_CORES3) || defined(IS_ATOMS3)
     int kf = vgm_ym2151_decode_kf(engine->kf[ch]); // Yamaha KF bits D7..D2
 #else
     int kf = engine->kf[ch] & 0x3F;
@@ -120,7 +120,7 @@ static void update_phase_step(FMSoundEngine *engine, int ch) {
         static const float DT1_TAB[8] = { 1.0f, 1.002f, 1.004f, 1.006f, 1.0f, 0.998f, 0.996f, 0.994f };
         float detune_m = DT1_TAB[dt1 & 7];
 
-#if defined(IS_CORES3)
+#if defined(IS_CORES3) || defined(IS_ATOMS3)
         // Cardputer R5: YM2151 DT2 is a *pitch ratio*, not a fixed phase offset.
         const float phase_step = vgm_ym2151_apply_dt2(
             step_f * m * detune_m, engine->ops[idx].dt2);
@@ -1113,7 +1113,7 @@ void fm_engine_write_ym2151(FMSoundEngine *engine, uint16_t addr, uint8_t data) 
         }
         return;
     }
-#if defined(IS_CORES3)
+#if defined(IS_CORES3) || defined(IS_ATOMS3)
     // CoreS3/Module Audio: Yamaha YM2151 KEY ON hardware bits are
     // M1(D3), C1(D4), M2(D5), C2(D6) while the physical slot order
     // remains M1, M2, C1, C2. On an OFF->ON edge, reset phase once.
@@ -1795,7 +1795,7 @@ inline int32_t calc_op_ym2151_internal(
     // - CoreS3: preserve Cardputer R5 phase-domain modulation without extra x2
     uint32_t active_phase_step = op->phase_step;
     
-#if !defined(IS_CORES3)
+#if !defined(IS_CORES3) && !defined(IS_ATOMS3)
     modulation *= 2;
 #endif
     if (pm_amount != 0) {
