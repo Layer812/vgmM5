@@ -1,0 +1,45 @@
+name: Cardputer native build (no flash)
+
+on:
+  push:
+    paths:
+      - "cardputer/**"
+      - ".github/workflows/cardputer-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - name: Check out protected source snapshot
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PlatformIO CLI
+        run: python -m pip install --disable-pip-version-check platformio
+
+      - name: Verify original Cardputer source lock and DB status
+        run: python cardputer/tools/build_only.py --check-only
+
+      - name: Compile Cardputer offline edition (never flash)
+        run: python cardputer/tools/build_only.py
+
+      - name: Archive reports and build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vgmM5-Cardputer-native-build-report
+          path: |
+            cardputer/reports/
+            cardputer/.pio/build/m5stack-cardputer/firmware.bin
+            cardputer/.pio/build/m5stack-cardputer/firmware.elf
+          if-no-files-found: warn
+          retention-days: 14
