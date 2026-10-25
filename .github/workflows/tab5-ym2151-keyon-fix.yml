@@ -1,0 +1,111 @@
+name: Tab5 R61 YM2151 KON D4 C1 D5 M2 native + host (NO FLASH)
+
+on:
+  push:
+    branches:
+      - tab5/ym2151-kon-c1-m2-fix-20261025
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-and-host:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify change exactly KEY ON D4 C1 / D5 M2, protect other 83 R61 files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,subprocess,json
+          original=subprocess.check_output(['git','show','742d3143bfe845d99f8531f68eacf1e25f1dab1f:tab5/firmware/src/fm_engine.c'])
+          current=Path('tab5/firmware/src/fm_engine.c').read_bytes()
+          changes=((b'if ((data >> 4) & 1) { // M2 (Slot 2)',
+                    b'if ((data >> 5) & 1) { // M2: physical slot 9, KON D5 ($20)'),
+                   (b'if ((data >> 5) & 1) { // C1 (Slot 3)',
+                    b'if ((data >> 4) & 1) { // C1: physical slot 17, KON D4 ($10)'))
+          test=original
+          for old,new in changes:
+              assert test.count(old)==1,(old,test.count(old))
+              test=test.replace(old,new,1)
+          assert current==test, 'SAFE STOP: FM source changed beyond two KEY ON conditions'
+          pins=json.loads(Path('tab5/PUBLIC_SOURCE_SHA256.json').read_text())
+          checked=0
+          for rel,h in pins.items():
+              raw=(Path('tab5')/rel).read_bytes()
+              if rel=='firmware/src/fm_engine.c':
+                  assert hashlib.sha256(original).hexdigest()==h
+              else: assert hashlib.sha256(raw).hexdigest()==h,rel
+              checked+=1
+          assert checked>=80
+          assert b'1-sample delay' in current and b'opm_algo_mem_dst[8]' in current
+          print('PASS only two YM2151 KEY ON bit predicates modified; baseline',checked,'source pins protected')
+          PY
+      - name: Host compile authentic Tab5 FM (no device)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/shims
+          printf '#pragma once\n#define IRAM_ATTR\n#define DRAM_ATTR\n' >out/shims/esp_attr.h
+          : >out/shims/esp_partition.h
+          : >out/shims/esp_spi_flash.h
+          git show 742d3143bfe845d99f8531f68eacf1e25f1dab1f:tab5/firmware/src/fm_engine.c >out/fm_engine_baseline.c
+          cp tab5/firmware/src/fm_engine.c out/fm_engine_KON_fixed.c
+          cp tab5/firmware/src/{fm_engine.h,pcm_engine.h,ssg_engine.h} out/
+          for type in baseline KON_fixed; do
+            gcc -std=gnu11 -O2 -ffunction-sections -fdata-sections -Iout/shims -Iout -c out/fm_engine_${type}.c -o out/fm_engine_${type}.o
+            gcc -std=gnu11 -O2 -ffunction-sections -fdata-sections -Iout/shims -Iout -c tab5/tests/ym2151_kon_host.c -o out/host_${type}.o
+            gcc -Wl,--gc-sections out/fm_engine_${type}.o out/host_${type}.o -lm -o out/tab5_ym2151_${type}_host
+          done
+          out/tab5_ym2151_KON_fixed_host --test
+          # Baseline MUST fail on intentionally exposed partial KON mapping
+          if out/tab5_ym2151_baseline_host --test; then
+            echo 'ERROR: baseline unexpectedly passes corrected KEY ON mapping';exit 1
+          fi
+          echo 'PASS: original baseline reproduces KEY ON defect, fixed passes 56 cases'
+      - name: Install pinned PlatformIO for native ESP32-P4 build
+        shell: bash
+        run: |
+          python3 -m pip install --disable-pip-version-check platformio
+          python3 -m pip install --disable-pip-version-check 'click==8.1.8'
+          (cd tab5/firmware && pio pkg install -e tab5-r61-speaker-revert)
+      - name: Apply pinned R60 panel compatibility patch
+        run: python tab5/patch_m5gfx_r60.py
+      - name: Build real ESP32-P4 app (NO FLASH)
+        run: cd tab5/firmware && pio run -e tab5-r61-speaker-revert
+      - name: Validate app image and bundle offline host comparison tools
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,shutil
+          image=Path('tab5/firmware/.pio/build/tab5-r61-speaker-revert/firmware.bin')
+          assert image.is_file() and image.read_bytes()[:1]==b'\xe9'
+          assert 100000<len(image.read_bytes())<0x800000
+          shutil.copy2(image,'out/firmware.bin')
+          print('PASS Tab5 native BIN',image.stat().st_size,hashlib.sha256(image.read_bytes()).hexdigest())
+          PY
+          sha256sum out/firmware.bin out/tab5_ym2151_*_host | tee out/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: tab5-ym2151-keyon-fix-native-and-host
+          path: |
+            out/firmware.bin
+            out/tab5_ym2151_baseline_host
+            out/tab5_ym2151_KON_fixed_host
+            out/fm_engine_baseline.c
+            out/fm_engine_KON_fixed.c
+            out/fm_engine.h
+            out/ssg_engine.h
+            out/pcm_engine.h
+            out/SHA256SUMS.txt
+          retention-days: 7
