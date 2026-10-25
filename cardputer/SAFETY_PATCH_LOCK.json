@@ -1,10 +1,27 @@
 {
   "format": "vgmM5-cardputer-arithmetic-patch-v1",
   "base_commit": "2e6f0f9f7ad7a3f5e5544cceb231e60f88cfff64",
-  "description": "Cardputer YM2151 phase, DT2, KF, OPM 4-operator routing and calibrated FM modulation; C140/C352 signed sample fixes; original sources preserved.",
+  "description": "Cardputer YM2151 phase, DT2, KF, OPM 4-operator routing and calibrated FM modulation; C140/C352 signed sample fixes; original sources preserved. Cardputer R6 candidate: Yamaha YM2151 KON C1/M2 bit mapping + rising-edge phase reset; all R5 synthesis routing/modulation preserved.",
   "patched_git_blob_sha1": {
-    "src/fm_engine.c": "b10733466a22a518d7e98e1e430968923cf34489",
+    "src/fm_engine.c": "8f3547155635766870d8ca990548481d24992e41",
     "src/pcm_engine.c": "27d352697c87969e6378aa12db0d2a8aa8469eac",
     "src/sound_safe_math.h": "d4cca70be29e9ad739db6831afdba57d58d599c3"
+  },
+  "cardputer_r6_keyon_phase": {
+    "parent_cardputer_r5_fm_blob_sha1": "b10733466a22a518d7e98e1e430968923cf34489",
+    "changed_ym2151_register": "0x08",
+    "physical_operator_order": [
+      "M1",
+      "M2",
+      "C1",
+      "C2"
+    ],
+    "kon_order": [
+      "M1",
+      "C1",
+      "M2",
+      "C2"
+    ],
+    "phase_reset": "Only on off-to-on KEY ON transition"
   }
 }
