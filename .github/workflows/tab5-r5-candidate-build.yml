@@ -1,0 +1,50 @@
+name: vgmM5 Tab5 R61 + R5 YM2151 candidate native build (NO FLASH)
+on:
+  push:
+    branches:
+      - tab5/ym2151-r5-algo0-feedback-20261025
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify R61 immutable 84-source pins and isolated patch
+        run: python tab5/build_tab5_r5_candidate.py --check-only
+      - name: Install PlatformIO
+        run: python -m pip install --disable-pip-version-check platformio
+      - name: Install pinned R61 platform and dependencies
+        run: |
+          cd tab5/firmware
+          pio pkg install -e tab5-r61-speaker-revert
+      - name: Apply original guarded R60 M5GFX compatibility overlay
+        run: python tab5/patch_m5gfx_r60.py
+      - name: Real ESP32-P4 native compilation (NO FLASH)
+        run: |
+          cd tab5/firmware
+          pio run -e tab5-r61-speaker-revert
+      - name: Verify post-build source invariants and produced image
+        run: |
+          python tab5/build_tab5_r5_candidate.py --check-only
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p=Path('tab5/firmware/.pio/build/tab5-r61-speaker-revert/firmware.bin')
+          assert p.is_file() and 100 < p.stat().st_size < 0x800000 and p.read_bytes()[0]==0xe9
+          print('PASS firmware',p.stat().st_size,'SHA256',hashlib.sha256(p.read_bytes()).hexdigest())
+          PY
+      - name: Preserve no-flash build artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vgmM5-Tab5-R61-R5-native-no-flash
+          path: |
+            tab5/firmware/.pio/build/tab5-r61-speaker-revert/firmware.bin
+            tab5/R5_CANDIDATE_PATCH_LOCK.json
+          retention-days: 7

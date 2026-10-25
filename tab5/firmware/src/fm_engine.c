@@ -82,6 +82,14 @@ static inline uint32_t ym2151_phase_advance_mod32(float advance) {
     return (uint32_t)rem;
 }
 
+/* The R61 production synthesizer already contains the Cardputer R5
+ * no-extra-x2 modulation correction, KF/DT2 and high-step protection.
+ * Only the separate YM2151 algorithm-0 routing is under review here.
+ * 0 restores the exact original R61 synthesis route at compile time. */
+#ifndef VGMM5_TAB5_YM2151_R5_ALGO0_PREVIEW
+#define VGMM5_TAB5_YM2151_R5_ALGO0_PREVIEW 1
+#endif
+
 static void update_phase_step(FMSoundEngine *engine, int ch) {
     int kc = engine->kc[ch];
     int kf = (engine->kf[ch] >> 2) & 0x3F;
@@ -1345,6 +1353,23 @@ __attribute__((optimize("O3"))) void IRAM_ATTR fm_engine_tick(FMSoundEngine *eng
 
             int32_t bus[6] = {0};
             int algo = engine->algo[ch] & 7;
+#if VGMM5_TAB5_YM2151_R5_ALGO0_PREVIEW
+            if (is_ym2151 && algo == 0) {
+                /* Cardputer R5 OPM logical order maps to physical slots
+                 * M1(0) -> C1(2) -> M2(1) -> C2(3).
+                 * Preserve original generic OPN/OPNA/OPLL routing. */
+                const int32_t o0 = calc_op_internal(engine, b+0, fb_mod, ch_pm, ch_am, 0, 0, 0);
+                engine->fb_memory[ch][0] = engine->fb_memory[ch][1];
+                engine->fb_memory[ch][1] = o0;
+                const int32_t o2 = calc_op_internal(engine, b+2, o0, ch_pm, ch_am, 0, 0, 0);
+                const int32_t o1 = calc_op_internal(engine, b+1, o2, ch_pm, ch_am, 0, 0, 0);
+                const int32_t o3 = calc_op_internal(engine, b+3, o1, ch_pm, ch_am, is_noise_ch ? 1 : 0, 0, 0);
+                engine->mem_value[ch] = 0;
+                mix_l += o3 * engine->pan_l[ch];
+                mix_r += o3 * engine->pan_r[ch];
+                continue;
+            }
+#endif
             bus[algo_mem_dst[algo]] = engine->mem_value[ch];
 
             int32_t mod0 = bus[0] + fb_mod;
