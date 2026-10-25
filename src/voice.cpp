@@ -439,8 +439,10 @@ void setup() {
         
         // ★ 注意：ここにあった古い update_namco_volumes(engine, ch);
         
-        if (!FFat.begin(true)) {
-            Serial.println("FFat Mount Failed!");
+        // Music in the internal FFat volume must never be formatted silently.
+        // If the volume is absent/corrupt, use the separate USB mode for recovery.
+        if (!FFat.begin(false)) {
+            Serial.println("FFat Mount Failed (NOT FORMATTED)!");
             return;
         }
         Serial.println("FFat Initialized.");
