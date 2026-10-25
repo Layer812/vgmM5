@@ -1,4 +1,4 @@
-# vgmM5 (v0.98)
+# vgmM5
 vgm and mdx player for M5Stack
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -18,7 +18,7 @@ vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(MXDRV)ファイ�
 #### 対応デバイスと機能 (Supported Devices & Features)
 | 機能 (Features) \ デバイス (Device) | M5Stack AtomS3R (Echo) | M5Stack Cardputer | M5Stack CoreS3 | + [Module Audio](https://docs.m5stack.com/ja/module/Module-Audio) | [M5 TAB5](https://docs.m5stack.com/ja/core/Tab5) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **ステータス (Status)** | ✔️ 対応済 | ✔️ 対応済 | ✔️ 対応済 | ✔️ 対応済 | [✔️ 安定版](tab5/README.md) |
+| **ステータス (Status)** | ✔️ 対応済 | ✔️ 対応済 | [✔️ R6安定版](cores3/README.md) | [✔️ R6安定版](cores3/README.md) | [✔️ 安定版](tab5/README.md) |
 | **VGM/VGZ 再生** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **MDX 再生** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **内蔵フラッシュ (USB Drive)** | ✔️ | - | - | - | - |
@@ -46,8 +46,15 @@ vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(MXDRV)ファイ�
 | **Namco C140** | ✔️ 対応済 (Supported |
 | **Namco C352** | ✔️ 対応済 (Supported) |
 
-※ いくつかのチップのサウンドテストを経た安定板（v0.98）です。ソースは近日更新します。
+※ 元のv0.98系に加え、CoreS3とTab5では更新版のソースを公開しています。
 ※ ステータスが「対応済」となっていても、もし再生時に音がおかしい・違和感があると感じた場合は、曲名とおかしい点を優しく申告していただければ対応いたします！
+
+#### M5Stack CoreS3版（2026年10月26日 更新）
+Module Audio（ES8388）を接続した場合と、接続せず内蔵スピーカーを使用した場合の**両方で実機動作を確認**しました。
+
+**更新内容:** M5Unified 0.2.28／M5GFX 0.2.35への対応、YM2151を中心とした音源処理とPCM演算の修正・改善。
+
+詳細は [CoreS3版の説明](cores3/README.md) をご覧ください。
 
 #### M5Stack Tab5版（2026年10月25日 更新）
 ESP32-P4採用のTab5に対応。VGM/VGZ・MDXのmicroSD再生、タッチ操作、JPEG/PNG/BMPカバー画像表示が利用できます。
@@ -66,7 +73,7 @@ ESP32-P4採用のTab5に対応。VGM/VGZ・MDXのmicroSD再生、タッチ操作
 手軽に試す場合は、M5 Burnerから以下のシェアコードでファームウェアを直接書き込めます。
 
 - **M5Stack Tab5用 シェアコード:** `8i9Cp1C6ufGpGC5J`
-- **M5Stack CoreS3用 シェアコード:** `HRmuTxOVO7iUxfeo`
+- **M5Stack CoreS3用 シェアコード:** `wEBeKwOKFsqAmlsu`（Module Audioあり・なし共通）
 - **M5Stack Cardputer用 シェアコード:** `KxVPdM380FWTyMmC`
 - **M5Stack Atom Echo S3R用 シェアコード:** `zoSd8neRRq7ZQFjB`
 
@@ -75,7 +82,7 @@ ESP32-P4採用のTab5に対応。VGM/VGZ・MDXのmicroSD再生、タッチ操作
 ### 操作方法
 
 #### 📺 M5Stack CoreS3
-CoreS3版はタッチパネル操作に対応しています。外部モジュール [Module-Audio](https://docs.m5stack.com/ja/module/Module-Audio) を接続しての高音質再生もサポートしています。
+CoreS3版はタッチパネル操作と内蔵スピーカー再生に対応しています。外部 [Module Audio](https://docs.m5stack.com/ja/module/Module-Audio)（ES8388）を接続した場合も同じR6で再生できます。
 
 > [!IMPORTANT]
 > **Module-Audio を使用する場合、正常に動作させるためにモジュール内部のDIPスイッチを「B」に切り替えてから接続してください。**
@@ -118,7 +125,7 @@ vgmM5 is a VGM/VGZ and MDX (X68000) file player designed specifically for the M5
 
 | Features \ Device | M5Stack AtomS3R (Echo) | M5Stack Cardputer | M5Stack CoreS3 | + [Module Audio](https://docs.m5stack.com/ja/module/Module-Audio) | [M5 TAB5](https://docs.m5stack.com/ja/core/Tab5) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Status** | ✔️ Supported | ✔️ Supported | ✔️ Supported | ✔️ Supported | [✔️ Stable](tab5/README.md) |
+| **Status** | ✔️ Supported | ✔️ Supported | [✔️ R6 Stable](cores3/README.md) | [✔️ R6 Stable](cores3/README.md) | [✔️ Stable](tab5/README.md) |
 | **VGM/VGZ Playback** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **MDX Playback** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **Internal Flash (USB Drive)** | ✔️ | - | - | - | - |
@@ -129,8 +136,15 @@ vgmM5 is a VGM/VGZ and MDX (X68000) file player designed specifically for the M5
 #### Supported Sound Chips
 *(Please refer to the Supported Sound Chips table in the Japanese section above)*
 
-*Note: This is a stable version (v0.98) after sound tests on various chips.*
+*Note: Updated CoreS3 and Tab5 source editions are available alongside the original v0.98 implementation.*
 *Even if a chip is listed as "Supported," if you notice any strange sounds or something feels off during playback, please kindly report it (gently) with the song title and the issue, and I will address it!*
+
+#### M5Stack CoreS3 edition (updated October 26, 2026)
+Verified on real CoreS3 hardware **with and without the external Module Audio (ES8388)**, using the internal speaker when no module is attached.
+
+**What's new:** Support for M5Unified 0.2.28 / M5GFX 0.2.35, plus YM2151 sound engine and PCM arithmetic corrections.
+
+See the [CoreS3 documentation](cores3/README.md).
 
 #### M5Stack Tab5 edition (updated October 25, 2026)
 Supports ESP32-P4 Tab5 with VGM/VGZ and MDX playback from microSD, touch controls, and JPEG/PNG/BMP cover artwork.
@@ -149,7 +163,7 @@ See the [Tab5 documentation and safety notes](tab5/README.md).
 For a quick and easy start, you can flash the firmware directly to your device using M5 Burner with the following share codes:
 
 - **M5Stack Tab5 Share Code:** `8i9Cp1C6ufGpGC5J`
-- **M5Stack CoreS3 Share Code:** `HRmuTxOVO7iUxfeo`
+- **M5Stack CoreS3 Share Code:** `wEBeKwOKFsqAmlsu` (with or without Module Audio)
 - **M5Stack Cardputer Share Code:** `KxVPdM380FWTyMmC`
 - **M5Stack Atom Echo S3R Share Code:** `zoSd8neRRq7ZQFjB`
 ---
@@ -157,7 +171,7 @@ For a quick and easy start, you can flash the firmware directly to your device u
 ### Controls
 
 #### 📺 M5Stack CoreS3
-The CoreS3 version supports touch panel controls. It also supports high-quality audio output via an external [Module-Audio](https://docs.m5stack.com/ja/module/Module-Audio).
+The CoreS3 R6 version supports touch input and the built-in speaker, with optional output via [Module Audio](https://docs.m5stack.com/ja/module/Module-Audio) (ES8388). Both configurations have been hardware-tested.
 
 > [!IMPORTANT]
 > **When using the Module-Audio, you must switch its internal DIP switch to "B" before connecting it for proper operation.**
