@@ -1,6 +1,6 @@
 #include "pcm_engine.h"
-#if defined(IS_CORES3)
-#include "sound_safe_math.h" // CoreS3 signed PCM safety only
+#if defined(IS_CORES3) || defined(IS_ATOMS3)
+#include "sound_safe_math.h" // CoreS3 and Atom Echo S3R signed PCM safety
 #endif
 #include "fm_engine.h"
 #include <stdlib.h>
@@ -388,7 +388,7 @@ void pcm_engine_namco_write(PCMSoundEngine *engine, uint16_t addr, uint16_t data
                         
                         int16_t new_sample = 0;
                         if (ch->mode & 0x0008) new_sample = c352_mulaw_table[dt];
-                        #if defined(IS_CORES3)
+                        #if defined(IS_CORES3) || defined(IS_ATOMS3)
                         else new_sample = vgm_safe_signed_pcm_byte(dt);
 #else
                         else new_sample = (int16_t)((int8_t)dt) << 8;
@@ -470,14 +470,14 @@ void pcm_engine_namco_write(PCMSoundEngine *engine, uint16_t addr, uint16_t data
                     int16_t new_sample = 0;
                     if (ch->mode & 0x08) {
                         int16_t sdt = ((int8_t)dt) >> 3;
-#if defined(IS_CORES3)
+#if defined(IS_CORES3) || defined(IS_ATOMS3)
                         new_sample = vgm_safe_c140_companded(sdt, dt & 7, c140_pcmtbl[dt & 7]);
 #else
                         if (sdt < 0) new_sample = (sdt << (dt & 7)) - c140_pcmtbl[dt & 7];
                         else         new_sample = (sdt << (dt & 7)) + c140_pcmtbl[dt & 7];
 #endif
                     } else {
-                        #if defined(IS_CORES3)
+                        #if defined(IS_CORES3) || defined(IS_ATOMS3)
                         new_sample = vgm_safe_signed_pcm_byte(dt); // C140 8-bit signed PCM
 #else
                         new_sample = (int16_t)((int8_t)dt) << 8; // ★ C140 uncompressed PCM: correct shift from 4 to 8
@@ -779,7 +779,7 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
                     if (v->mode & 0x0008) { // C352 MuLaw flag is bit 3 (0x0008)
                         new_sample = c352_mulaw_table[dt];
                     } else {
-#if defined(IS_CORES3)
+#if defined(IS_CORES3) || defined(IS_ATOMS3)
                         new_sample = vgm_safe_signed_pcm_byte(dt);
 #else
                         new_sample = (int16_t)((int8_t)dt) << 8;
@@ -788,14 +788,14 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
                 } else {
                     if (v->mode & 0x08) {
                         int16_t sdt = ((int8_t)dt) >> 3;
-#if defined(IS_CORES3)
+#if defined(IS_CORES3) || defined(IS_ATOMS3)
                         new_sample = vgm_safe_c140_companded(sdt, dt & 7, c140_pcmtbl[dt & 7]);
 #else
                         if (sdt < 0) new_sample = (sdt << (dt & 7)) - c140_pcmtbl[dt & 7];
                         else         new_sample = (sdt << (dt & 7)) + c140_pcmtbl[dt & 7];
 #endif
                     } else {
-                        #if defined(IS_CORES3)
+                        #if defined(IS_CORES3) || defined(IS_ATOMS3)
                         new_sample = vgm_safe_signed_pcm_byte(dt); // C140 8-bit signed PCM
 #else
                         new_sample = (int16_t)((int8_t)dt) << 8; // ★ C140 uncompressed PCM: correct shift from 4 to 8
