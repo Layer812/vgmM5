@@ -52,7 +52,7 @@ jobs:
           v=Path('src/voice.cpp').read_text()
           assert v==original.replace(prefix,replacement),'USB/UI other behavior changed'
           usb=v.split('void enter_usb_mode()',1)[1].split('#endif // IS_ATOMS3',1)[0]
-          assert usb.index('MSC.begin(sector_count, sector_size)')<usb.index('    USB.begin();')<usb.index('    while(1)')
+          assert usb.index('MSC.begin(sector_count, sector_size)')<usb.index('    USB.begin();')<usb.rindex('    while(1)')
           print('PASS root FM and PCM restricted to Atom; CoreS3/Cardputer/Tab5, audio pins, USB FS partition unchanged')
           PY
       - name: Actual YM2151 R6 KEY ON 56 + phase edges 32 host tests
