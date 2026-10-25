@@ -2,7 +2,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
-#include "../src/sound_safe_math.h"
+#include "../../src/sound_safe_math.h"
 
 int main(void) {
     // All signed PCM bytes, including -128 and -1.
