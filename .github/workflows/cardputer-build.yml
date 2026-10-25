@@ -60,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p cardputer/reports/shims
-          printf '#pragma once\\n#define IRAM_ATTR\\n#define DRAM_ATTR\\n' > cardputer/reports/shims/esp_attr.h
+          printf '#pragma once\n#define IRAM_ATTR\n#define DRAM_ATTR\n' > cardputer/reports/shims/esp_attr.h
           : > cardputer/reports/shims/esp_partition.h
           : > cardputer/reports/shims/esp_spi_flash.h
           git show 8ab06296e1b133351376b67d73cf7c0416334539:cardputer/src/fm_engine.c > cardputer/reports/fm_engine_R5.c
