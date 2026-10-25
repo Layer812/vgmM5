@@ -10,4 +10,4 @@
 - Flash: **none**; no app-only/whole-flash script is included.
 - R61 FIX1 Tab5: unchanged and not used as the base for this snapshot.
 
-- AUDIO_R1 development branch: two guarded engine source modifications; native build pending, physical test not performed. The main-branch Cardputer v0.98 build already passed.
+- AUDIO_R1 development branch: two guarded engine source modifications; **ESP32-S3 native build PASS** (run 40148923112), physical playback untested. Experimental BIN SHA-256: `fcc4a0d6d7e37a3ac040018e8c4f49aa5296b46d137eb69e67ae15cbb86e9ca5`. Main-branch baseline remains unchanged.

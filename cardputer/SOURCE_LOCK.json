@@ -68,7 +68,8 @@
       "src/pcm_engine.c"
     ],
     "host_checks": "Clang UBSan arithmetic: 212370 normal phase, 3479 wrapped phase, 2048 PCM cases; no mismatches",
-    "validation": "Native build pending (GitHub Actions). Physical playback not tested.",
-    "note": "No imported Tab5 DT1/DT2 pitch parameters; original Cardputer synthesis and speaker pipeline otherwise unchanged."
+    "validation": "ESP32-S3 native build PASS in GitHub Actions 40148923112 (no flashing). Cardputer physical playback not tested; full-song PCM not compared.",
+    "note": "No imported Tab5 DT1/DT2 pitch parameters; original Cardputer synthesis and speaker pipeline otherwise unchanged.",
+    "experimental_firmware_sha256": "fcc4a0d6d7e37a3ac040018e8c4f49aa5296b46d137eb69e67ae15cbb86e9ca5"
   }
 }

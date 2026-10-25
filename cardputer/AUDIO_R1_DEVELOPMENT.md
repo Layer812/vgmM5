@@ -9,6 +9,8 @@ Only two original Cardputer engine files are modified:
 
 43 other source/header files and the original partition table are **byte-identical to v0.98**. Original root `src/`, main-branch `cardputer/`, and `tab5/` are not changed.
 
-**Host Clang UBSan**: 212,370 in-range phase values, 3,479 modulo cases and 2,048 signed PCM cases; zero mismatches. Full-song PCM bit identity, Cardputer native-build success and physical audio quality remain to be established for this experimental branch. No flashing is performed.
+**Host Clang UBSan**: 212,370 in-range phase values, 3,479 modulo cases and 2,048 signed PCM cases; zero mismatches. ESP32-S3 native-build **PASS** (GitHub Actions [run 40148923112](https://github.com/Layer812/vgmM5/actions/runs/40148923112)). Full-song PCM bit identity and physical audio quality remain unverified for this development branch. No flashing is performed.
 
-**Do not merge into main until native compilation and actual listening verification are complete.**
+**Built binary (not flashed):** 1,241,360 bytes, SHA-256 `fcc4a0d6d7e37a3ac040018e8c4f49aa5296b46d137eb69e67ae15cbb86e9ca5`. CI artifact: [BIN, ELF, full log](https://github.com/Layer812/vgmM5/actions/runs/40148923112/artifacts/12582351435).
+
+**Do not merge into main until physical listening verification is complete.**
