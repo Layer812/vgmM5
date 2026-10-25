@@ -41,6 +41,35 @@ static void test_keyon(void){
     }
     puts("PASS YM2151 KEY ON 7 patterns x 8 channels = 56 cases; D4->C1, D5->M2.");
 }
+static void test_keyon_edges(void){
+    for (unsigned ch=0;ch<8;ch++) {
+        FMSoundEngine *e=engine();
+        const unsigned idx=ch*4+2; /* C1 has KON D4 */
+        OperatorState *p=&e->ops[idx];
+        p->phase=0x11223344u;
+        fm_engine_write_ym2151(e,0x08,(uint8_t)(ch|0x10));
+        if (p->phase!=0 || p->env_state!=EG_ATTACK || !p->key_on) {
+            fprintf(stderr,"KON rising edge phase/attack mismatch ch=%u\n",ch);exit(20);
+        }
+        p->phase=0x55667788u;
+        p->env_state=EG_DECAY;
+        fm_engine_write_ym2151(e,0x08,(uint8_t)(ch|0x10));
+        if (p->phase!=0x55667788u || p->env_state!=EG_DECAY) {
+            fprintf(stderr,"Repeated KON must NOT restart phase/attack ch=%u\n",ch);exit(21);
+        }
+        fm_engine_write_ym2151(e,0x08,(uint8_t)ch);
+        if (p->env_state!=EG_RELEASE || p->key_on) {
+            fprintf(stderr,"KON falling edge release mismatch ch=%u\n",ch);exit(22);
+        }
+        p->phase=0xaabbccddu;
+        fm_engine_write_ym2151(e,0x08,(uint8_t)(ch|0x10));
+        if (p->phase!=0 || p->env_state!=EG_ATTACK || !p->key_on) {
+            fprintf(stderr,"KON reattack phase mismatch ch=%u\n",ch);exit(23);
+        }
+        free(e);
+    }
+    puts("PASS YM2151 8 channels x 4 edge/phase checks = 32 cases.");
+}
 static void emit(FMSoundEngine *e,FILE *out,unsigned n,uint64_t *elapsed){
     int32_t lr[2];
     if(*elapsed+n>44100ull*120ull){fputs("VGM duration safety cap\n",stderr);exit(4);}
@@ -52,7 +81,7 @@ static void emit(FMSoundEngine *e,FILE *out,unsigned n,uint64_t *elapsed){
     *elapsed+=n;
 }
 int main(int argc,char**argv){
-    if(argc==2 && strcmp(argv[1],"--test")==0){test_keyon();return 0;}
+    if(argc==2 && strcmp(argv[1],"--test")==0){test_keyon();test_keyon_edges();return 0;}
     if(argc!=3){fputs("usage: host input.vgm output_int32_stereo.raw OR host --test\n",stderr);return 2;}
     FILE *f=fopen(argv[1],"rb");if(!f){perror("vgm file");return 3;}
     if(fseek(f,0,SEEK_END)){return 4;}long n=ftell(f);rewind(f);
