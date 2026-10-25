@@ -17,7 +17,7 @@ LOCK = ROOT / 'R5_CANDIDATE_PATCH_LOCK.json'
 REPORT_NAME = 'VGMM5_TAB5_R5_YM2151_BUILD_SEND_THIS.zip'
 
 def blob_sha(data):
-    return hashlib.sha1(b'blob ' + str(len(data)).encode('ascii') + b'\\0' + data).hexdigest()
+    return hashlib.sha1(b'blob ' + str(len(data)).encode('ascii') + b'\0' + data).hexdigest()
 
 def check_sources():
     original = json.loads((ROOT / 'PUBLIC_SOURCE_SHA256.json').read_text(encoding='utf8'))
@@ -70,7 +70,7 @@ def main():
     run([pio,'run','-e',ENV])
     check_sources()
     binpath = FW/'.pio'/'build'/ENV/'firmware.bin'
-    if not binpath.is_file() or not 100 < binpath.stat().st_size < 0x800000 or binpath.read_bytes()[:1]!=b'\\xe9':
+    if not binpath.is_file() or not 100 < binpath.stat().st_size < 0x800000 or binpath.read_bytes()[:1]!=b'\xe9':
         raise RuntimeError('Invalid firmware BIN; NO FLASH')
     result = {'status':'PASS','flash':False,'r61_pinned_files':count,
               'firmware_bytes':binpath.stat().st_size,
@@ -79,7 +79,7 @@ def main():
     if not report_dir.is_dir(): report_dir=ROOT
     report = report_dir/REPORT_NAME
     with zipfile.ZipFile(report,'w',zipfile.ZIP_DEFLATED) as z:
-        z.writestr('RESULT.json',json.dumps(result,indent=2)+'\\n')
+        z.writestr('RESULT.json',json.dumps(result,indent=2)+'\n')
         z.write(LOCK,LOCK.name)
         z.write(binpath,'firmware.bin')
     print('PASS native Tab5 candidate BUILD ONLY',report)
