@@ -18,6 +18,12 @@ static inline uint32_t vgm_safe_ym2151_phase_step(float step) {
  * Equivalently +0, +600, +781.25 and +950 cents.
  * Applied to the current operator's frequency, never as a fixed Hz delta.
  */
+// YM2151 KF register uses bits 7..2; bits 1..0 are unused.
+// Do not mask bits 5..0, which shifts the pitch by up to a semitone.
+static inline uint8_t vgm_ym2151_decode_kf(uint8_t reg) {
+    return (uint8_t)(reg >> 2);
+}
+
 static inline float vgm_ym2151_apply_dt2(float phase_step, uint8_t dt2) {
     static const float ratios[4] = {
         1.0f, 1.41421356237f, 1.57030158878f, 1.73107312201f

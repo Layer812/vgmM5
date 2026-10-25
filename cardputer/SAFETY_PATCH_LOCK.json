@@ -1,10 +1,10 @@
 {
   "format": "vgmM5-cardputer-arithmetic-patch-v1",
   "base_commit": "2e6f0f9f7ad7a3f5e5544cceb231e60f88cfff64",
-  "description": "Cardputer YM2151 safe phase conversion, DT2 pitch ratio correction, and C140/C352 signed PCM arithmetic; original 45-file baseline lock preserved.",
+  "description": "Cardputer YM2151 safe phase conversion, DT2 cents correction, KF register bit decode, and C140/C352 signed PCM arithmetic; original baseline preserved.",
   "patched_git_blob_sha1": {
-    "src/fm_engine.c": "9623a19f994fb1161070894ba21941f2fb1cbddc",
+    "src/fm_engine.c": "ee70901d7b7c36391625ac1a9394acabb693b0cf",
     "src/pcm_engine.c": "27d352697c87969e6378aa12db0d2a8aa8469eac",
-    "src/sound_safe_math.h": "f9742908dc1b8155517426b17f17e6f55e03958d"
+    "src/sound_safe_math.h": "0b17862dbdaf3f03dca74b609c34d51acfa38e43"
   }
 }

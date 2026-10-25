@@ -41,6 +41,17 @@ int main(void) {
     assert(vgm_safe_ym2151_phase_step(INFINITY) == 0u);
     assert(vgm_safe_ym2151_phase_step(NAN) == 0u);
     assert(vgm_safe_ym2151_phase_step(-1.0f) == 0u);
+    // YM2151 KF: upper six register bits only, exhaustive byte check.
+    for (int raw = 0; raw < 256; ++raw) {
+        uint8_t kf = vgm_ym2151_decode_kf((uint8_t)raw);
+        assert(kf == (uint8_t)(raw / 4));
+        assert(kf < 64);
+    }
+    assert(vgm_ym2151_decode_kf(0x14) == 5);
+    assert(vgm_ym2151_decode_kf(0x18) == 6);
+    assert(vgm_ym2151_decode_kf(0x0c) == 3);
+    puts("PASS: YM2151 256 KF register values, unused low bits excluded");
+
     // Official YM2151 DT2 is measured in 1/64 of a semitone, not Hz.
     const int dt2_units[4] = {0, 384, 500, 608};
     for (int dt2 = 0; dt2 < 4; ++dt2) {

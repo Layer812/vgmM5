@@ -78,7 +78,7 @@ static void init_tables() {
 }
 static void update_phase_step(FMSoundEngine *engine, int ch) {
     int kc = engine->kc[ch];
-    int kf = engine->kf[ch] & 0x3F;
+    int kf = vgm_ym2151_decode_kf(engine->kf[ch]);
 
     int note = kc & 0x0F;
     int octave = (kc >> 4) & 0x07;
