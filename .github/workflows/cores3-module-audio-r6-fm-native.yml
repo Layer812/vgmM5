@@ -1,0 +1,103 @@
+name: CoreS3 Module Audio R6 sound fixes + Unified 0.2.28 (NO FLASH)
+
+on:
+  push:
+    branches:
+      - dev/cores3-module-audio-r6-fm-safe-20261026
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Assert CoreS3 changes isolated and Module Audio driver preserved
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          base='1645a693941321ce460239bc39d296d60952f4a3'
+          modified=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          wanted={'platformio.ini','src/fm_engine.c','src/pcm_engine.c','src/sound_safe_math.h','cores3/tests/sound_arithmetic_host.c','cores3/tests/ym2151_kon_phase_host.c','.github/workflows/cores3-module-audio-028-native.yml','.github/workflows/cores3-module-audio-r6-fm-native.yml'}
+          assert modified==wanted, (modified-wanted,wanted-modified)
+          for name in ('src/vgm_engine.cpp','src/voice.cpp','src/mdx_engine.cpp','src/mdx_fm.c','partitions.csv'):
+              assert Path(name).read_bytes()==subprocess.check_output(['git','show',base+':'+name]),name
+          fm=Path('src/fm_engine.c').read_text()
+          pcm=Path('src/pcm_engine.c').read_text()
+          assert '#if defined(IS_CORES3)' in fm and 'kon_bit[4] = { 3, 5, 4, 6 }' in fm
+          assert 'int kf = vgm_ym2151_decode_kf(engine->kf[ch]);' in fm
+          assert 'vgm_ym2151_apply_dt2' in fm and 'vgm_safe_ym2151_phase_step' in fm
+          assert '#if !defined(IS_CORES3)\n    modulation *= 2;' in fm
+          assert 'engine->mem_value[ch] = bus[5];' in fm
+          assert 'opm_algo_mem_dst[8]' in fm
+          assert pcm.count('vgm_safe_signed_pcm_byte') == 4,pcm.count('vgm_safe_signed_pcm_byte')
+          assert pcm.count('vgm_safe_c140_companded')==2
+          assert 'src/albums.bin' in Path('platformio.ini').read_text() # CoreS3 edit did not remove other envs
+          print('PASS CoreS3-only audio changes; ES8388 I2S path and prior app/partitions unchanged')
+          PY
+      - name: Test actual FM KEY ON D4/D5 and 32 phase transitions
+        run: |
+          set -euo pipefail
+          mkdir -p cores3/reports/shims
+          printf '#pragma once\n#define IRAM_ATTR\n#define DRAM_ATTR\n' > cores3/reports/shims/esp_attr.h
+          : > cores3/reports/shims/esp_partition.h
+          : > cores3/reports/shims/esp_spi_flash.h
+          for kind in original cores3; do
+            flag=''
+            if [ "$kind" = cores3 ]; then flag='-DIS_CORES3=1'; fi
+            gcc -std=gnu11 -O2 -ffunction-sections -fdata-sections -Icores3/reports/shims -Isrc $flag -c src/fm_engine.c -o cores3/reports/fm_${kind}.o
+            gcc -std=gnu11 -O2 -ffunction-sections -fdata-sections -Icores3/reports/shims -Isrc $flag -c cores3/tests/ym2151_kon_phase_host.c -o cores3/reports/test_${kind}.o
+            gcc -Wl,--gc-sections cores3/reports/fm_${kind}.o cores3/reports/test_${kind}.o -lm -o cores3/reports/ym2151_${kind}_host
+          done
+          cores3/reports/ym2151_cores3_host --test
+          if cores3/reports/ym2151_original_host --test 2>cores3/reports/old_expected_failure.txt;then echo 'old engine unexpected PASS';exit 1;fi
+          grep -q 'KON FAIL' cores3/reports/old_expected_failure.txt
+          echo 'PASS 88 YM2151 mapping+phase tests, old path correctly fails'
+      - name: Test R5 source safe math with ASan and UBSan
+        run: |
+          gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer cores3/tests/sound_arithmetic_host.c -lm -o /tmp/cores3_safe_math_host
+          ASAN_OPTIONS=detect_leaks=1 /tmp/cores3_safe_math_host
+      - name: Install fixed ESP32-S3 build dependencies
+        run: |
+          python -m pip install --disable-pip-version-check platformio
+          pio pkg install -e m5stack-cores3
+      - name: Validate official M5Unified / M5GFX pins
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.pio/libdeps/m5stack-cores3')
+          assert 'version=0.2.28' in (p/'M5Unified'/'library.properties').read_text()
+          assert 'version=0.2.35' in (p/'M5GFX'/'library.properties').read_text()
+          print('PASS pinned Unified 0.2.28 / GFX 0.2.35')
+          PY
+      - name: Build CoreS3 real ESP32-S3 native app (NO FLASH)
+        run: pio run -e m5stack-cores3
+      - name: Validate native image and capture hash
+        run: |
+          mkdir -p cores3/artifacts
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,shutil
+          p=Path('.pio/build/m5stack-cores3/firmware.bin')
+          assert p.exists() and 100000 < p.stat().st_size < 0x800000
+          b=p.read_bytes()
+          assert b[0]==0xe9 and int.from_bytes(b[12:14],'little')==9, 'not ESP32-S3'
+          shutil.copy2(p,'cores3/artifacts/firmware.bin')
+          print('PASS ESP32-S3 app',len(b),'sha256',hashlib.sha256(b).hexdigest())
+          PY
+          sha256sum cores3/artifacts/firmware.bin > cores3/artifacts/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: vgmM5-CoreS3-ModuleAudio-R6-FM-UNIFIED028-native-NOFLASH
+          path: cores3/artifacts/
+          retention-days: 14
