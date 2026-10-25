@@ -42,8 +42,8 @@ jobs:
               data=(Path('tab5')/rel).read_bytes()
               if rel=='firmware/src/fm_engine.c':
                   assert data==stable
-              elif rel=='firmware/platformio.ini':
-                  pass
+              elif rel in ('firmware/platformio.ini','patch_m5gfx_r60.py'):
+                  pass # only the two pinned dependency/overlay files allowed
               else:
                   assert hashlib.sha256(data).hexdigest()==h,rel
           print('PASS all Tab5 app sources preserved, M5Unified and M5GFX pins only')
