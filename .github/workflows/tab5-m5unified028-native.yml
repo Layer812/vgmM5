@@ -1,0 +1,90 @@
+name: Tab5 M5Unified 0.2.28 + M5GFX 0.2.35 candidate native (NO FLASH)
+
+on:
+  push:
+    branches:
+      - dev/tab5-m5unified-0.2.28-m5gfx-0.2.35-20261025
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Protect user-confirmed stable YM2151 and all app sources
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess,hashlib,json
+          base='d20fa03207660aa228013761cd8bc32437b16e4d'
+          files=subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines()
+          allowed={'.github/workflows/tab5-m5unified028-native.yml','tab5/firmware/platformio.ini','tab5/patch_m5gfx_r60.py'}
+          assert set(files).issubset(allowed),(files,allowed)
+          a=subprocess.check_output(['git','show',base+':tab5/firmware/platformio.ini']).decode('utf8')
+          b=Path('tab5/firmware/platformio.ini').read_text('utf8')
+          x=a.replace('e125e73f28b6b83e621e48df432af426bb2ff935','368ad60807161625aa65baad37a4a3af2a7eccea').replace(
+              '347a23274081a105cb9fc0fc3bbf0e15c78e79c3','65c816a38386062d2c3dc47d41237a9083acbc75')
+          assert b.endswith(x), 'unexpected platformio change'
+          p=Path('tab5/firmware/src/fm_engine.c').read_bytes()
+          stable=subprocess.check_output(['git','show',base+':tab5/firmware/src/fm_engine.c'])
+          assert p==stable, 'stable YM2151 changed'
+          pins=json.loads(Path('tab5/PUBLIC_SOURCE_SHA256.json').read_text())
+          for rel,h in pins.items():
+              data=(Path('tab5')/rel).read_bytes()
+              if rel=='firmware/src/fm_engine.c':
+                  assert data==stable
+              elif rel=='firmware/platformio.ini':
+                  pass
+              else:
+                  assert hashlib.sha256(data).hexdigest()==h,rel
+          print('PASS all Tab5 app sources preserved, M5Unified and M5GFX pins only')
+          PY
+      - name: Install pinned PlatformIO toolchain
+        run: |
+          python3 -m pip install --disable-pip-version-check platformio
+          python3 -m pip install --disable-pip-version-check 'click==8.1.8'
+          cd tab5/firmware
+          pio pkg install -e tab5-r61-speaker-revert
+      - name: Verify upstream M5Unified 0.2.28 / M5GFX 0.2.35 dependency and apply R60 panel overlay
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('tab5/firmware/.pio/libdeps/tab5-r61-speaker-revert')
+          m=root/'M5Unified'/'library.properties'
+          g=root/'M5GFX'/'library.properties'
+          assert m.exists() and g.exists(),(m,g)
+          assert 'version=0.2.28' in m.read_text(),m.read_text()[:300]
+          assert 'version=0.2.35' in g.read_text(),g.read_text()[:300]
+          print('PASS correct installed versions: M5Unified=0.2.28; M5GFX=0.2.35')
+          PY
+          python3 tab5/patch_m5gfx_r60.py
+      - name: ESP32-P4 native app build (NO FLASH)
+        run: cd tab5/firmware && pio run -e tab5-r61-speaker-revert
+      - name: Verify and archive candidate firmware
+        run: |
+          mkdir -p dist
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,shutil
+          p=Path('tab5/firmware/.pio/build/tab5-r61-speaker-revert/firmware.bin')
+          assert p.is_file() and 100000<p.stat().st_size<0x800000 and p.read_bytes()[0]==0xe9
+          shutil.copy2(p,'dist/firmware.bin')
+          print('PASS native app',p.stat().st_size,hashlib.sha256(p.read_bytes()).hexdigest())
+          PY
+          cp tab5/firmware/.pio/R61_M5GFX_PATCH_SHA256.json dist/
+          sha256sum dist/firmware.bin > dist/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: tab5-m5unified028-m5gfx035-native-no-flash
+          path: dist/
+          retention-days: 7
