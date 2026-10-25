@@ -24,6 +24,25 @@ static inline uint8_t vgm_ym2151_decode_kf(uint8_t reg) {
     return (uint8_t)(reg >> 2);
 }
 
+// YM2151 operator order for the 4-op algorithms is O1=slot0,
+// O2=slot2, O3=slot1, O4=slot3 (register order differs).
+// Input indices: 0=silence, 1=O1, 2=O2, 3=O3,
+// 5=O1+O2, 6=O1+O3, 7=O2+O3.
+typedef struct {
+    uint8_t op2_input;
+    uint8_t op3_input;
+    uint8_t op4_input;
+    uint8_t extra_carriers; // bits 0/1/2: O1/O2/O3, O4 always audible
+} VgmYM2151Routing;
+
+static inline VgmYM2151Routing vgm_ym2151_routing(uint8_t algorithm) {
+    static const VgmYM2151Routing routes[8] = {
+        {1, 2, 3, 0}, {0, 5, 3, 0}, {0, 2, 6, 0}, {1, 0, 7, 0},
+        {1, 0, 3, 2}, {1, 1, 1, 6}, {1, 0, 0, 6}, {0, 0, 0, 7}
+    };
+    return routes[algorithm & 7u];
+}
+
 static inline float vgm_ym2151_apply_dt2(float phase_step, uint8_t dt2) {
     static const float ratios[4] = {
         1.0f, 1.41421356237f, 1.57030158878f, 1.73107312201f

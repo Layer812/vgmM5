@@ -70,6 +70,25 @@ int main(void) {
         assert(fabsf(high - 4.0f * low) < 0.001f);
     }
     puts("PASS: YM2151 DT2 pitch ratios and normal-notes R1 parity (ASan/UBSan)");
+    // Validate all YM2151 4-operator topology entries, including masking.
+    // Reference order O1, O2, O3, O4 maps to physical register slots 0, 2, 1, 3.
+    static const uint8_t expected[8][4] = {
+        {1,2,3,0}, {0,5,3,0}, {0,2,6,0}, {1,0,7,0},
+        {1,0,3,2}, {1,1,1,6}, {1,0,0,6}, {0,0,0,7}
+    };
+    for (int raw = 0; raw < 256; ++raw) {
+        VgmYM2151Routing rt = vgm_ym2151_routing((uint8_t)raw);
+        assert(rt.op2_input == expected[raw & 7][0]);
+        assert(rt.op3_input == expected[raw & 7][1]);
+        assert(rt.op4_input == expected[raw & 7][2]);
+        assert(rt.extra_carriers == expected[raw & 7][3]);
+        assert(rt.op2_input == 0 || rt.op2_input == 1);
+        assert(rt.op3_input == 0 || rt.op3_input == 1 ||
+               rt.op3_input == 2 || rt.op3_input == 5);
+        assert(rt.op4_input == 0 || rt.op4_input == 1 ||
+               rt.op4_input == 3 || rt.op4_input == 6 || rt.op4_input == 7);
+    }
+    puts("PASS: YM2151 8 algorithms and 256 routing-mask values");
     puts("PASS: YM2151 normal/wrapped phases, C140/C352 sample decode (ASan/UBSan)");
     return 0;
 }
