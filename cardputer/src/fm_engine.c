@@ -1,6 +1,7 @@
 #include "fm_engine.h"
 #include "ssg_engine.h"
 #include "pcm_engine.h"
+#include "sound_safe_math.h"
 #include <string.h>
 #include <math.h>
 
@@ -77,7 +78,7 @@ static void init_tables() {
 }
 static void update_phase_step(FMSoundEngine *engine, int ch) {
     int kc = engine->kc[ch];
-    int kf = engine->kf[ch] & 0x3F;
+    int kf = vgm_ym2151_decode_kf(engine->kf[ch]);
 
     int note = kc & 0x0F;
     int octave = (kc >> 4) & 0x07;
@@ -113,14 +114,13 @@ static void update_phase_step(FMSoundEngine *engine, int ch) {
         static const float DT1_TAB[8] = { 1.0f, 1.002f, 1.004f, 1.006f, 1.0f, 0.998f, 0.996f, 0.994f };
         float detune_m = DT1_TAB[dt1 & 7];
 
-        // DT2 (実機仕様に基づく加算オフセット)
-        int dt2 = engine->ops[idx].dt2;
-        // MAME等の解析に基づく加算値（位相ステップのスケールに合わせる）
-        static const float DT2_OFFSET_TAB[4] = { 0.0f, 384.0f, 500.0f, 608.0f }; 
-        float dt2_offset = DT2_OFFSET_TAB[dt2 & 3] * engine->phase_step_factor * 0.5f;
-        
-        // 最終計算 (DT2は乗算ではなく加算)
-        engine->ops[idx].phase_step = (uint32_t)(step_f * m * detune_m + dt2_offset);
+        // YM2151 DT2 is a pitch offset (+600/+781.25/+950 cents),
+        // not a fixed Hz/phase-step addition. It scales with the note.
+        // DT2=0 bypasses multiplication to preserve R1's normal notes.
+        const float phase_step = vgm_ym2151_apply_dt2(
+            step_f * m * detune_m, engine->ops[idx].dt2
+        );
+        engine->ops[idx].phase_step = vgm_safe_ym2151_phase_step(phase_step);
     }
 }
 
@@ -1755,10 +1755,10 @@ inline int32_t calc_op_ym2151_internal(
     // YM2151で確定する条件の簡約化:
     // - active_phase_step は常に op->phase_step
     // - pm_amount 加算は元の汎用OPN計算式を維持
-    // - modulation *= 2
+    // - YM2151 operator output is 2x the native 13-bit value; no additional x2
     uint32_t active_phase_step = op->phase_step;
     
-    modulation *= 2;
+    // The 12-bit phase domain is already matched by the 14-bit output level.
     if (pm_amount != 0) {
         active_phase_step += (((int32_t)(active_phase_step >> 10)) * pm_amount) >> 3;
     }
@@ -1810,91 +1810,50 @@ inline int32_t calc_op_ym2151_internal(
  2. YM2151専用の合成関数
 ================================================================================
 */
+// OPM algorithm routing is YM2151-only. Keep the original register
+// decoding and key-on slot order intact; map physical slots at synthesis.
 static IRAM_ATTR __attribute__((noinline, optimize("O3")))
-void fm_engine_synthesize_ym2151_tick(
-    FMSoundEngine *engine,
-    int active_channels,
-    int32_t *mix_l,
-    int32_t *mix_r
-) {
-    int32_t local_mix_l = 0;
-    int32_t local_mix_r = 0;
-    
-    int32_t global_pm = engine->cached_global_pm;
-    int32_t global_am = engine->cached_global_am;
-
-    static int32_t pms_mult[8] = { 0, 1, 2, 4, 8, 16, 32, 64 };
-    static int32_t ams_mult[4] = { 0, 2, 4, 8 };
-
-    for (int ch = 0; ch < active_channels; ch++) {
-        int b = ch * 4;
+void fm_engine_synthesize_ym2151_tick(FMSoundEngine *engine,
+                                      int active_channels,
+                                      int32_t *mix_l, int32_t *mix_r) {
+    static const int32_t pms_mult[8] = {0, 1, 2, 4, 8, 16, 32, 64};
+    static const int32_t ams_mult[4] = {0, 2, 4, 8};
+    int32_t l = 0, r = 0;
+    for (int ch = 0; ch < active_channels; ++ch) {
+        const int b = ch * 4;
         if (engine->ops[b+0].env_state == EG_OFF && engine->ops[b+1].env_state == EG_OFF &&
             engine->ops[b+2].env_state == EG_OFF && engine->ops[b+3].env_state == EG_OFF) continue;
 
-        int32_t ch_pm = (global_pm * pms_mult[engine->pms[ch]]) >> 4;
-        int32_t ch_am = (global_am * ams_mult[engine->ams[ch]]) >> 2;
+        const VgmYM2151Routing rt = vgm_ym2151_routing(engine->algo[ch]);
+        const int32_t pm = (engine->cached_global_pm * pms_mult[engine->pms[ch]]) >> 4;
+        const int32_t am = (engine->cached_global_am * ams_mult[engine->ams[ch]]) >> 2;
+        int32_t outputs[8] = {0};
+        const int32_t feedback = calc_feedback_modulation(engine, ch);
 
-        int32_t fb_mod = calc_feedback_modulation(engine, ch);
-
-        int is_noise_ch = (ch == 7 && engine->noise_enable);
-
-        static uint8_t opm_algo_mem_dst[8] = { 2, 2, 2, 3, 5, 2, 5, 5 };
-        static uint8_t opm_algo_dst_m1[8]  = { 1, 5, 3, 1, 1, 5, 1, 4 };
-        static uint8_t opm_algo_dst_m2[8]  = { 3, 3, 3, 3, 3, 4, 4, 4 };
-        static uint8_t opm_algo_dst_c1[8]  = { 5, 5, 5, 5, 4, 4, 4, 4 };
-        static uint8_t opm_algo_dst_c2[8]  = { 4, 4, 4, 4, 4, 4, 4, 4 };
-
-        uint8_t *algo_mem_dst = opm_algo_mem_dst;
-        uint8_t *algo_dst_m1  = opm_algo_dst_m1;
-        uint8_t *algo_dst_m2  = opm_algo_dst_m2;
-        uint8_t *algo_dst_c1  = opm_algo_dst_c1;
-        uint8_t *algo_dst_c2  = opm_algo_dst_c2;
-
-        int32_t bus[6] = {0};
-        int algo = engine->algo[ch] & 7;
-        bus[algo_mem_dst[algo]] = engine->mem_value[ch];
-
-        // OP1 (M1)
-        int32_t mod0 = bus[0] + fb_mod;
-        int32_t out0 = calc_op_ym2151_internal(engine, b+0, mod0, ch_pm, ch_am, 0);
+        // Logical O1 = YM2151 register slot 0 (M1).
+        outputs[1] = calc_op_ym2151_internal(engine, b+0, feedback, pm, am, 0);
         engine->fb_memory[ch][0] = engine->fb_memory[ch][1];
-        engine->fb_memory[ch][1] = out0;
-        bus[algo_dst_m1[algo]] += out0;
-        if (algo == 5) {
-            bus[1] += out0;
-            bus[3] += out0;
-        }
-
-        // OP2 (M2)
-        int32_t mod1 = bus[2];
-        int32_t out1 = calc_op_ym2151_internal(engine, b+1, mod1, ch_pm, ch_am, 0);
-        bus[algo_dst_m2[algo]] += out1;
-
-        // OP3 (C1)
-        int32_t mod2 = bus[1];
-        int32_t out2 = calc_op_ym2151_internal(engine, b+2, mod2, ch_pm, ch_am, 0);
-        bus[algo_dst_c1[algo]] += out2;
-
-        // OP4 (C2)
-        int32_t mod3 = bus[3];
-        int32_t out3;
-        if (is_noise_ch) {
-            out3 = calc_op_ym2151_internal(engine, b+3, mod3, ch_pm, ch_am, 1);
-        } else {
-            out3 = calc_op_ym2151_internal(engine, b+3, mod3, ch_pm, ch_am, 0);
-        }
-        bus[algo_dst_c2[algo]] += out3;
-
-        engine->mem_value[ch] = bus[5];
-        int32_t ch_out = bus[4];
-        local_mix_l += ch_out * engine->pan_l[ch];
-        local_mix_r += ch_out * engine->pan_r[ch];
+        engine->fb_memory[ch][1] = outputs[1];
+        // Logical O2 = register slot 2 (C1).
+        outputs[2] = calc_op_ym2151_internal(engine, b+2, outputs[rt.op2_input], pm, am, 0);
+        outputs[5] = outputs[1] + outputs[2];
+        // Logical O3 = register slot 1 (M2).
+        outputs[3] = calc_op_ym2151_internal(engine, b+1, outputs[rt.op3_input], pm, am, 0);
+        outputs[6] = outputs[1] + outputs[3];
+        outputs[7] = outputs[2] + outputs[3];
+        // Logical O4 = register slot 3 (C2 / noise CH7).
+        outputs[4] = calc_op_ym2151_internal(engine, b+3, outputs[rt.op4_input], pm, am,
+                                             (ch == 7 && engine->noise_enable) ? 1 : 0);
+        int32_t out = outputs[4];
+        if (rt.extra_carriers & 1u) out += outputs[1];
+        if (rt.extra_carriers & 2u) out += outputs[2];
+        if (rt.extra_carriers & 4u) out += outputs[3];
+        l += out * engine->pan_l[ch];
+        r += out * engine->pan_r[ch];
     }
-    *mix_l = local_mix_l;
-    *mix_r = local_mix_r;
+    *mix_l = l;
+    *mix_r = r;
 }
-
-
 
 __attribute__((optimize("O3"))) void IRAM_ATTR fm_engine_tick(FMSoundEngine *engine, int32_t *out_l, int32_t *out_r) {
     int active_channels = (engine->chip_type == CHIP_YM2612) ? 6 :

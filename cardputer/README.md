@@ -2,7 +2,7 @@
 
 ## 日本語
 
-既存の [vgmM5 v0.98](../README.md) から、Cardputer用ソースを独立させた **ESP32-S3 / M5Stack Cardputer向けのビルド環境**です。2026-10-25時点の旧ルートソース45ファイルを **バイト単位で変更せず** コピーし、既存の `src/`・Tab5 R61 FIX1・他機種版は変更していません。
+既存の [vgmM5 v0.98](../README.md) から、Cardputer用ソースを独立させた **ESP32-S3 / M5Stack Cardputer向けのビルド環境**です。旧ルートの45ファイルをコピーした保存基準は `SOURCE_LOCK.json` に維持しています。Cardputer R5では `fm_engine.c`・`pcm_engine.c` と新規の `sound_safe_math.h` だけを個別ハッシュで変更管理しています。既存のルート `src/`、Tab5 R61 FIX1および他機種版は変更していません。
 
 ### Windowsでのビルド（書込なし）
 
@@ -12,7 +12,7 @@ PlatformIO Coreが利用できるWindowsでこのリポジトリを取得し、�
 cardputer\RUN_THIS_CARDPUTER_BUILD_ONLY.cmd
 ~~~
 
-ビルドはCardputer専用の `platformio.ini` と `partitions.csv` を使用します。レポートはG:ドライブが存在する場合 `G:\VGMM5_CARDPUTER_BUILD_SEND_THIS.zip`、それ以外はCardputerディレクトリ内に生成します。**実機へは書き込みません。**
+ビルドはCardputer専用の `platformio.ini` と `partitions.csv` を使用します。レポートZIPは `F:\build\tmp` が存在すればそこへ保存し、それ以外はCardputerディレクトリ内に生成します。**実機へは書き込みません。**
 
 ### オンラインモード用DBの注意
 
@@ -27,17 +27,17 @@ cardputer\RUN_THIS_CARDPUTER_BUILD_ONLY.cmd
 
 - 45ソースファイルと元のパーティション定義のGit Blob SHA-1を `SOURCE_LOCK.json` で固定。
 - Tab5のR61用演算修正・Speaker・LCD初期化はCardputerへ**移植していません**。
-- **ESP32-S3ネイティブビルドPASS（2026-10-25）:** GitHub Actions [実行40148553881](https://github.com/Layer812/vgmM5/actions/runs/40148553881)でArduino 2.0.17／Espressif32 6.13.0にてコンパイル成功。ローカルSD再生用の空DB6個を使用。BINは1,240,480バイト、SHA-256：`9ebc9d4004947b3708943b72724fd5371ec030f68755c15fe12dd223347a64a7`。RAM 49.4%、Flash 19.9%。**実機再生は未確認・書込なし。** M5Burnerの配布イメージとの同一性も未確認。
+- Cardputer R5はGitHub Actions上でESP32-S3ネイティブビルド、ASan/UBSan演算検査および音源ハッシュ検証が **PASS** しています（[run 40186870273](https://github.com/Layer812/vgmM5/actions/runs/40186870273)）。R1のapp-only書込・読戻しは実機PASSしましたが、**R5の実機音質は未確認**です。旧Cardputer版のM5Burner用コード `KxVPdM380FWTyMmC` は今回生成したBINと同一とは確認できていません。
 - `RUN_THIS_CARDPUTER_BUILD_ONLY.cmd` はビルド専用。フラッシュや既存機の消去は行いません。
 
 旧Cardputer版に合わせ、**Espressif32プラットフォーム6.13.0／Arduino 2.0.17に固定**しました。2026年の最新8.0.0／Arduino 3.3.12では旧Flash mmap APIが変更され、元コードのままではコンパイルできなかったためです。`env:m5stack-cardputer` は維持しています。音源共通化や新しいArduino/ESP-IDFへのアップグレードは将来の別作業です。
 
 ## English
 
-This directory independently snapshots the original **M5Stack Cardputer / ESP32-S3 v0.98** source. All 45 compiled source/header files and the original partition table are preserved byte-for-byte; existing root projects and Tab5 R61 FIX1 are untouched.
+This directory independently snapshots the original **M5Stack Cardputer / ESP32-S3 v0.98** source. The original 45-source baseline and partition table remain protected under `SOURCE_LOCK.json`; the R5 changes are restricted to the two separately pinned Cardputer audio sources and one new math header. Root projects and Tab5 R61 FIX1 remain untouched.
 
-Run `cardputer\RUN_THIS_CARDPUTER_BUILD_ONLY.cmd` on Windows with PlatformIO Core to perform a **build only**. No device flashing is performed. A single report ZIP is written to the root of G: when available, otherwise into the Cardputer directory.
+Run `cardputer\RUN_THIS_CARDPUTER_BUILD_ONLY.cmd` on Windows with PlatformIO Core to perform a **build only**. No device flashing is performed. A single report ZIP is written to `F:\build\tmp` when this directory exists, otherwise into the Cardputer directory.
 
 The original project referenced six embedded online-catalogue `.bin` files which were **not in the repository**. If none are present, the build runner generates six one-byte empty files, allowing an **offline/local microSD build** but leaving **Online catalogue mode empty/unusable**. To use the full online catalogue, supply all six valid DB files that you are entitled to use. Incomplete or mixed DB sets fail validation, and provided DB contents are not fully audited. Never commit proprietary datasets.
 
-The build platform is pinned to **Espressif32 6.13.0 / Arduino 2.0.17**, since unpinned 8.0.0 / Arduino 3.3.12 failed on the original Flash mmap API. Source hashes and the partition layout are protected by `SOURCE_LOCK.json`. Native ESP32-S3 compilation **PASS** on [GitHub Actions run 40148553881](https://github.com/Layer812/vgmM5/actions/runs/40148553881) with Arduino 2.0.17, offline placeholders and no flash. BIN SHA-256: `9ebc9d4004947b3708943b72724fd5371ec030f68755c15fe12dd223347a64a7`. Hardware playback is **not yet verified**; do not infer that the previously distributed M5Burner binary is bit-identical to a new build. Third-party source licensing and external media rights remain governed by their original terms.
+The build platform is pinned to **Espressif32 6.13.0 / Arduino 2.0.17**, since unpinned 8.0.0 / Arduino 3.3.12 failed on the original Flash mmap API. Source hashes and the partition layout are protected by `SOURCE_LOCK.json`. Cardputer R5 passed native ESP32-S3 build and ASan/UBSan host tests in GitHub Actions run 40186870273; R1 was physically flashed and read back successfully, while R5 has not been hardware-tested; do not infer that the previously distributed M5Burner binary is bit-identical to a new build. Third-party source licensing and external media rights remain governed by their original terms.
