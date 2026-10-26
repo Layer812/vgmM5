@@ -73,7 +73,8 @@ static bool cloud_force_redraw = true;
 static_assert(ARDUINO_USB_ON_BOOT == 0,
               "Atom Echo S3R MSC requires USB startup AFTER FFat/WL initialization");
 USBCDC g_atom_usb_cdc;
-USBMSC MSC;
+// The MSC descriptor must be registered only when USB drive mode is selected.
+// Normal playback exposes CDC without an empty/offline storage interface.
 static wl_handle_t s_wl_handle = WL_INVALID_HANDLE;
 static uint32_t s_msc_sector_size = 0;
 static uint32_t s_msc_block_count = 0;
@@ -144,6 +145,9 @@ static bool onStartStop(uint8_t power_condition, bool start, bool load_eject) {
 }
 
 void enter_usb_mode() {
+    // Construct MSC before USB.begin() but ONLY for USB-drive boot.
+    // USB must not have been started by Arduino app_main (see platformio.ini).
+    static USBMSC MSC;
     Serial.println("[USBMSC] Exclusive USB drive mode");
 
     // NEVER FFat.begin(true) here: mount failure would silently format the music.
@@ -388,9 +392,8 @@ static void cores3_show_splash() {
 
 void setup() {
 #if defined(IS_ATOMS3)
-    // ★大至急！ ここに移動させます。一番最初にUSBを起動し、PCの認識を待ちます
-//    update_namco_volumes(engine, ch);
-   delay(2000);
+    // Do not sleep two seconds before sampling the boot-held MSC button.
+    // M5.begin() will initialize the button, then we sample after debounce.
 #endif
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
