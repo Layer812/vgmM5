@@ -69,6 +69,10 @@ jobs:
           new_fat="        // Music in the internal FFat volume must never be formatted silently.\n        // If the volume is absent/corrupt, use the separate USB mode for recovery.\n        if (!FFat.begin(false)) {\n            Serial.println(\"FFat Mount Failed (NOT FORMATTED)!\");\n            return;\n        }"
           assert new_normal.count(new_fat)==1
           new_normal=new_normal.replace(new_fat,old_fat)
+          baseline_start="#if defined(IS_ATOMS3)\n    // ★大至急！ ここに移動させます。一番最初にUSBを起動し、PCの認識を待ちます\n//    update_namco_volumes(engine, ch);\n   delay(2000);\n#endif"
+          now_start="#if defined(IS_ATOMS3)\n    // Do not sleep two seconds before sampling the boot-held MSC button.\n    // M5.begin() will initialize the button, then we sample after debounce.\n#endif"
+          assert new_normal.count(now_start)==1
+          new_normal=new_normal.replace(now_start,baseline_start)
           assert new_normal==old_normal,'Changes outside USB mode/Atom setup'
           usb=updated.split('void enter_usb_mode()',1)[1].split('#endif // IS_ATOMS3',1)[0]
           assert 'FFat.begin(false)' in usb and not any(x.lstrip().startswith('FFat.begin(true);') for x in usb.splitlines()), 'USB autoformat prohibited'
@@ -81,6 +85,9 @@ jobs:
           assert 'if (!MSC.begin' in usb and 'if (!USB.begin())' in usb
           assert 'static_assert(ARDUINO_USB_ON_BOOT == 0' in updated
           assert 'USBCDC g_atom_usb_cdc;' in updated
+          assert 'static USBMSC MSC;' in usb and updated.count('USBMSC MSC;')==1, 'MSC must exist ONLY inside selected USB-drive path'
+          assert updated.index('USBCDC g_atom_usb_cdc;')<updated.index('void enter_usb_mode()')
+          assert 'delay(2000);' not in updated[:updated.index('void enter_usb_mode()')], 'USB drive button sampling must be early'
           assert usb.index('MSC.begin(s_msc_block_count') < usb.index('g_atom_usb_cdc.begin(115200)') < usb.index('if (!USB.begin())'), 'USB descriptor/capacity initialization order'
           assert updated.index('enter_usb_mode(); // never returns')<updated.index('vgm_engine_init();')
           print('PASS pre-setup USB disabled, CDC manually registered, MSC medium ready before enumerate, audio/other boards unchanged, no autoformat')
@@ -92,7 +99,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           s=Path('src/voice.cpp').read_text()
-          start=s.index('USBMSC MSC;')
+          start=s.index('static wl_handle_t s_wl_handle')
           end=s.index('void enter_usb_mode()',start)
           callback=s[start:end]
           assert callback.count('static int32_t onWrite')==1
@@ -127,6 +134,23 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check platformio
           pio pkg install -e m5stack-atoms3
+      - name: Verify exact Arduino-ESP32 2.0.17 pre-setup USB autostart mechanism
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          f=Path.home()/'.platformio/packages/framework-arduinoespressif32/cores/esp32'
+          main=(f/'main.cpp').read_text()
+          usb=(f/'USB.h').read_text()
+          assert 'ARDUINO_USB_ON_BOOT && !ARDUINO_USB_MODE' in main
+          assert 'USB.begin();' in main[main.index('extern "C" void app_main()'):]
+          assert '#define ARDUINO_USB_ON_BOOT (ARDUINO_USB_CDC_ON_BOOT|ARDUINO_USB_MSC_ON_BOOT|ARDUINO_USB_DFU_ON_BOOT)' in usb
+          ini=Path('platformio.ini').read_text().split('[env:m5stack-cardputer]')[0]
+          assert '-D ARDUINO_USB_CDC_ON_BOOT=0' in ini
+          assert '-D ARDUINO_USB_MSC_ON_BOOT=0' in ini
+          assert '-D ARDUINO_USB_DFU_ON_BOOT=0' in ini
+          assert 'static USBMSC MSC;' in Path('src/voice.cpp').read_text()
+          print('PASS 2.0.17 app_main USB autostart disabled; selected MSC constructed before explicit USB begin')
+          PY
       - name: Verify actual Unified 0.2.28 GFX 0.2.35
         run: |
           python3 - <<'PY'
