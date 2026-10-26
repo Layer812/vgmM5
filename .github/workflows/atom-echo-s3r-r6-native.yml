@@ -29,7 +29,11 @@ jobs:
           assert changed==wanted,(changed-wanted,wanted-changed)
           a=Path('platformio.ini').read_text()
           assert a.split('[env:m5stack-cardputer]',1)[1]==old('platformio.ini').split('[env:m5stack-cardputer]',1)[1]
-          assert 'espressif32 @ 6.13.0' in a.split('[env:m5stack-cardputer]')[0]
+          atom=a.split('[env:m5stack-cardputer]')[0]
+          assert 'espressif32 @ 6.13.0' in atom
+          assert '-D ARDUINO_USB_MODE=0' in atom
+          assert '-D ARDUINO_USB_CDC_ON_BOOT=0' in atom and '-D ARDUINO_USB_CDC_ON_BOOT=1' not in atom
+          assert '-D ARDUINO_USB_MSC_ON_BOOT=0' in atom and '-D ARDUINO_USB_DFU_ON_BOOT=0' in atom
           assert 'M5Unified.git#368ad60807161625aa65baad37a4a3af2a7eccea' in a
           assert 'M5GFX.git#65c816a38386062d2c3dc47d41237a9083acbc75' in a
           for path in ('src/vgm_engine.cpp','src/mdx_engine.cpp','src/mdx_fm.c','src/sound_safe_math.h','partitions_atoms3.csv','partitions.csv'):
@@ -58,7 +62,7 @@ jobs:
           assert new_normal.count(early)==1
           new_normal=new_normal.replace(early,'')
           old_late="        // 起動直後のピン状態が安定し、M5.update()が正確にボタンを読めるように少し待機\n        delay(100);\n        M5.update();\n        \n        if (M5.BtnA.isPressed()) {\n            Serial.println(\"Entering USB mode...\");\n            enter_usb_mode();\n        }\n        USB.begin();"
-          new_late="        // Boot-held MSC selection has already been handled before audio init.\n        // Normal playback can use the existing CDC path.\n        USB.begin();"
+          new_late="        // Boot-held MSC selection has already been handled before audio init.\n        // Keep the native USB serial COM port in normal playback mode.\n        // Without CDC_ON_BOOT, USB is NOT initialized by Arduino app_main.\n        g_atom_usb_cdc.begin(115200);\n        if (!USB.begin()) {\n            Serial.println(\"[ATOM] USB.begin failed\");\n        }"
           assert new_normal.count(new_late)==1
           new_normal=new_normal.replace(new_late,old_late)
           old_fat="        if (!FFat.begin(true)) {\n            Serial.println(\"FFat Mount Failed!\");\n            return;\n        }"
@@ -75,8 +79,11 @@ jobs:
           assert 'wl_erase_range(s_wl_handle, base, sector)' in updated
           assert 'wl_write(s_wl_handle, base, s_msc_write_sector, sector)' in updated
           assert 'if (!MSC.begin' in usb and 'if (!USB.begin())' in usb
+          assert 'static_assert(ARDUINO_USB_ON_BOOT == 0' in updated
+          assert 'USBCDC g_atom_usb_cdc;' in updated
+          assert usb.index('MSC.begin(s_msc_block_count') < usb.index('g_atom_usb_cdc.begin(115200)') < usb.index('if (!USB.begin())'), 'USB descriptor/capacity initialization order'
           assert updated.index('enter_usb_mode(); // never returns')<updated.index('vgm_engine_init();')
-          print('PASS root FM/PCM isolated, no non-USB code changes, MSC before audio tasks, restart only intentional long hold, no autoformat')
+          print('PASS pre-setup USB disabled, CDC manually registered, MSC medium ready before enumerate, audio/other boards unchanged, no autoformat')
           PY
       - name: Exercise real MSC callbacks with simulated NOR and WL (512B/4096B)
         run: |
