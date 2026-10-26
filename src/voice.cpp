@@ -61,72 +61,161 @@ static bool cloud_force_redraw = true;
 // 1. 初期化・設定フェーズ (Initialization)
 // ============================================================================
 
-// AtomS3 USB Drive Logic
+// Atom Echo S3R USB Mass Storage. This is an exclusive boot mode:
+// normal audio tasks and the application FAT mount must never own this volume.
+// Preserve the original partition and host-visible logical sector size.
 #if defined(IS_ATOMS3)
-USBMSC MSC;
+// In Arduino-ESP32 2.0.17, CDC_ON_BOOT=1 triggers USB.begin() from
+// app_main() *before* setup(), exposing an unready MSC LUN to Windows.
+// CDC_ON_BOOT=0 defers the USB connection until explicit USB.begin()
+// below. Create the CDC interface manually, before USB initialization,
+// so the usual serial COM port also remains available.
+static_assert(ARDUINO_USB_ON_BOOT == 0,
+              "Atom Echo S3R MSC requires USB startup AFTER FFat/WL initialization");
+USBCDC g_atom_usb_cdc;
+// The MSC descriptor must be registered only when USB drive mode is selected.
+// Normal playback exposes CDC without an empty/offline storage interface.
 static wl_handle_t s_wl_handle = WL_INVALID_HANDLE;
+static uint32_t s_msc_sector_size = 0;
+static uint32_t s_msc_block_count = 0;
+static uint8_t s_msc_write_sector[4096]; // one WL sector; MSC callback is serialized
 
-static int32_t onWrite(uint32_t lba, uint32_t offset, uint8_t* buffer, uint32_t bufsize) {
-    if (s_wl_handle == WL_INVALID_HANDLE) return 0;
-    uint32_t sector_size = wl_sector_size(s_wl_handle);
-    uint32_t address = (lba * sector_size) + offset;
-    if (offset == 0) wl_erase_range(s_wl_handle, address, bufsize);
-    wl_write(s_wl_handle, address, buffer, bufsize);
-    return bufsize;
+static bool msc_bounds(uint32_t lba, uint32_t offset, uint32_t size,
+                       uint64_t* byte_addr) {
+    if (s_wl_handle == WL_INVALID_HANDLE || !s_msc_sector_size ||
+        !s_msc_block_count || lba >= s_msc_block_count ||
+        offset >= s_msc_sector_size) return false;
+    const uint64_t start = (uint64_t)lba * s_msc_sector_size + offset;
+    const uint64_t limit = (uint64_t)s_msc_block_count * s_msc_sector_size;
+    if (start > limit || (uint64_t)size > limit - start) return false;
+    *byte_addr = start;
+    return true;
 }
 
 static int32_t onRead(uint32_t lba, uint32_t offset, void* buffer, uint32_t bufsize) {
-    if (s_wl_handle == WL_INVALID_HANDLE) return 0;
-    wl_read(s_wl_handle, (lba * wl_sector_size(s_wl_handle)) + offset, buffer, bufsize);
-    return bufsize;
+    uint64_t pos;
+    if (!buffer || !msc_bounds(lba, offset, bufsize, &pos)) return -1;
+    if (!bufsize) return 0;
+    esp_err_t rc = wl_read(s_wl_handle, (size_t)pos, buffer, bufsize);
+    if (rc != ESP_OK) {
+        Serial.printf("[USBMSC] READ error=%d lba=%lu off=%lu len=%lu\n",
+                      (int)rc, (unsigned long)lba, (unsigned long)offset,
+                      (unsigned long)bufsize);
+        return -1;
+    }
+    return (int32_t)bufsize;
 }
 
-static bool onStartStop(uint8_t power_condition, bool start, bool load_eject) { return true; }
+static int32_t onWrite(uint32_t lba, uint32_t offset,
+                       uint8_t* buffer, uint32_t bufsize) {
+    uint64_t pos;
+    if (!buffer || !msc_bounds(lba, offset, bufsize, &pos)) return -1;
+    if (!bufsize) return 0;
+    const uint32_t sector = s_msc_sector_size;
+    uint32_t done = 0;
+    while (done < bufsize) {
+        const size_t base = ((size_t)pos / sector) * sector;
+        const uint32_t within = (uint32_t)pos % sector;
+        const uint32_t part = ((bufsize - done) < (sector - within))
+                            ? (bufsize - done) : (sector - within);
+        // The host can send partial sectors; erase must still be whole-sector.
+        // Preserve surrounding bytes before erase (no destructive half-sector erase).
+        if (within || part != sector) {
+            if (wl_read(s_wl_handle, base, s_msc_write_sector, sector) != ESP_OK) {
+                Serial.println("[USBMSC] read-modify-write read error");
+                return -1;
+            }
+        }
+        memcpy(s_msc_write_sector + within, buffer + done, part);
+        if (wl_erase_range(s_wl_handle, base, sector) != ESP_OK ||
+            wl_write(s_wl_handle, base, s_msc_write_sector, sector) != ESP_OK) {
+            Serial.printf("[USBMSC] WRITE error sector=%lu\n", (unsigned long)base);
+            return -1;
+        }
+        done += part;
+        pos += part;
+    }
+    return (int32_t)bufsize;
+}
+
+static bool onStartStop(uint8_t power_condition, bool start, bool load_eject) {
+    (void)power_condition;
+    Serial.printf("[USBMSC] start=%u eject=%u\n", start, load_eject);
+    return true;
+}
 
 void enter_usb_mode() {
-    Serial.println("Entering USB Drive Mode...");
-    // 画面がある場合 (AtomS3)
-    M5.Display.fillScreen(TFT_BLUE);
-    M5.Display.setCursor(10, 40);
-    M5.Display.setTextColor(TFT_WHITE);
-    M5.Display.setTextSize(2);
-    M5.Display.println("USB Mode");
+    // Construct MSC before USB.begin() but ONLY for USB-drive boot.
+    // USB must not have been started by Arduino app_main (see platformio.ini).
+    static USBMSC MSC;
+    Serial.println("[USBMSC] Exclusive USB drive mode");
 
-    // 省電力などのためにVGMタスクを停止（または再開させない）
-    vgm_engine_stop();
-    
-    FFat.begin(true);
-    FFat.end();
-
-    const esp_partition_t* partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_FAT, "ffat");
+    // NEVER FFat.begin(true) here: mount failure would silently format the music.
+    // A temporary read-only ownership check uses formatOnFail=false; FFat.end()
+    // releases VFS/WL before the host takes ownership.
+    if (FFat.begin(false)) {
+        FFat.end();
+    } else {
+        Serial.println("[USBMSC] No mounted FAT; leaving contents untouched");
+    }
+    const esp_partition_t* partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_FAT, "ffat");
     if (!partition) {
-        Serial.println("No FAT partition found!");
-        while(1) delay(100);
+        Serial.println("[USBMSC] ffat partition not found");
+        for (;;) delay(100);
     }
-    
     if (wl_mount(partition, &s_wl_handle) != ESP_OK) {
-        Serial.println("wl_mount failed!");
-        while(1) delay(100);
+        Serial.println("[USBMSC] wl_mount failed, NOT formatting");
+        for (;;) delay(100);
     }
-    
-    uint32_t sector_size = wl_sector_size(s_wl_handle); 
-    uint32_t sector_count = wl_size(s_wl_handle) / sector_size;
-    
+    s_msc_sector_size = wl_sector_size(s_wl_handle);
+    const size_t usable = wl_size(s_wl_handle);
+    if ((s_msc_sector_size != 512 && s_msc_sector_size != 4096) ||
+        usable < (size_t)s_msc_sector_size * 16u ||
+        usable % s_msc_sector_size) {
+        Serial.printf("[USBMSC] Unsupported WL geometry: sector=%lu size=%lu\n",
+                      (unsigned long)s_msc_sector_size, (unsigned long)usable);
+        for (;;) delay(100);
+    }
+    s_msc_block_count = (uint32_t)(usable / s_msc_sector_size);
     MSC.vendorID("vgmM5");
     MSC.productID("USB_Drive");
-    MSC.productRevision("1.0");
+    MSC.productRevision("1.1");
     MSC.onStartStop(onStartStop);
     MSC.onRead(onRead);
     MSC.onWrite(onWrite);
+    // Arduino 2.0.17 USBMSC is writable by default (no isWritable API).
     MSC.mediaPresent(true);
-    MSC.begin(sector_count, sector_size);
-//    update_namco_volumes(engine, ch);
-    
-    Serial.println("USB Drive Mode Ready.");
-    while(1) {
+    if (!MSC.begin(s_msc_block_count, (uint16_t)s_msc_sector_size)) {
+        Serial.println("[USBMSC] MSC.begin FAILED");
+        for (;;) delay(100);
+    }
+    // Arduino official MSC sequence: MSC callbacks/capacity, then
+    // USBCDC.begin, finally the one USB.begin() that enumerates the device.
+    g_atom_usb_cdc.begin(115200);
+    if (!USB.begin()) {
+        Serial.println("[USBMSC] USB.begin FAILED");
+        for (;;) delay(100);
+    }
+    Serial.printf("[USBMSC] Ready: %lu x %lu bytes\n",
+                  (unsigned long)s_msc_block_count,
+                  (unsigned long)s_msc_sector_size);
+
+    // The boot button is initially held by design. Its first transition MUST
+    // NEVER trigger a reset. Only a *later* press held 2.5 seconds, after a
+    // deliberate release of at least 500 ms, exits MSC mode.
+    // Eject the disk safely on the PC before this manual restart.
+    bool restart_armed = false;
+    uint32_t release_since = 0;
+    for (;;) {
         M5.update();
-        if (M5.BtnA.wasPressed()) {
-            Serial.println("Restarting...");
+        if (!restart_armed) {
+            if (M5.BtnA.isReleased()) {
+                if (!release_since) release_since = millis();
+                if (millis() - release_since >= 500) restart_armed = true;
+            } else release_since = 0;
+        } else if (M5.BtnA.pressedFor(2500)) {
+            Serial.println("[USBMSC] Intentional long-press restart");
             ESP.restart();
         }
         delay(10);
@@ -303,9 +392,8 @@ static void cores3_show_splash() {
 
 void setup() {
 #if defined(IS_ATOMS3)
-    // ★大至急！ ここに移動させます。一番最初にUSBを起動し、PCの認識を待ちます
-//    update_namco_volumes(engine, ch);
-   delay(2000);
+    // Do not sleep two seconds before sampling the boot-held MSC button.
+    // M5.begin() will initialize the button, then we sample after debounce.
 #endif
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
@@ -326,6 +414,15 @@ void setup() {
     Serial.begin(115200);
 
     Serial.println("--- Boot Start ---"); // ★これがシリアルモニタに出るか確認！
+#if defined(IS_ATOMS3)
+    // Detect boot-held USB drive BEFORE creating audio tasks or mounting FFat.
+    // It is not safe for the firmware and the USB host to own the same FAT.
+    delay(100);
+    M5.update();
+    if (M5.BtnA.isPressed()) {
+        enter_usb_mode(); // never returns
+    }
+#endif
     // 共通の再生エンジン初期化（I2S等の設定）
     Serial.println("Calling vgm_engine_init...");
     vgm_engine_init();
@@ -350,20 +447,20 @@ void setup() {
 #elif defined(IS_ATOMS3)
         Serial.println("Initializing AtomS3 Board...");
         
-        // 起動直後のピン状態が安定し、M5.update()が正確にボタンを読めるように少し待機
-        delay(100);
-        M5.update();
-        
-        if (M5.BtnA.isPressed()) {
-            Serial.println("Entering USB mode...");
-            enter_usb_mode();
+        // Boot-held MSC selection has already been handled before audio init.
+        // Keep the native USB serial COM port in normal playback mode.
+        // Without CDC_ON_BOOT, USB is NOT initialized by Arduino app_main.
+        g_atom_usb_cdc.begin(115200);
+        if (!USB.begin()) {
+            Serial.println("[ATOM] USB.begin failed");
         }
-        USB.begin();
         
         // ★ 注意：ここにあった古い update_namco_volumes(engine, ch);
         
-        if (!FFat.begin(true)) {
-            Serial.println("FFat Mount Failed!");
+        // Music in the internal FFat volume must never be formatted silently.
+        // If the volume is absent/corrupt, use the separate USB mode for recovery.
+        if (!FFat.begin(false)) {
+            Serial.println("FFat Mount Failed (NOT FORMATTED)!");
             return;
         }
         Serial.println("FFat Initialized.");

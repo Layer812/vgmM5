@@ -1,0 +1,185 @@
+name: Atom Echo S3R R6 audio+Unified028+USBMSC (NO FLASH)
+on:
+  push:
+    branches:
+      - dev/atom-echo-s3r-r6-unified028-usb-20261026
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  atom-r6-native:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Protect other devices, audio I2S, FFat and USB startup
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          base='0f311eb3a2a2fa690a9665cb2f8025c61c622970'
+          def old(path): return subprocess.check_output(['git','show',base+':'+path]).decode()
+          changed=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          wanted={'platformio.ini','src/fm_engine.c','src/pcm_engine.c','src/voice.cpp','atoms3r/tests/usb_msc_backend_host.cpp','.github/workflows/atom-echo-s3r-r6-native.yml'}
+          assert changed==wanted,(changed-wanted,wanted-changed)
+          a=Path('platformio.ini').read_text()
+          assert a.split('[env:m5stack-cardputer]',1)[1]==old('platformio.ini').split('[env:m5stack-cardputer]',1)[1]
+          atom=a.split('[env:m5stack-cardputer]')[0]
+          assert 'espressif32 @ 6.13.0' in atom
+          assert '-D ARDUINO_USB_MODE=0' in atom
+          assert '-D ARDUINO_USB_CDC_ON_BOOT=0' in atom and '-D ARDUINO_USB_CDC_ON_BOOT=1' not in atom
+          assert '-D ARDUINO_USB_MSC_ON_BOOT=0' in atom and '-D ARDUINO_USB_DFU_ON_BOOT=0' in atom
+          assert 'M5Unified.git#368ad60807161625aa65baad37a4a3af2a7eccea' in a
+          assert 'M5GFX.git#65c816a38386062d2c3dc47d41237a9083acbc75' in a
+          for path in ('src/vgm_engine.cpp','src/mdx_engine.cpp','src/mdx_fm.c','src/sound_safe_math.h','partitions_atoms3.csv','partitions.csv'):
+              assert Path(path).read_text()==old(path),path
+          assert 'app0,       app,  ota_0,   0x10000,  0x300000,' in old('partitions_atoms3.csv')
+          assert 'ffat,       data, fat,     0x510000, 0x2F0000,' in old('partitions_atoms3.csv')
+          s=old('src/fm_engine.c')
+          s=s.replace('#if defined(IS_CORES3)', '#if defined(IS_CORES3) || defined(IS_ATOMS3)')
+          s=s.replace('#if !defined(IS_CORES3)', '#if !defined(IS_CORES3) && !defined(IS_ATOMS3)')
+          s=s.replace('// Cardputer R5 verified helpers, CoreS3 only','// Cardputer R5 verified helpers, CoreS3 and Atom Echo S3R')
+          assert Path('src/fm_engine.c').read_text()==s,'FM non-Atom changes'
+          s=old('src/pcm_engine.c')
+          s=s.replace('#if defined(IS_CORES3)', '#if defined(IS_CORES3) || defined(IS_ATOMS3)')
+          s=s.replace('// CoreS3 signed PCM safety only','// CoreS3 and Atom Echo S3R signed PCM safety')
+          assert Path('src/pcm_engine.c').read_text()==s,'PCM non-Atom changes'
+          original=old('src/voice.cpp')
+          updated=Path('src/voice.cpp').read_text()
+          def no_msc_body(x):
+              start=x.rfind('// Atom',0,x.index('USBMSC MSC;'))
+              assert start>=0
+              end=x.index('#endif // IS_ATOMS3',start)+len('#endif // IS_ATOMS3')
+              return x[:start] + x[end:]
+          old_normal=no_msc_body(original)
+          new_normal=no_msc_body(updated)
+          early="#if defined(IS_ATOMS3)\n    // Detect boot-held USB drive BEFORE creating audio tasks or mounting FFat.\n    // It is not safe for the firmware and the USB host to own the same FAT.\n    delay(100);\n    M5.update();\n    if (M5.BtnA.isPressed()) {\n        enter_usb_mode(); // never returns\n    }\n#endif\n"
+          assert new_normal.count(early)==1
+          new_normal=new_normal.replace(early,'')
+          old_late="        // 起動直後のピン状態が安定し、M5.update()が正確にボタンを読めるように少し待機\n        delay(100);\n        M5.update();\n        \n        if (M5.BtnA.isPressed()) {\n            Serial.println(\"Entering USB mode...\");\n            enter_usb_mode();\n        }\n        USB.begin();"
+          new_late="        // Boot-held MSC selection has already been handled before audio init.\n        // Keep the native USB serial COM port in normal playback mode.\n        // Without CDC_ON_BOOT, USB is NOT initialized by Arduino app_main.\n        g_atom_usb_cdc.begin(115200);\n        if (!USB.begin()) {\n            Serial.println(\"[ATOM] USB.begin failed\");\n        }"
+          assert new_normal.count(new_late)==1
+          new_normal=new_normal.replace(new_late,old_late)
+          old_fat="        if (!FFat.begin(true)) {\n            Serial.println(\"FFat Mount Failed!\");\n            return;\n        }"
+          new_fat="        // Music in the internal FFat volume must never be formatted silently.\n        // If the volume is absent/corrupt, use the separate USB mode for recovery.\n        if (!FFat.begin(false)) {\n            Serial.println(\"FFat Mount Failed (NOT FORMATTED)!\");\n            return;\n        }"
+          assert new_normal.count(new_fat)==1
+          new_normal=new_normal.replace(new_fat,old_fat)
+          baseline_start="#if defined(IS_ATOMS3)\n    // ★大至急！ ここに移動させます。一番最初にUSBを起動し、PCの認識を待ちます\n//    update_namco_volumes(engine, ch);\n   delay(2000);\n#endif"
+          now_start="#if defined(IS_ATOMS3)\n    // Do not sleep two seconds before sampling the boot-held MSC button.\n    // M5.begin() will initialize the button, then we sample after debounce.\n#endif"
+          assert new_normal.count(now_start)==1
+          new_normal=new_normal.replace(now_start,baseline_start)
+          assert new_normal==old_normal,'Changes outside USB mode/Atom setup'
+          usb=updated.split('void enter_usb_mode()',1)[1].split('#endif // IS_ATOMS3',1)[0]
+          assert 'FFat.begin(false)' in usb and not any(x.lstrip().startswith('FFat.begin(true);') for x in usb.splitlines()), 'USB autoformat prohibited'
+          assert 'MSC.isWritable(true);' not in usb, 'Unsupported Arduino 2.0.17 API'
+          assert usb.index('MSC.begin(s_msc_block_count')<usb.index('if (!USB.begin())')<usb.rindex('for (;;) {'), 'USB startup before mode loop'
+          assert 'M5.BtnA.wasPressed()' not in usb and 'M5.BtnA.pressedFor(2500)' in usb
+          assert 'wl_read(s_wl_handle, base, s_msc_write_sector, sector)' in updated
+          assert 'wl_erase_range(s_wl_handle, base, sector)' in updated
+          assert 'wl_write(s_wl_handle, base, s_msc_write_sector, sector)' in updated
+          assert 'if (!MSC.begin' in usb and 'if (!USB.begin())' in usb
+          assert 'static_assert(ARDUINO_USB_ON_BOOT == 0' in updated
+          assert 'USBCDC g_atom_usb_cdc;' in updated
+          assert 'static USBMSC MSC;' in usb and updated.count('USBMSC MSC;')==1, 'MSC must exist ONLY inside selected USB-drive path'
+          assert updated.index('USBCDC g_atom_usb_cdc;')<updated.index('void enter_usb_mode()')
+          assert 'delay(2000);' not in updated[:updated.index('void enter_usb_mode()')], 'USB drive button sampling must be early'
+          assert usb.index('MSC.begin(s_msc_block_count') < usb.index('g_atom_usb_cdc.begin(115200)') < usb.index('if (!USB.begin())'), 'USB descriptor/capacity initialization order'
+          assert updated.index('enter_usb_mode(); // never returns')<updated.index('vgm_engine_init();')
+          print('PASS pre-setup USB disabled, CDC manually registered, MSC medium ready before enumerate, audio/other boards unchanged, no autoformat')
+          PY
+      - name: Exercise real MSC callbacks with simulated NOR and WL (512B/4096B)
+        run: |
+          set -euo pipefail
+          mkdir -p atoms3r/reports
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('src/voice.cpp').read_text()
+          start=s.index('static wl_handle_t s_wl_handle')
+          end=s.index('void enter_usb_mode()',start)
+          callback=s[start:end]
+          assert callback.count('static int32_t onWrite')==1
+          assert callback.count('static int32_t onRead')==1
+          Path('atoms3r/reports/usb_msc_callbacks.inc').write_text(callback)
+          PY
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer atoms3r/tests/usb_msc_backend_host.cpp -o /tmp/atom_usb_msc_host
+          ASAN_OPTIONS=detect_leaks=1 /tmp/atom_usb_msc_host
+      - name: Actual YM2151 R6 KEY ON 56 + phase edges 32 host tests
+        run: |
+          set -euo pipefail
+          mkdir -p atoms3r/reports/shims
+          printf '#pragma once\n#define IRAM_ATTR\n#define DRAM_ATTR\n' > atoms3r/reports/shims/esp_attr.h
+          : > atoms3r/reports/shims/esp_partition.h
+          : > atoms3r/reports/shims/esp_spi_flash.h
+          for kind in old atom; do
+            flag=''
+            if [ "$kind" = atom ]; then flag='-DIS_ATOMS3=1'; fi
+            gcc -std=gnu11 -O2 -ffunction-sections -fdata-sections -Iatoms3r/reports/shims -Isrc $flag -c src/fm_engine.c -o atoms3r/reports/fm_$kind.o
+            gcc -std=gnu11 -O2 -ffunction-sections -fdata-sections -Iatoms3r/reports/shims -Isrc $flag -c cores3/tests/ym2151_kon_phase_host.c -o atoms3r/reports/test_$kind.o
+            gcc -Wl,--gc-sections atoms3r/reports/fm_$kind.o atoms3r/reports/test_$kind.o -lm -o atoms3r/reports/ym2151_$kind
+          done
+          atoms3r/reports/ym2151_atom --test
+          if atoms3r/reports/ym2151_old --test 2>atoms3r/reports/R5_expected_failure.txt;then exit 1; fi
+          grep -q 'KON FAIL' atoms3r/reports/R5_expected_failure.txt
+          echo 'PASS 88 actual Atom FM regression cases'
+      - name: YM2151 pitch/routing and PCM safe-math host ASan/UBSan
+        run: |
+          gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer cores3/tests/sound_arithmetic_host.c -lm -o /tmp/atoms3r_math
+          ASAN_OPTIONS=detect_leaks=1 /tmp/atoms3r_math
+      - name: Install pinned PlatformIO dependencies
+        run: |
+          python -m pip install --disable-pip-version-check platformio
+          pio pkg install -e m5stack-atoms3
+      - name: Verify exact Arduino-ESP32 2.0.17 pre-setup USB autostart mechanism
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          f=Path.home()/'.platformio/packages/framework-arduinoespressif32/cores/esp32'
+          main=(f/'main.cpp').read_text()
+          usb=(f/'USB.h').read_text()
+          assert 'ARDUINO_USB_ON_BOOT && !ARDUINO_USB_MODE' in main
+          assert 'USB.begin();' in main[main.index('extern "C" void app_main()'):]
+          assert '#define ARDUINO_USB_ON_BOOT (ARDUINO_USB_CDC_ON_BOOT|ARDUINO_USB_MSC_ON_BOOT|ARDUINO_USB_DFU_ON_BOOT)' in usb
+          ini=Path('platformio.ini').read_text().split('[env:m5stack-cardputer]')[0]
+          assert '-D ARDUINO_USB_CDC_ON_BOOT=0' in ini
+          assert '-D ARDUINO_USB_MSC_ON_BOOT=0' in ini
+          assert '-D ARDUINO_USB_DFU_ON_BOOT=0' in ini
+          assert 'static USBMSC MSC;' in Path('src/voice.cpp').read_text()
+          print('PASS 2.0.17 app_main USB autostart disabled; selected MSC constructed before explicit USB begin')
+          PY
+      - name: Verify actual Unified 0.2.28 GFX 0.2.35
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          base=Path('.pio/libdeps/m5stack-atoms3')
+          assert 'version=0.2.28' in (base/'M5Unified'/'library.properties').read_text()
+          assert 'version=0.2.35' in (base/'M5GFX'/'library.properties').read_text()
+          print('PASS exact vendor pins')
+          PY
+      - name: Build actual Atom Echo S3R ESP32-S3 app without device flash
+        run: pio run -e m5stack-atoms3
+      - name: Verify app image and archive
+        run: |
+          mkdir -p atoms3r/artifacts
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil,hashlib,json
+          src=Path('.pio/build/m5stack-atoms3/firmware.bin')
+          b=src.read_bytes()
+          assert 100000<len(b)<0x300000 and b[0]==0xe9 and int.from_bytes(b[12:14],'little')==9
+          shutil.copy2(src,'atoms3r/artifacts/firmware.bin')
+          report=dict(target='Atom Echo S3R ESP32-S3',chip_id=9,app_offset='0x10000',app_size='0x300000',firmware_size=len(b),sha256=hashlib.sha256(b).hexdigest(),native_build='PASS',flash='NOT PERFORMED',usb='startup code fix, pending real device acceptance')
+          Path('atoms3r/artifacts/RESULT.json').write_text(json.dumps(report,indent=2)+'\n')
+          print('PASS',report)
+          PY
+          sha256sum atoms3r/artifacts/firmware.bin > atoms3r/artifacts/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: vgmM5-AtomEchoS3R-R6-Unified028-USBMSC-native-NOFLASH
+          path: atoms3r/artifacts/
+          retention-days: 14
