@@ -65,6 +65,14 @@ static bool cloud_force_redraw = true;
 // normal audio tasks and the application FAT mount must never own this volume.
 // Preserve the original partition and host-visible logical sector size.
 #if defined(IS_ATOMS3)
+// In Arduino-ESP32 2.0.17, CDC_ON_BOOT=1 triggers USB.begin() from
+// app_main() *before* setup(), exposing an unready MSC LUN to Windows.
+// CDC_ON_BOOT=0 defers the USB connection until explicit USB.begin()
+// below. Create the CDC interface manually, before USB initialization,
+// so the usual serial COM port also remains available.
+static_assert(ARDUINO_USB_ON_BOOT == 0,
+              "Atom Echo S3R MSC requires USB startup AFTER FFat/WL initialization");
+USBCDC g_atom_usb_cdc;
 USBMSC MSC;
 static wl_handle_t s_wl_handle = WL_INVALID_HANDLE;
 static uint32_t s_msc_sector_size = 0;
@@ -178,6 +186,9 @@ void enter_usb_mode() {
         Serial.println("[USBMSC] MSC.begin FAILED");
         for (;;) delay(100);
     }
+    // Arduino official MSC sequence: MSC callbacks/capacity, then
+    // USBCDC.begin, finally the one USB.begin() that enumerates the device.
+    g_atom_usb_cdc.begin(115200);
     if (!USB.begin()) {
         Serial.println("[USBMSC] USB.begin FAILED");
         for (;;) delay(100);
@@ -434,8 +445,12 @@ void setup() {
         Serial.println("Initializing AtomS3 Board...");
         
         // Boot-held MSC selection has already been handled before audio init.
-        // Normal playback can use the existing CDC path.
-        USB.begin();
+        // Keep the native USB serial COM port in normal playback mode.
+        // Without CDC_ON_BOOT, USB is NOT initialized by Arduino app_main.
+        g_atom_usb_cdc.begin(115200);
+        if (!USB.begin()) {
+            Serial.println("[ATOM] USB.begin failed");
+        }
         
         // ★ 注意：ここにあった古い update_namco_volumes(engine, ch);
         
