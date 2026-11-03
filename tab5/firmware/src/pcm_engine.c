@@ -345,7 +345,12 @@ void pcm_engine_namco_init(PCMSoundEngine *engine, uint32_t clock, uint8_t type,
     if (type == 0xC1) {
         native_rate = (clock > 0) ? (clock / 192) : (21390000 / 192);
     } else {
-        native_rate = (clock > 0) ? (clock / 288) : 83333; // C352
+        // VGM 1.71 header 0xD6 stores the C352 clock divider / 4.
+        // 0 means unspecified: retain the historical 288 default.
+        // The last parameter is the C140 banking type for C140, but the
+        // header divider / 4 for C352. Preserve the C140 path unchanged.
+        const uint32_t divider = (c140_type != 0u) ? ((uint32_t)c140_type * 4u) : 288u;
+        native_rate = (clock > 0) ? (clock / divider) : (24000000u / divider);
     }
     engine->namco.step_scale = (uint32_t)(((uint64_t)native_rate << 16) / engine->sample_rate);
 }
