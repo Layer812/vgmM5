@@ -6,6 +6,8 @@
 
 M5Stack Tab5（ESP32-P4）向けのVGM/VGZ・MDXプレイヤーです。microSD上の楽曲再生、タッチ操作、曲情報・チャンネル表示、スペクトラム、JPEG/PNG/BMPカバー画像に対応します。
 
+![vgmM5 Tab5 実機画面](tab5.png)
+
 ### 正式版 R67（2026年11月4日）
 
 **R67はGitHub `main` に正式統合済みです。** [統合PR #24](https://github.com/Layer812/vgmM5/pull/24) / [ネイティブビルド・回帰テスト PASS](https://github.com/Layer812/vgmM5/actions/runs/41661806444)
@@ -34,9 +36,9 @@ python -m esptool --chip esp32p4 --port COM9 --baud 460800 --before default_rese
 
 ### M5Burner（別配布）
 
-既存のTab5用M5Burnerシェアコード：`8i9Cp1C6ufGpGC5J`。
+**Tab5用M5Burnerシェアコード（作者提供・2026年11月4日更新）：`rg69duyAcUQoohOl`**
 
-**このコードで配布されるイメージはR67として更新・SHA照合されていません。** R67を使用する場合は上記のGitHubビルドを使ってください。M5Burnerへの新バージョン登録は別作業です。
+Tab5用に新しく公開されたシェアコードです。**M5Burner配布BINと上記GitHub R67ビルドBINのSHA-256一致は未照合**のため、両者がバイナリとして同一であるとは断定していません。GitHub R67ビルドから直接書き込む方法も上記に残しています。
 
 この版ではオンラインモード、USBマスストレージ、USBキーボード操作は提供していません。楽曲データは同梱していません。ライセンスは[プロジェクトREADME](../README.md#license)を参照してください。
 
@@ -59,4 +61,4 @@ vgmM5 for M5Stack Tab5 (ESP32-P4) plays VGM/VGZ and MDX from microSD with touch 
 
 [Verified R67 CI artifact](https://github.com/Layer812/vgmM5/actions/runs/41661806444) (subject to GitHub retention). The native app image is 870,192 bytes with SHA-256 `ba26ef34a3eb9f9565c8a7e9e7159beef252d61eafbaa70d1dfc81abbe7607d8`. For a Tab5 with the established partition map, flash the app **only** at `0x10000` using the command above. Do not overwrite the bootloader, partition table, or HumanXDF. Firmware flashing was not carried out by CI; R67's exact BIN has not been separately device-tested, while R66-A with identical audio logic was verified by the user.
 
-**M5Burner share code** `8i9Cp1C6ufGpGC5J` is a separate distribution and is **not yet verified or updated to R67**. To obtain R67, use the native build artifact instead. No bundled music or online/USB MSC/USB keyboard mode in this Tab5 edition.
+**M5Burner Tab5 share code (author-provided, updated November 4, 2026): `rg69duyAcUQoohOl`.** The new Tab5 share code has been published, but the SHA-256 of its distributed image has **not been checked against the GitHub R67 native build**, so bit-for-bit identity is not claimed. The GitHub native build remains available separately. No bundled music or online/USB MSC/USB keyboard mode in this Tab5 edition.
