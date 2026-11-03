@@ -10,12 +10,12 @@ typedef struct {
     uint16_t remaining;
 } tab5_r66_note_fade;
 
-static inline void tab5_r66_note_begin(tab5_r66_note_fade *state) {
+static inline __attribute__((always_inline)) void tab5_r66_note_begin(tab5_r66_note_fade *state) {
     state->from = state->previous;
     state->remaining = 88u;
 }
 
-static inline int32_t tab5_r66_note_sample(tab5_r66_note_fade *state, int32_t raw) {
+static inline __attribute__((always_inline)) int32_t tab5_r66_note_sample(tab5_r66_note_fade *state, int32_t raw) {
     if (!state->remaining) {
         state->previous = raw;
         return raw;
