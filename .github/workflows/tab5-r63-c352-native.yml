@@ -58,9 +58,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/tab5_r63_shims
-          printf '#pragma once\\n#define IRAM_ATTR\\n#define DRAM_ATTR\\n' >/tmp/tab5_r63_shims/esp_attr.h
-          printf '#pragma once\\n' >/tmp/tab5_r63_shims/esp_partition.h
-          printf '#pragma once\\n' >/tmp/tab5_r63_shims/esp_heap_caps.h
+          printf '#pragma once\n#define IRAM_ATTR\n#define DRAM_ATTR\n' >/tmp/tab5_r63_shims/esp_attr.h
+          printf '#pragma once\n' >/tmp/tab5_r63_shims/esp_partition.h
+          printf '#pragma once\n' >/tmp/tab5_r63_shims/esp_heap_caps.h
           gcc -std=gnu11 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I/tmp/tab5_r63_shims -Itab5/firmware/src tab5/tests/r63_c352_clock_host.c tab5/firmware/src/pcm_engine.c -Wl,--gc-sections -lm -o /tmp/r63_c352_host
           ASAN_OPTIONS=detect_leaks=1 /tmp/r63_c352_host
       - name: Verify VGM1.71 header modes and generator-specific dispatch
