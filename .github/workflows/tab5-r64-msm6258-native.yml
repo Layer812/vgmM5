@@ -1,0 +1,151 @@
+name: Tab5 R64 MSM6258 header divider + R63 C352 and R62 fidelity (NO FLASH)
+on:
+  push:
+    branches:
+      - dev/tab5-r64-msm6258-divider-20261103
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Protect R61 stable FM, M5Unified, audio path and other boards
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          base='3f7b55157dc59e562c5e889ea49e90e7aee6f4e6'
+          changed=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          allow={'tab5/firmware/src/pcm_engine.c','tab5/firmware/src/pcm_engine.h','tab5/firmware/src/vgm_engine.cpp','tab5/tests/r64_msm6258_clock_host.c','.github/workflows/tab5-r64-msm6258-native.yml'}
+          assert changed==allow,(changed-allow,allow-changed)
+          def old(path):return subprocess.check_output(['git','show',base+':'+path])
+          for name in ('tab5/firmware/src/fm_engine.c','tab5/firmware/src/psg_engine.c','tab5/firmware/src/scc_engine.c','tab5/firmware/src/scc_engine.h','tab5/firmware/src/ssg_engine.c','tab5/firmware/src/ym2413_core.c','tab5/firmware/src/main.cpp','tab5/firmware/platformio.ini','tab5/firmware/src/tab5_audio_contract.cpp','tab5/firmware/tab5_live_humanxdf_preserve_16MB.csv','platformio.ini','src/vgm_engine.cpp','src/fm_engine.c','cardputer/src/fm_engine.c'):
+              assert Path(name).read_bytes()==old(name),name
+          s=Path('tab5/firmware/src/ssg_engine.c').read_text()
+          assert 'engine->noise_period = (val & 0x1F);' in s
+          assert '(n_period * 2) << 16' in s
+          s=Path('tab5/firmware/src/scc_engine.c').read_text()
+          h=Path('tab5/firmware/src/scc_engine.h').read_text()
+          assert 'scc_engine_set_variant' in s and 'scc_engine_set_variant' in h
+          assert 'ch == 3 && !engine->is_scc_plus' in s
+          assert 'reg >= 0x80 && reg <= 0x9F && engine->is_scc_plus' in s
+          s=Path('tab5/firmware/src/vgm_engine.cpp').read_text()
+          assert 'scc_engine_set_variant(&g_scc_engine, is_scc_plus);' in s
+          assert 'header[0x96]' in s and '(vgm_c140_clock >> 31)' not in s
+          p=Path('tab5/firmware/src/pcm_engine.c').read_text()
+          assert 'native_rate = (clock > 0) ? (clock / divider) : (24000000u / divider);' in p
+          assert 'const uint32_t divider = (c140_type != 0u) ? ((uint32_t)c140_type * 4u) : 288u;' in p
+          assert 'const uint8_t clkdiv4 = (vgmDataStart > 0xD6) ? header[0xD6] : 0;' in s
+          assert 'pcm_engine_namco_init(&g_pcm_engine, vgm_c352_clock & 0x3FFFFFFF, 0xC2, clkdiv4);' in s
+          assert 'static const uint16_t dividers[4] = {1024, 768, 512, 512};' in p
+          assert 'pcm_engine_set_msm6258_clock(PCMSoundEngine *engine, uint32_t clock, uint8_t divider_code)' in p
+          assert 'const uint8_t msm_divcode = (vgmDataStart > 0x94) ? (header[0x94] & 0x03u) : 0u;' in s
+          assert 'pcm_engine_set_msm6258_clock(&g_pcm_engine, vgm_msm6258_clock & 0x3FFFFFFFu, msm_divcode);' in s
+          print('PASS R64 MSM6258 changes; R63 C352 and R62 AY/SCC/C140 maintained, R61 stable untouched')
+          PY
+      - name: Host test actual Tab5 AY8910 and SCC/SCC+ engines with ASan and UBSan
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/tab5_r62_shims
+          printf '#pragma once\n#define IRAM_ATTR\n' >/tmp/tab5_r62_shims/esp_attr.h
+          gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I/tmp/tab5_r62_shims -Itab5/firmware/src tab5/tests/r62_ay_scc_host.c tab5/firmware/src/ssg_engine.c tab5/firmware/src/scc_engine.c -lm -o /tmp/tab5_r62_fidelity_host
+          ASAN_OPTIONS=detect_leaks=1 /tmp/tab5_r62_fidelity_host
+      - name: Host-test actual Tab5 PCM engine C352 divider and unchanged C140 with ASan/UBSan
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/tab5_r63_shims
+          printf '#pragma once\n#define IRAM_ATTR\n#define DRAM_ATTR\n' >/tmp/tab5_r63_shims/esp_attr.h
+          printf '#pragma once\n' >/tmp/tab5_r63_shims/esp_partition.h
+          printf '#pragma once\n' >/tmp/tab5_r63_shims/esp_heap_caps.h
+          gcc -std=gnu11 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I/tmp/tab5_r63_shims -Itab5/firmware/src tab5/tests/r63_c352_clock_host.c tab5/firmware/src/pcm_engine.c -Wl,--gc-sections -lm -o /tmp/r63_c352_host
+          ASAN_OPTIONS=detect_leaks=1 /tmp/r63_c352_host
+      - name: Host-test actual Tab5 PCM MSM6258 divider codes with ASan/UBSan
+        run: |
+          set -euo pipefail
+          gcc -std=gnu11 -O1 -g -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I/tmp/tab5_r63_shims -Itab5/firmware/src tab5/tests/r64_msm6258_clock_host.c tab5/firmware/src/pcm_engine.c -Wl,--gc-sections -lm -o /tmp/r64_msm6258_host
+          ASAN_OPTIONS=detect_leaks=1 /tmp/r64_msm6258_host
+      - name: Verify VGM1.71 header modes and generator-specific dispatch
+        run: |
+          python3 - <<'PY'
+          import struct
+          from pathlib import Path
+          # Two headers with identical command streams must select distinct SCC RAM rules.
+          def header(clock, c140_type=0):
+              b=bytearray(0x100)
+              b[:4]=b'Vgm '
+              struct.pack_into('<I',b,8,0x171)
+              struct.pack_into('<I',b,0x9c,clock)
+              b[0x96]=c140_type
+              return b
+          for flag in (0,0x80000000):
+              b=header(1789772|flag)
+              c=struct.unpack_from('<I',b,0x9c)[0]
+              assert (c & 0x3fffffff)==1789772
+              assert bool(c & 0x80000000)==bool(flag)
+          for typ in (0,1,2):
+              b=header(1789772,typ)
+              assert b[0x96]==typ
+          s=Path('tab5/firmware/src/vgm_engine.cpp').read_text()
+          assert 'scc_engine_set_variant(&g_scc_engine, is_scc_plus);' in s
+          assert 'declared_c140_type = (vgmDataStart > 0x96) ? header[0x96] : 0u;' in s
+          print('PASS 0x9C K051649/K052539 bit31 and C140 subtype byte 0x96')
+          PY
+      - name: Install exact Tab5 ESP32-P4 PlatformIO toolchain
+        run: |
+          python3 -m pip install --disable-pip-version-check platformio
+          python3 -m pip install --disable-pip-version-check 'click==8.1.8'
+          cd tab5/firmware && pio pkg install -e tab5-r61-speaker-revert
+      - name: Force build-local exact M5GFX 0.2.35 against transitive 0.2.36
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          root=Path('tab5/firmware/.pio/libdeps/tab5-r61-speaker-revert')
+          unified=root/'M5Unified'/'library.properties'
+          assert unified.exists() and 'version=0.2.28' in unified.read_text()
+          pinned=[p.parent for p in root.glob('M5GFX@*/library.properties') if 'version=0.2.35' in p.read_text()]
+          assert len(pinned)==1,[(str(p),p.read_text()[:250]) for p in root.glob('M5GFX*/library.properties')]
+          preferred=root/'M5GFX'
+          if not preferred.exists() or 'version=0.2.35' not in (preferred/'library.properties').read_text():
+              # M5Unified's >=0.2.35 transitively installs 0.2.36 as M5GFX
+              # in November 2026, ahead of the git-pinned 0.2.35 clone.
+              # Replace ONLY the temporary CI registry copy, never repository or device files.
+              if preferred.exists(): shutil.rmtree(preferred)
+              shutil.copytree(pinned[0],preferred)
+              print('R62 repaired CI-only dependency collision: removed transient M5GFX0.2.36, installed pinned0.2.35')
+          assert 'version=0.2.35' in (preferred/'library.properties').read_text()
+          print('PASS exact M5Unified0.2.28 / M5GFX0.2.35, no dependency regression')
+          PY
+          python3 tab5/patch_m5gfx_r60.py
+      - name: Real Tab5 ESP32-P4 native firmware build (NO FLASH)
+        run: cd tab5/firmware && pio run -e tab5-r61-speaker-revert
+      - name: Check firmware bounds and archive R64 trial
+        run: |
+          mkdir -p tab5/r64_artifacts
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,shutil,json
+          p=Path('tab5/firmware/.pio/build/tab5-r61-speaker-revert/firmware.bin')
+          b=p.read_bytes()
+          assert 100000<len(b)<0x800000 and b[0]==0xe9,'invalid P4 firmware'
+          shutil.copyfile(p,'tab5/r64_artifacts/firmware.bin')
+          report=dict(target='M5Stack Tab5 ESP32-P4',image_size=len(b),sha256=hashlib.sha256(b).hexdigest(),native_build='PASS',host_ay_scc='PASS',host_c352='PASS',host_msm6258='PASS',flash='NOT PERFORMED',physical_audio='PENDING',stable_main_untouched=True)
+          Path('tab5/r64_artifacts/RESULT.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
+          print(report)
+          PY
+          sha256sum tab5/r64_artifacts/firmware.bin > tab5/r64_artifacts/SHA256SUMS.txt
+          cp tab5/firmware/.pio/R61_M5GFX_PATCH_SHA256.json tab5/r64_artifacts/
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: vgmM5-Tab5-R64-MSM6258-divider-native-NOFLASH
+          path: tab5/r64_artifacts/
+          retention-days: 14

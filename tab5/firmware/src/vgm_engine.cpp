@@ -18,6 +18,10 @@
 #include <esp_timer.h> // R42: per-completed-block CPU budget observer (not in sample loop)
 #include "tab5_psram_bounds.hpp"
 #include "tab5_track_meta.hpp"
+#include "tab5_vgm_mix_tail.hpp"
+#if defined(VGMM5_R66_SILENCE_DITHER)
+#include "tab5_r66_silence_dither.hpp"
+#endif
 #include "tab5_live_monitor.hpp"
 
 // ★ MDXエンジンとのバッファ共有：MDX再生中もaudio_play_taskが動作するようにする
@@ -205,7 +209,7 @@ uint32_t actual_sample_rate = 44100;
 uint8_t chip_type = 0;
 int currentSong = 0;
 
-// ★ ミキサー用の除数（チップ数）をグローバルに一度だけ事前計算
+// R65: mixer denominator counts physical chips, not multiple software wrappers.
 static int global_chip_count = 1;
 
 #define MAX_SONGS 100
@@ -983,7 +987,9 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     if (vgm_scc_clock != 0) {
         bool is_scc_plus = (vgm_scc_clock & 0x80000000) != 0;
         Serial.printf("[VGM] SCC Clock: %lu, SCC+: %d\n", vgm_scc_clock & 0x3FFFFFFF, is_scc_plus);
-        scc_engine_init(&g_scc_engine, actual_sample_rate, vgm_scc_clock & 0x3FFFFFFF); active_chips[active_chip_count++] = &scc_wrapper;
+        scc_engine_init(&g_scc_engine, actual_sample_rate, vgm_scc_clock & 0x3FFFFFFF);
+        scc_engine_set_variant(&g_scc_engine, is_scc_plus);
+        active_chips[active_chip_count++] = &scc_wrapper;
         active_channel_count += 5;
     }
 
@@ -994,18 +1000,34 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     if (vgm_msm6258_clock != 0 || vgm_oki_clock != 0 || vgm_segapcm_clock != 0 || vgm_ym2612_clock != 0 || vgm_ym2608_clock != 0 || vgm_ym2610_clock != 0 || vgm_c140_clock != 0 || vgm_c352_clock != 0) {
         active_chips[active_chip_count++] = &pcm_wrapper;
         active_channel_count += 1;
-        if (vgm_msm6258_clock != 0) pcm_engine_set_msm6258_clock(&g_pcm_engine, vgm_msm6258_clock);
+        if (vgm_msm6258_clock != 0) {
+            // VGM 1.71 byte 0x94 bits 0-1 controls the OKIM6258 sample divider.
+            // Header 0 (including older files) means /1024, not /512.
+            const uint8_t msm_divcode = (vgmDataStart > 0x94) ? (header[0x94] & 0x03u) : 0u;
+            pcm_engine_set_msm6258_clock(&g_pcm_engine, vgm_msm6258_clock & 0x3FFFFFFFu, msm_divcode);
+            Serial.printf("[VGM] MSM6258 divider code=%u\n", (unsigned)msm_divcode);
+        }
         if (vgm_oki_clock != 0)     pcm_engine_set_oki_clock(&g_pcm_engine, vgm_oki_clock);
         if (vgm_segapcm_clock != 0) pcm_engine_segapcm_init(&g_pcm_engine, vgm_segapcm_clock & 0x3FFFFFFF, vgm_spcm_intf);
         if (vgm_c140_clock != 0) {
-            uint8_t c140_bank_type = (vgm_c140_clock >> 31) & 1; // 0 = System 2, 1 = System 21
+            // VGM v1.71: C140 banking type is header byte 0x96, NOT clock bit 31.
+            // 0=System 2, 1=System 21, 2=219 ASIC (not implemented here).
+            const uint8_t declared_c140_type = (vgmDataStart > 0x96) ? header[0x96] : 0u;
+            if (declared_c140_type > 1u) {
+                Serial.printf("[VGM][C140] WARNING: chip subtype %u (219 ASIC) not modeled; fallback to System 2 banking\n", declared_c140_type);
+            }
+            uint8_t c140_bank_type = (declared_c140_type <= 1u) ? declared_c140_type : 0u;
             Serial.printf("[VGM] C140 Clock: %lu, Type: %d\n", vgm_c140_clock & 0x3FFFFFFF, c140_bank_type);
             pcm_engine_namco_init(&g_pcm_engine, vgm_c140_clock & 0x3FFFFFFF, 0xC1, c140_bank_type);
         }
         if (vgm_c352_clock != 0) {
-            uint8_t clkdiv = (vgmDataStart > 0xD6) ? header[0xD6] : 0;
-            Serial.printf("[VGM] C352 Clock: %lu (Div: %d)\n", vgm_c352_clock & 0x3FFFFFFF, clkdiv);
-            pcm_engine_namco_init(&g_pcm_engine, vgm_c352_clock & 0x3FFFFFFF, 0xC2, clkdiv);
+            // VGM 1.71 stores the real C352 divider / 4 at byte 0xD6.
+            // 0 is unspecified; the Namco engine will use the 288 default.
+            const uint8_t clkdiv4 = (vgmDataStart > 0xD6) ? header[0xD6] : 0;
+            Serial.printf("[VGM] C352 Clock: %lu, divider=%u\n",
+                          (unsigned long)(vgm_c352_clock & 0x3FFFFFFF),
+                          (unsigned)(clkdiv4 ? 4u * clkdiv4 : 288u));
+            pcm_engine_namco_init(&g_pcm_engine, vgm_c352_clock & 0x3FFFFFFF, 0xC2, clkdiv4);
         }
     }
 
@@ -1036,11 +1058,21 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
         if(vgm_segapcm_clock || vgm_c140_clock || vgm_c352_clock)add("PCM");
     }
 
-    // ========================================================
-    // ★ ミキサー用の除数（チップ数）をグローバルに一度だけ事前計算
-    // ========================================================
-    global_chip_count = (active_chip_count > 0) ? active_chip_count : 1;
-    Serial.printf("[VGM] Mixer: chip_count=%d\n", global_chip_count);
+    // R65: a YM2612 has FM + DAC wrappers; YM2608/2610 have FM/SSG/PCM
+    // wrappers. They are ONE physical chip and must not be divided by 2/3.
+    // Other VGM clock fields each identify a physically separate chip.
+    const uint32_t separate_chip_clocks[] = {
+        vgm_ym2413_clock, vgm_ym2612_clock, vgm_ym2151_clock,
+        vgm_ym2203_clock, vgm_ym2608_clock, vgm_ym2610_clock,
+        vgm_ym3812_clock, vgm_ay8910_clock, vgm_msm6258_clock,
+        vgm_oki_clock, vgm_segapcm_clock, vgm_scc_clock,
+        vgm_c140_clock, vgm_c352_clock
+    };
+    global_chip_count = (int)tab5::vgm_physical_chip_count(
+        vgm_sn_clock, separate_chip_clocks,
+        sizeof(separate_chip_clocks) / sizeof(separate_chip_clocks[0]));
+    Serial.printf("[VGM][R65] Mixer: physical=%d synth_wrappers=%d\n",
+                  global_chip_count, active_chip_count);
 
     waitSamples = 8820; vgm_time_acc = 0; ym2612_pcm_offset = 0;
     sn76489_writes = 0;
@@ -1583,8 +1615,8 @@ void IRAM_ATTR processAudioBlock() {
             mix_r += ch_r;
         }
 
-        // グローバルに計算済みのチップ数で割る
-        // （各音源の出力が非常に大きく合算でクリップするため、さらに3で割ってヘッドルームを確保し音割れを防ぐ）
+        // R65: preserve /3 fixed headroom; divide by PHYSICAL VGM chip
+        // count, not FM+SSG+PCM software-wrapper count.
         mix_l /= (global_chip_count * 3);
         mix_r /= (global_chip_count * 3);
 
@@ -1631,6 +1663,14 @@ if (atom_eq) {
 
         out_buf[i * 2]     = (int16_t)mix_l;
         out_buf[i * 2 + 1] = (int16_t)mix_r;
+#if defined(VGMM5_R66_SILENCE_DITHER)
+        // Experiment A: keep sub-audible PCM movement ONLY during digital
+        // silence inside the VGM stream. This does not queue any extra audio,
+        // change the physical chip sound, or revive playback after EOF.
+        static uint32_t r66_quiet_lfsr = 0xA56959A5u;
+        tab5_r66_fill_silent_pcm(&out_buf[i * 2], &out_buf[i * 2 + 1],
+                                 &r66_quiet_lfsr);
+#endif
     }
 #if defined(VGMM5_R53_STEADY_FULL_AUDIO)
     // R49 mode0 is the full-quality FM(FIR)+PCM path. Re-arm the diagnostic
@@ -1638,6 +1678,14 @@ if (atom_eq) {
     // This keeps 256/256 FM, PCM and FIR gains indefinitely, including >27h.
     if (s_r49_segments.enabled) s_r49_segments.frame_in_mode = 0;
 #endif
+    // Natural EOF may occur mid-block; this last block will be queued and
+    // abruptly followed by silence. Taper its last 256 frames without
+    // resetting chip histories or touching the audio ownership protocol.
+    // Manual STOP is excluded (its queue is cancelled separately).
+    if (!isPlaying.load(std::memory_order_acquire) &&
+        !s_vgm_manual_stop.load(std::memory_order_acquire)) {
+        tab5::vgm_fade_final_pcm_block(out_buf, BUFF_SIZE);
+    }
     wav_buff_size[wd] = BUFF_SIZE;
     // R13: optional lossy UI snapshot from the *finished* generated PCM,
     // at generator priority 2, before publishing its ring slot. Never

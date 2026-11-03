@@ -186,9 +186,12 @@ uint8_t pcm_engine_get_ym2612_byte(PCMSoundEngine *engine, uint32_t offset) {
 // ─────────────────────────────────────────
 // MSM6258 クロック設定
 // ─────────────────────────────────────────
-void pcm_engine_set_msm6258_clock(PCMSoundEngine *engine, uint32_t clock) {
+void pcm_engine_set_msm6258_clock(PCMSoundEngine *engine, uint32_t clock, uint8_t divider_code) {
+    // VGM 1.71 header 0x94 bits 0-1: /1024, /768, /512, /512.
+    // Avoid the former unconditional /512 (2x speed on default 0).
+    static const uint16_t dividers[4] = {1024, 768, 512, 512};
     engine->msm6258.clock = clock;
-    uint32_t sr = (clock > 0) ? (clock / 512) : 15625;
+    const uint32_t sr = (clock > 0) ? (clock / dividers[divider_code & 3u]) : 15625u;
     engine->msm6258.step_size = ((uint64_t)sr * 65536) / engine->sample_rate;
 }
 
@@ -345,7 +348,12 @@ void pcm_engine_namco_init(PCMSoundEngine *engine, uint32_t clock, uint8_t type,
     if (type == 0xC1) {
         native_rate = (clock > 0) ? (clock / 192) : (21390000 / 192);
     } else {
-        native_rate = (clock > 0) ? (clock / 288) : 83333; // C352
+        // VGM 1.71 header 0xD6 stores the C352 clock divider / 4.
+        // 0 means unspecified: retain the historical 288 default.
+        // The last parameter is the C140 banking type for C140, but the
+        // header divider / 4 for C352. Preserve the C140 path unchanged.
+        const uint32_t divider = (c140_type != 0u) ? ((uint32_t)c140_type * 4u) : 288u;
+        native_rate = (clock > 0) ? (clock / divider) : (24000000u / divider);
     }
     engine->namco.step_scale = (uint32_t)(((uint64_t)native_rate << 16) / engine->sample_rate);
 }
@@ -727,8 +735,13 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
         if (final_namco_r > 32767) final_namco_r = 32767;
         else if (final_namco_r < -32768) final_namco_r = -32768;
 
-        mix_l += final_namco_l >> 1; // ±16384 (matches FM max)
-        mix_r += final_namco_r >> 1;
+        // R65: C140 8-bit linear samples are expanded only to 12-bit
+        // (see << 4 above). The old unconditional >>1 left this chip
+        // markedly quieter than other mono-chip VGM tracks. Give C140
+        // +6 dB inside the existing 16-bit saturation boundary, while
+        // preserving the prior C352 output gain unchanged.
+        mix_l += engine->c140_enabled ? final_namco_l : (final_namco_l >> 1);
+        mix_r += engine->c140_enabled ? final_namco_r : (final_namco_r >> 1);
     }
 
     pcm_engine_opn_tick(engine, &mix_l, &mix_r);

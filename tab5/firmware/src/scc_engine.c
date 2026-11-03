@@ -7,7 +7,11 @@ void scc_engine_init(SCCSoundEngine *engine, uint32_t sample_rate, uint32_t cloc
     memset(engine, 0, sizeof(SCCSoundEngine));
     engine->sample_rate = sample_rate;
     // SCCの内部クロック（通常アーケード/MSX共に約1.78MHz相当）
-    engine->clock = clock; 
+    engine->clock = clock;
+}
+
+void scc_engine_set_variant(SCCSoundEngine *engine, bool is_scc_plus) {
+    engine->is_scc_plus = is_scc_plus;
 }
 
 // チャンネルのフェーズステップ（再生速度）を更新する
@@ -56,17 +60,23 @@ void scc_engine_write(SCCSoundEngine *engine, uint8_t port, uint8_t reg, uint8_t
 
     // 古いVGMやMSXダイレクトマッピングVGMへの救済措置
     // port=0 に全レジスタが書き込まれるケース
-    if (port == 0) {
+    // VGM port 0 uses the K051649 waveform map. K052539 also accepts
+    // independent channel-5 data and standard VGM port 4 for SCC+ waves.
+    if (port == 0 || (port == 4 && engine->is_scc_plus)) {
+        if (port == 0 && !engine->is_scc_plus && reg >= 0x80 && reg <= 0x9F) {
+            // The K051649 shares CH4 wave RAM with CH5: no fifth bank.
+            return;
+        }
         if (reg < 0x80) {
             // 波形RAM CH1〜CH4 (0x00 - 0x7F)
             int ch = reg / 0x20;
             int offset = reg % 0x20;
             engine->wave[ch][offset] = (int8_t)data;
-            if (ch == 3) {
+            if (ch == 3 && !engine->is_scc_plus) {
                 engine->wave[4][offset] = (int8_t)data; 
             }
         }
-        else if (reg >= 0x80 && reg <= 0x9F) {
+        else if (reg >= 0x80 && reg <= 0x9F && engine->is_scc_plus) {
             // SCC+ 波形RAM CH5 (0x80 - 0x9F)
             int ch = reg / 0x20;
             int offset = reg % 0x20;
