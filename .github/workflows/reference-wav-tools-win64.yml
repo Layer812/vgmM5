@@ -1,0 +1,74 @@
+name: vgmM5 reference WAV renderers Win64 (TOOLS ONLY NO USER MEDIA)
+on:
+  push:
+    branches:
+      - dev/reference-wav-tools-win64-20261103
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  renderer:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Fetch upstream official reference renderers (no VGM music uploads)
+        shell: pwsh
+        run: |
+          git clone --depth=1 https://github.com/aaronsgiles/ymfm.git upstream/ymfm
+          if ($LASTEXITCODE) { throw "YMFM checkout failed" }
+          git clone --depth=1 https://github.com/ValleyBell/libvgm.git upstream/libvgm
+          if ($LASTEXITCODE) { throw "libvgm checkout failed" }
+          git -C upstream/ymfm rev-parse HEAD
+          git -C upstream/libvgm rev-parse HEAD
+      - name: Build upstream official YMFM vgmrender.exe
+        shell: pwsh
+        run: |
+          Push-Location upstream/ymfm/examples/vgmrender
+          $src=@("vgmrender.cpp","em_inflate.cpp","../../src/ymfm_misc.cpp","../../src/ymfm_opl.cpp","../../src/ymfm_opm.cpp","../../src/ymfm_opn.cpp","../../src/ymfm_adpcm.cpp","../../src/ymfm_pcm.cpp","../../src/ymfm_ssg.cpp")
+          & cl.exe /nologo /EHsc /std:c++14 /O2 /I "../../src" $src /Fe:vgmrender.exe
+          if ($LASTEXITCODE -ne 0) {throw "YMFM compiler failed"}
+          Pop-Location
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item upstream/ymfm/examples/vgmrender/vgmrender.exe dist/ymfm_vgmrender.exe
+      - name: Install zlib dependency for libvgm
+        shell: pwsh
+        run: |
+          $vcpkg = Join-Path $env:VCPKG_INSTALLATION_ROOT "vcpkg.exe"
+          if (-not (Test-Path $vcpkg)) { throw "vcpkg missing from Windows runner" }
+          & $vcpkg install "zlib:x64-windows-static"
+          if ($LASTEXITCODE -ne 0) {throw "vcpkg zlib failed"}
+      - name: Build upstream official libvgm vgm2wav.exe
+        shell: pwsh
+        run: |
+          $toolchain=Join-Path $env:VCPKG_INSTALLATION_ROOT "scripts/buildsystems/vcpkg.cmake"
+          cmake -S upstream/libvgm -B upstream/libvgm/_build -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE="$toolchain" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DBUILD_LIBAUDIO=OFF -DBUILD_PLAYER=OFF -DBUILD_VGM2WAV=ON -DBUILD_TESTS=OFF -DUSE_SANITIZERS=OFF -DLIBRARY_TYPE=STATIC
+          if ($LASTEXITCODE -ne 0) {throw "libvgm configure failed"}
+          cmake --build upstream/libvgm/_build --config Release --target vgm2wav --parallel 4
+          if ($LASTEXITCODE -ne 0) {throw "libvgm native build failed"}
+          $exe=Get-ChildItem upstream/libvgm/_build -Recurse -Filter vgm2wav.exe | Where-Object { $_.FullName -match "Release" } | Select-Object -First 1
+          if (-not $exe) {throw "libvgm vgm2wav.exe missing"}
+          Copy-Item $exe.FullName dist/libvgm_vgm2wav.exe
+      - name: Check Win64 binary headers and save upstream attribution
+        shell: pwsh
+        run: |
+          foreach ($file in @("dist/ymfm_vgmrender.exe","dist/libvgm_vgm2wav.exe")) {
+            if (-not (Test-Path $file)) {throw "Missing tool: $file"}
+            if ((Get-Item $file).Length -lt 10000) {throw "Too short: $file"}
+            $bytes=[IO.File]::ReadAllBytes((Resolve-Path $file))
+            if ($bytes[0] -ne 77 -or $bytes[1] -ne 90) {throw "No PE magic: $file"}
+            Get-FileHash -Algorithm SHA256 $file | Format-List | Out-String | Write-Host
+          }
+          "ymfm commit: $(git -C upstream/ymfm rev-parse HEAD)" | Set-Content dist/SOURCE_COMMITS.txt
+          "libvgm commit: $(git -C upstream/libvgm rev-parse HEAD)" | Add-Content dist/SOURCE_COMMITS.txt
+          "ymfm: https://github.com/aaronsgiles/ymfm (BSD-3-Clause)" | Add-Content dist/SOURCE_COMMITS.txt
+          "libvgm: https://github.com/ValleyBell/libvgm (check upstream licenses/core notices)" | Add-Content dist/SOURCE_COMMITS.txt
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: vgmm5-reference-renderers-win64
+          path: dist/
+          retention-days: 14
