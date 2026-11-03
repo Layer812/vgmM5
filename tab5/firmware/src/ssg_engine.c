@@ -31,7 +31,7 @@ void ssg_engine_write(SSGSoundEngine *engine, uint8_t reg, uint8_t val) {
         case 0: case 1: engine->tone_period[0] = (engine->regs[0] | ((engine->regs[1] & 0x0F) << 8)); break;
         case 2: case 3: engine->tone_period[1] = (engine->regs[2] | ((engine->regs[3] & 0x0F) << 8)); break;
         case 4: case 5: engine->tone_period[2] = (engine->regs[4] | ((engine->regs[5] & 0x0F) << 8)); break;
-        case 6: engine->noise_period = (val & 0x1F) * 2; break; // ノイズ周期
+        case 6: engine->noise_period = (val & 0x1F); break; // Raw AY noise period; generator below applies the required /2 prescaler once
         case 11: case 12: engine->env_period = (engine->regs[11] | (engine->regs[12] << 8)); break;
         case 13: 
             // エンベロープ形状のリセットとフラグ設定
