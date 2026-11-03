@@ -275,7 +275,8 @@ void pcm_engine_write_oki(PCMSoundEngine *engine, uint8_t data);
 void pcm_engine_set_oki_clock(PCMSoundEngine *engine, uint32_t clock);
 
 // OKI MSM6258 (X68000)
-void pcm_engine_set_msm6258_clock(PCMSoundEngine *engine, uint32_t clock);
+// Divider code is VGM header byte 0x94 bits 0-1; 0 selects /1024.
+void pcm_engine_set_msm6258_clock(PCMSoundEngine *engine, uint32_t clock, uint8_t divider_code);
 void pcm_engine_write_msm6258(PCMSoundEngine *engine, uint8_t reg, uint8_t data);
 void pcm_engine_msm6258_start_stream(PCMSoundEngine *engine, uint32_t offset, uint32_t length);
 
