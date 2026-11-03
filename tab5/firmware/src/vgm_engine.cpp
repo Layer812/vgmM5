@@ -983,7 +983,9 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     if (vgm_scc_clock != 0) {
         bool is_scc_plus = (vgm_scc_clock & 0x80000000) != 0;
         Serial.printf("[VGM] SCC Clock: %lu, SCC+: %d\n", vgm_scc_clock & 0x3FFFFFFF, is_scc_plus);
-        scc_engine_init(&g_scc_engine, actual_sample_rate, vgm_scc_clock & 0x3FFFFFFF); active_chips[active_chip_count++] = &scc_wrapper;
+        scc_engine_init(&g_scc_engine, actual_sample_rate, vgm_scc_clock & 0x3FFFFFFF);
+        scc_engine_set_variant(&g_scc_engine, is_scc_plus);
+        active_chips[active_chip_count++] = &scc_wrapper;
         active_channel_count += 5;
     }
 
@@ -998,7 +1000,13 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
         if (vgm_oki_clock != 0)     pcm_engine_set_oki_clock(&g_pcm_engine, vgm_oki_clock);
         if (vgm_segapcm_clock != 0) pcm_engine_segapcm_init(&g_pcm_engine, vgm_segapcm_clock & 0x3FFFFFFF, vgm_spcm_intf);
         if (vgm_c140_clock != 0) {
-            uint8_t c140_bank_type = (vgm_c140_clock >> 31) & 1; // 0 = System 2, 1 = System 21
+            // VGM v1.71: C140 banking type is header byte 0x96, NOT clock bit 31.
+            // 0=System 2, 1=System 21, 2=219 ASIC (not implemented here).
+            const uint8_t declared_c140_type = (vgmDataStart > 0x96) ? header[0x96] : 0u;
+            if (declared_c140_type > 1u) {
+                Serial.printf("[VGM][C140] WARNING: chip subtype %u (219 ASIC) not modeled; fallback to System 2 banking\n", declared_c140_type);
+            }
+            uint8_t c140_bank_type = (declared_c140_type <= 1u) ? declared_c140_type : 0u;
             Serial.printf("[VGM] C140 Clock: %lu, Type: %d\n", vgm_c140_clock & 0x3FFFFFFF, c140_bank_type);
             pcm_engine_namco_init(&g_pcm_engine, vgm_c140_clock & 0x3FFFFFFF, 0xC1, c140_bank_type);
         }
