@@ -80,30 +80,26 @@ jobs:
           python3 -m pip install --disable-pip-version-check platformio
           python3 -m pip install --disable-pip-version-check 'click==8.1.8'
           cd tab5/firmware && pio pkg install -e tab5-r61-speaker-revert
-      - name: Resolve exact M5Unified 0.2.28 / M5GFX 0.2.35 and patch R60
+      - name: Force build-local exact M5GFX 0.2.35 against transitive 0.2.36
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          from subprocess import run
+          import shutil
           root=Path('tab5/firmware/.pio/libdeps/tab5-r61-speaker-revert')
-          pins={'M5Unified':'0.2.28','M5GFX':'0.2.35'}
-          print('Installed library metadata:')
-          for p in sorted(root.glob('*/library.properties')):
-              data=p.read_text()
-              print(p.parent.name,[x for x in data.splitlines() if x.startswith(('name=','version='))])
-          for lib,version in pins.items():
-              p=root/lib/'library.properties'
-              if not p.exists() or f'version={version}' not in p.read_text():
-                  if lib=='M5GFX':
-                      print('R62: a newer M5GFX may have been resolved transitively; explicitly reinstall the pinned Git commit')
-                      run(['pio','pkg','install','-e','tab5-r61-speaker-revert','--library',
-                           'https://github.com/M5Stack/M5GFX.git#65c816a38386062d2c3dc47d41237a9083acbc75'],
-                          cwd='tab5/firmware',check=True)
-              p=root/lib/'library.properties'
-              assert p.exists(),f'Pinned {lib} missing from {root}'
-              data=p.read_text()
-              assert f'version={version}' in data,(p,data[:550])
-              print('PASS pinned',lib,version)
+          unified=root/'M5Unified'/'library.properties'
+          assert unified.exists() and 'version=0.2.28' in unified.read_text()
+          pinned=[p.parent for p in root.glob('M5GFX@*/library.properties') if 'version=0.2.35' in p.read_text()]
+          assert len(pinned)==1,[(str(p),p.read_text()[:250]) for p in root.glob('M5GFX*/library.properties')]
+          preferred=root/'M5GFX'
+          if not preferred.exists() or 'version=0.2.35' not in (preferred/'library.properties').read_text():
+              # M5Unified's >=0.2.35 transitively installs 0.2.36 as M5GFX
+              # in November 2026, ahead of the git-pinned 0.2.35 clone.
+              # Replace ONLY the temporary CI registry copy, never repository or device files.
+              if preferred.exists(): shutil.rmtree(preferred)
+              shutil.copytree(pinned[0],preferred)
+              print('R62 repaired CI-only dependency collision: removed transient M5GFX0.2.36, installed pinned0.2.35')
+          assert 'version=0.2.35' in (preferred/'library.properties').read_text()
+          print('PASS exact M5Unified0.2.28 / M5GFX0.2.35, no dependency regression')
           PY
           python3 tab5/patch_m5gfx_r60.py
       - name: Real Tab5 ESP32-P4 native firmware build (NO FLASH)
