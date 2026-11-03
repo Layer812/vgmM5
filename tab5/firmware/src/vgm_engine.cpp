@@ -19,6 +19,9 @@
 #include "tab5_psram_bounds.hpp"
 #include "tab5_track_meta.hpp"
 #include "tab5_vgm_mix_tail.hpp"
+#if defined(VGMM5_R66_SILENCE_DITHER)
+#include "tab5_r66_silence_dither.hpp"
+#endif
 #include "tab5_live_monitor.hpp"
 
 // ★ MDXエンジンとのバッファ共有：MDX再生中もaudio_play_taskが動作するようにする
@@ -1660,6 +1663,14 @@ if (atom_eq) {
 
         out_buf[i * 2]     = (int16_t)mix_l;
         out_buf[i * 2 + 1] = (int16_t)mix_r;
+#if defined(VGMM5_R66_SILENCE_DITHER)
+        // Experiment A: keep sub-audible PCM movement ONLY during digital
+        // silence inside the VGM stream. This does not queue any extra audio,
+        // change the physical chip sound, or revive playback after EOF.
+        static uint32_t r66_quiet_lfsr = 0xA56959A5u;
+        tab5_r66_fill_silent_pcm(&out_buf[i * 2], &out_buf[i * 2 + 1],
+                                 &r66_quiet_lfsr);
+#endif
     }
 #if defined(VGMM5_R53_STEADY_FULL_AUDIO)
     // R49 mode0 is the full-quality FM(FIR)+PCM path. Re-arm the diagnostic
