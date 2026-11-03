@@ -18,6 +18,7 @@
 #include <esp_timer.h> // R42: per-completed-block CPU budget observer (not in sample loop)
 #include "tab5_psram_bounds.hpp"
 #include "tab5_track_meta.hpp"
+#include "tab5_vgm_mix_tail.hpp"
 #include "tab5_live_monitor.hpp"
 
 // ★ MDXエンジンとのバッファ共有：MDX再生中もaudio_play_taskが動作するようにする
@@ -205,7 +206,7 @@ uint32_t actual_sample_rate = 44100;
 uint8_t chip_type = 0;
 int currentSong = 0;
 
-// ★ ミキサー用の除数（チップ数）をグローバルに一度だけ事前計算
+// R65: mixer denominator counts physical chips, not multiple software wrappers.
 static int global_chip_count = 1;
 
 #define MAX_SONGS 100
@@ -1054,11 +1055,21 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
         if(vgm_segapcm_clock || vgm_c140_clock || vgm_c352_clock)add("PCM");
     }
 
-    // ========================================================
-    // ★ ミキサー用の除数（チップ数）をグローバルに一度だけ事前計算
-    // ========================================================
-    global_chip_count = (active_chip_count > 0) ? active_chip_count : 1;
-    Serial.printf("[VGM] Mixer: chip_count=%d\n", global_chip_count);
+    // R65: a YM2612 has FM + DAC wrappers; YM2608/2610 have FM/SSG/PCM
+    // wrappers. They are ONE physical chip and must not be divided by 2/3.
+    // Other VGM clock fields each identify a physically separate chip.
+    const uint32_t separate_chip_clocks[] = {
+        vgm_ym2413_clock, vgm_ym2612_clock, vgm_ym2151_clock,
+        vgm_ym2203_clock, vgm_ym2608_clock, vgm_ym2610_clock,
+        vgm_ym3812_clock, vgm_ay8910_clock, vgm_msm6258_clock,
+        vgm_oki_clock, vgm_segapcm_clock, vgm_scc_clock,
+        vgm_c140_clock, vgm_c352_clock
+    };
+    global_chip_count = (int)tab5::vgm_physical_chip_count(
+        vgm_sn_clock, separate_chip_clocks,
+        sizeof(separate_chip_clocks) / sizeof(separate_chip_clocks[0]));
+    Serial.printf("[VGM][R65] Mixer: physical=%d synth_wrappers=%d\n",
+                  global_chip_count, active_chip_count);
 
     waitSamples = 8820; vgm_time_acc = 0; ym2612_pcm_offset = 0;
     sn76489_writes = 0;
@@ -1601,8 +1612,8 @@ void IRAM_ATTR processAudioBlock() {
             mix_r += ch_r;
         }
 
-        // グローバルに計算済みのチップ数で割る
-        // （各音源の出力が非常に大きく合算でクリップするため、さらに3で割ってヘッドルームを確保し音割れを防ぐ）
+        // R65: preserve /3 fixed headroom; divide by PHYSICAL VGM chip
+        // count, not FM+SSG+PCM software-wrapper count.
         mix_l /= (global_chip_count * 3);
         mix_r /= (global_chip_count * 3);
 
@@ -1656,6 +1667,14 @@ if (atom_eq) {
     // This keeps 256/256 FM, PCM and FIR gains indefinitely, including >27h.
     if (s_r49_segments.enabled) s_r49_segments.frame_in_mode = 0;
 #endif
+    // Natural EOF may occur mid-block; this last block will be queued and
+    // abruptly followed by silence. Taper its last 256 frames without
+    // resetting chip histories or touching the audio ownership protocol.
+    // Manual STOP is excluded (its queue is cancelled separately).
+    if (!isPlaying.load(std::memory_order_acquire) &&
+        !s_vgm_manual_stop.load(std::memory_order_acquire)) {
+        tab5::vgm_fade_final_pcm_block(out_buf, BUFF_SIZE);
+    }
     wav_buff_size[wd] = BUFF_SIZE;
     // R13: optional lossy UI snapshot from the *finished* generated PCM,
     // at generator priority 2, before publishing its ring slot. Never
