@@ -80,14 +80,30 @@ jobs:
           python3 -m pip install --disable-pip-version-check platformio
           python3 -m pip install --disable-pip-version-check 'click==8.1.8'
           cd tab5/firmware && pio pkg install -e tab5-r61-speaker-revert
-      - name: Verify and patch already-pinned Tab5 M5GFX 0.2.35
+      - name: Resolve exact M5Unified 0.2.28 / M5GFX 0.2.35 and patch R60
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          from subprocess import run
           root=Path('tab5/firmware/.pio/libdeps/tab5-r61-speaker-revert')
-          assert 'version=0.2.28' in (root/'M5Unified'/'library.properties').read_text()
-          assert 'version=0.2.35' in (root/'M5GFX'/'library.properties').read_text()
-          print('PASS M5Unified 0.2.28 / M5GFX 0.2.35')
+          pins={'M5Unified':'0.2.28','M5GFX':'0.2.35'}
+          print('Installed library metadata:')
+          for p in sorted(root.glob('*/library.properties')):
+              data=p.read_text()
+              print(p.parent.name,[x for x in data.splitlines() if x.startswith(('name=','version='))])
+          for lib,version in pins.items():
+              p=root/lib/'library.properties'
+              if not p.exists() or f'version={version}' not in p.read_text():
+                  if lib=='M5GFX':
+                      print('R62: a newer M5GFX may have been resolved transitively; explicitly reinstall the pinned Git commit')
+                      run(['pio','pkg','install','-e','tab5-r61-speaker-revert','--library',
+                           'https://github.com/M5Stack/M5GFX.git#65c816a38386062d2c3dc47d41237a9083acbc75'],
+                          cwd='tab5/firmware',check=True)
+              p=root/lib/'library.properties'
+              assert p.exists(),f'Pinned {lib} missing from {root}'
+              data=p.read_text()
+              assert f'version={version}' in data,(p,data[:550])
+              print('PASS pinned',lib,version)
           PY
           python3 tab5/patch_m5gfx_r60.py
       - name: Real Tab5 ESP32-P4 native firmware build (NO FLASH)
