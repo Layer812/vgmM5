@@ -1,6 +1,9 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#if defined(VGMM5_R66_PSG_GATE_RAMP)
+#include "tab5_r66_note_declick.h"
+#endif
 
 // ─────────────────────────────────────────
 // SN76489 (DCSG) / Sega VDP PSG
@@ -10,6 +13,9 @@ typedef struct {
     uint8_t  vol;       // 4bit ボリュームレジスタ (0=最大, 15=無音)
     int32_t  counter;   // 周期カウンタ
     int8_t   out_state; // 現在の出力状態 (1 or -1)
+#if defined(VGMM5_R66_PSG_GATE_RAMP)
+    tab5_r66_note_fade note_fade;
+#endif
 } SN76489_Tone;
 
 typedef struct {
@@ -18,6 +24,9 @@ typedef struct {
     int32_t  counter;       // 周期カウンタ
     int8_t   out_state;     // 現在の出力状態
     uint16_t shift_reg;     // ノイズ生成用 LFSR (16bitシフトレジスタ)
+#if defined(VGMM5_R66_PSG_GATE_RAMP)
+    tab5_r66_note_fade note_fade;
+#endif
 } SN76489_Noise;
 
 typedef struct {
