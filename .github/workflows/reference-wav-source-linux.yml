@@ -1,0 +1,28 @@
+name: vgmM5 official reference source archive for local waveform comparison
+on:
+  push:
+    branches: [dev/reference-wav-tools-win64-20261103]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Clone official audio reference cores
+        shell: bash
+        run: |
+          git clone --depth=1 https://github.com/aaronsgiles/ymfm.git ymfm
+          git clone --depth=1 https://github.com/ValleyBell/libvgm.git libvgm
+          mkdir -p dist
+          git -C ymfm archive --format=zip -o ../dist/ymfm-source.zip HEAD
+          git -C libvgm archive --format=zip -o ../dist/libvgm-source.zip HEAD
+          printf 'ymfm HEAD = %s\n' "$(git -C ymfm rev-parse HEAD)" > dist/SOURCE_COMMITS.txt
+          printf 'libvgm HEAD = %s\n' "$(git -C libvgm rev-parse HEAD)" >> dist/SOURCE_COMMITS.txt
+          ls -lh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vgmm5-reference-sources-linux
+          path: dist/*
+          retention-days: 3
