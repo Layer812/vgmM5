@@ -63,13 +63,15 @@ Module Audio（ES8388）を接続した場合と、接続せず内蔵スピー�
 
 #### M5Stack Tab5版 R67 正式版（2026年11月4日）
 
+![vgmM5 Tab5画面](tab5/tab5.png)
+
 ESP32-P4採用のTab5に対応。VGM/VGZ・MDXのmicroSD再生、タッチ操作、JPEG/PNG/BMPカバー画像表示が利用できます。
 
 **R67の更新:** 実機でプチプチノイズの消失が確認された微弱PCM方式（R66-A）を正式採用しました。激しいノイズが出た2msフェード方式（R66-B）は**不採用**。AY/SCC、C140、C352、MSM6258、FM/PCM音量バランスなどR62〜R65の改善も含みます。M5Unified 0.2.28 / M5GFX 0.2.35に固定。
 
 [正式版ソース（main）](https://github.com/Layer812/vgmM5/tree/main/tab5) / [R67ネイティブビルド](https://github.com/Layer812/vgmM5/actions/runs/41661806444) / [Tab5版の説明・app-only書き込み](tab5/README.md)
 
-**注意:** 下記M5Burnerシェアコードの配布BINはR67への更新・照合が未確認です。R67を入れる場合はGitHubのビルド成果物をご利用ください。
+**Tab5用M5Burner新シェアコード：`rg69duyAcUQoohOl`（作者提供）。** ただしM5Burner配布BINとGitHubのR67ビルドBINのSHA-256一致は未確認です。
 
 ### 特徴
 - **オンラインモード**: Wi-Fiに接続することで、VGM/VGZXファイルをダウンロードする手間なく、クラウドのファイルを指定して再生できます。
@@ -80,7 +82,7 @@ ESP32-P4採用のTab5に対応。VGM/VGZ・MDXのmicroSD再生、タッチ操作
 ### インストール方法 (M5 Burner)
 手軽に試す場合は、M5 Burnerから以下のシェアコードでファームウェアを直接書き込めます。
 
-- **M5Stack Tab5用 シェアコード:** `8i9Cp1C6ufGpGC5J`
+- **M5Stack Tab5用 シェアコード:** `rg69duyAcUQoohOl`
 - **M5Stack CoreS3用 シェアコード:** `wEBeKwOKFsqAmlsu`（Module Audioあり・なし共通）
 - **M5Stack Cardputer用 シェアコード:** `rqz95QwaAsM6bN3O`
 - **M5Stack Atom Echo S3R用 シェアコード:** `zoSd8neRRq7ZQFjB`
@@ -167,7 +169,7 @@ Supports ESP32-P4 Tab5 with VGM/VGZ and MDX playback from microSD, touch control
 
 [Source (main)](https://github.com/Layer812/vgmM5/tree/main/tab5) / [verified R67 native build](https://github.com/Layer812/vgmM5/actions/runs/41661806444) / [Tab5 release and app-only flashing notes](tab5/README.md).
 
-**Note:** The M5Burner share code listed below is not verified to contain R67. Use the GitHub native build artifact for R67.
+**Updated M5Burner Tab5 share code: `rg69duyAcUQoohOl` (author-provided).** The binary served by M5Burner has not yet been SHA-256 matched against the GitHub R67 build.
 
 ### Features
 - **Online Mode (Jukebox)**: Connect via Wi-Fi to play VGM/VGZ files directly from the cloud without the need to download and save them to a MicroSD card.
@@ -178,7 +180,7 @@ Supports ESP32-P4 Tab5 with VGM/VGZ and MDX playback from microSD, touch control
 ### Installation (via M5 Burner)
 For a quick and easy start, you can flash the firmware directly to your device using M5 Burner with the following share codes:
 
-- **M5Stack Tab5 Share Code:** `8i9Cp1C6ufGpGC5J`
+- **M5Stack Tab5 Share Code:** `rg69duyAcUQoohOl`
 - **M5Stack CoreS3 Share Code:** `wEBeKwOKFsqAmlsu` (with or without Module Audio)
 - **M5Stack Cardputer Share Code:** `rqz95QwaAsM6bN3O`
 - **M5Stack Atom Echo S3R Share Code:** `zoSd8neRRq7ZQFjB`
