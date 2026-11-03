@@ -996,7 +996,13 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     if (vgm_msm6258_clock != 0 || vgm_oki_clock != 0 || vgm_segapcm_clock != 0 || vgm_ym2612_clock != 0 || vgm_ym2608_clock != 0 || vgm_ym2610_clock != 0 || vgm_c140_clock != 0 || vgm_c352_clock != 0) {
         active_chips[active_chip_count++] = &pcm_wrapper;
         active_channel_count += 1;
-        if (vgm_msm6258_clock != 0) pcm_engine_set_msm6258_clock(&g_pcm_engine, vgm_msm6258_clock);
+        if (vgm_msm6258_clock != 0) {
+            // VGM 1.71 byte 0x94 bits 0-1 controls the OKIM6258 sample divider.
+            // Header 0 (including older files) means /1024, not /512.
+            const uint8_t msm_divcode = (vgmDataStart > 0x94) ? (header[0x94] & 0x03u) : 0u;
+            pcm_engine_set_msm6258_clock(&g_pcm_engine, vgm_msm6258_clock & 0x3FFFFFFFu, msm_divcode);
+            Serial.printf("[VGM] MSM6258 divider code=%u\n", (unsigned)msm_divcode);
+        }
         if (vgm_oki_clock != 0)     pcm_engine_set_oki_clock(&g_pcm_engine, vgm_oki_clock);
         if (vgm_segapcm_clock != 0) pcm_engine_segapcm_init(&g_pcm_engine, vgm_segapcm_clock & 0x3FFFFFFF, vgm_spcm_intf);
         if (vgm_c140_clock != 0) {
