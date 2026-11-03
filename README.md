@@ -18,7 +18,7 @@ vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(MXDRV)ファイ�
 #### 対応デバイスと機能 (Supported Devices & Features)
 | 機能 (Features) \ デバイス (Device) | M5Stack AtomS3R (Echo) | M5Stack Cardputer | M5Stack CoreS3 | + [Module Audio](https://docs.m5stack.com/ja/module/Module-Audio) | [M5 TAB5](https://docs.m5stack.com/ja/core/Tab5) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **ステータス (Status)** | ✔️ 対応済 | [✔️ R6公開版](cardputer/README.md) | [✔️ R6安定版](cores3/README.md) | [✔️ R6安定版](cores3/README.md) | [✔️ 安定版](tab5/README.md) |
+| **ステータス (Status)** | ✔️ 対応済 | [✔️ R6公開版](cardputer/README.md) | [✔️ R6安定版](cores3/README.md) | [✔️ R6安定版](cores3/README.md) | [✔️ R67 正式版](tab5/README.md) |
 | **VGM/VGZ 再生** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **MDX 再生** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **内蔵フラッシュ (USB Drive)** | ✔️ | - | - | - | - |
@@ -61,12 +61,15 @@ Module Audio（ES8388）を接続した場合と、接続せず内蔵スピー�
 
 詳細は [CoreS3版の説明](cores3/README.md) をご覧ください。
 
-#### M5Stack Tab5版（2026年10月25日 更新）
+#### M5Stack Tab5版 R67 正式版（2026年11月4日）
+
 ESP32-P4採用のTab5に対応。VGM/VGZ・MDXのmicroSD再生、タッチ操作、JPEG/PNG/BMPカバー画像表示が利用できます。
 
-**更新内容:** 新しいM5Unified（0.2.28）・M5GFX（0.2.35）への対応と、一部音源の修正・改善。実機で動作を確認しました。
+**R67の更新:** 実機でプチプチノイズの消失が確認された微弱PCM方式（R66-A）を正式採用しました。激しいノイズが出た2msフェード方式（R66-B）は**不採用**。AY/SCC、C140、C352、MSM6258、FM/PCM音量バランスなどR62〜R65の改善も含みます。M5Unified 0.2.28 / M5GFX 0.2.35に固定。
 
-詳しくは [Tab5版の説明と注意事項](tab5/README.md) をご覧ください。
+[正式版ソース（main）](https://github.com/Layer812/vgmM5/tree/main/tab5) / [R67ネイティブビルド](https://github.com/Layer812/vgmM5/actions/runs/41661806444) / [Tab5版の説明・app-only書き込み](tab5/README.md)
+
+**注意:** 下記M5Burnerシェアコードの配布BINはR67への更新・照合が未確認です。R67を入れる場合はGitHubのビルド成果物をご利用ください。
 
 ### 特徴
 - **オンラインモード**: Wi-Fiに接続することで、VGM/VGZXファイルをダウンロードする手間なく、クラウドのファイルを指定して再生できます。
@@ -130,7 +133,7 @@ vgmM5 is a VGM/VGZ and MDX (X68000) file player designed specifically for the M5
 
 | Features \ Device | M5Stack AtomS3R (Echo) | M5Stack Cardputer | M5Stack CoreS3 | + [Module Audio](https://docs.m5stack.com/ja/module/Module-Audio) | [M5 TAB5](https://docs.m5stack.com/ja/core/Tab5) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Status** | ✔️ Supported | [✔️ R6 Published](cardputer/README.md) | [✔️ R6 Stable](cores3/README.md) | [✔️ R6 Stable](cores3/README.md) | [✔️ Stable](tab5/README.md) |
+| **Status** | ✔️ Supported | [✔️ R6 Published](cardputer/README.md) | [✔️ R6 Stable](cores3/README.md) | [✔️ R6 Stable](cores3/README.md) | [✔️ R67 Official](tab5/README.md) |
 | **VGM/VGZ Playback** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **MDX Playback** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **Internal Flash (USB Drive)** | ✔️ | - | - | - | - |
@@ -156,12 +159,15 @@ Verified on real CoreS3 hardware **with and without the external Module Audio (E
 
 See the [CoreS3 documentation](cores3/README.md).
 
-#### M5Stack Tab5 edition (updated October 25, 2026)
-Supports ESP32-P4 Tab5 with VGM/VGZ and MDX playback from microSD, touch controls, and JPEG/PNG/BMP cover artwork.
+#### M5Stack Tab5 R67 official edition (November 4, 2026)
 
-**What's new:** Support for M5Unified 0.2.28 and M5GFX 0.2.35, plus fixes and improvements to several sound engines. Verified on Tab5 hardware.
+Supports ESP32-P4 Tab5 with VGM/VGZ and MDX playback from microSD, touch controls and JPEG/PNG/BMP cover artwork.
 
-See the [Tab5 documentation and safety notes](tab5/README.md).
+**R67:** adopts the physically confirmed R66-A ±1-LSB in-song silent PCM treatment; repeated note clicks disappeared on Tab5. Rejects the R66-B 2ms note fade which caused severe noise. Includes R62–R65 AY/SCC, C140/C352, MSM6258 and FM/PCM gain fixes. M5Unified 0.2.28 / M5GFX 0.2.35 are pinned.
+
+[Source (main)](https://github.com/Layer812/vgmM5/tree/main/tab5) / [verified R67 native build](https://github.com/Layer812/vgmM5/actions/runs/41661806444) / [Tab5 release and app-only flashing notes](tab5/README.md).
+
+**Note:** The M5Burner share code listed below is not verified to contain R67. Use the GitHub native build artifact for R67.
 
 ### Features
 - **Online Mode (Jukebox)**: Connect via Wi-Fi to play VGM/VGZ files directly from the cloud without the need to download and save them to a MicroSD card.
