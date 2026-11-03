@@ -4,52 +4,59 @@
 
 ## 日本語
 
-M5Stack Tab5（ESP32-P4）向けのVGM/VGZ・MDXプレイヤーです。microSD上の楽曲再生、タッチ操作、曲情報・チャンネル表示、スペクトラム、JPEG/PNG/BMPカバー画像に対応しています。
+M5Stack Tab5（ESP32-P4）向けのVGM/VGZ・MDXプレイヤーです。microSD上の楽曲再生、タッチ操作、曲情報・チャンネル表示、スペクトラム、JPEG/PNG/BMPカバー画像に対応します。
 
-### M5Burnerで入手
+### 正式版 R67（2026年11月4日）
 
-**Tab5用シェアコード：`8i9Cp1C6ufGpGC5J`**
+**R67はGitHub `main` に正式統合済みです。** [統合PR #24](https://github.com/Layer812/vgmM5/pull/24) / [ネイティブビルド・回帰テスト PASS](https://github.com/Layer812/vgmM5/actions/runs/41661806444)
 
-[M5Stack公式Tab5ページ](https://docs.m5stack.com/ja/core/Tab5)からM5Burnerなどの情報を参照できます。他機種用のイメージは使用しないでください。
+- **音符のプチノイズを解消**：デジタル無音区間に16bit PCMで±1の微弱な疑似ランダム信号を出力する、R66-A方式を採用しました。実機Tab5で「プチプチノイズが完全に消えた」と報告されています。非無音サンプル、発音周波数や音色、再生タイミングは変更しません。VGM再生中の無音区間のみ対象です。
+- **R66-Bの2msフェードは不採用**：実機で激しいノイズが発生したため、正式版に入れていません。
+- **R62〜R65の音源修正**：AY8910ノイズ分周、SCC/SCC+、C140バンク設定、C352/OKIM6258クロック分周、FM/PCMの音量計算、C140音量、曲全体の終端処理。
+- **ライブラリ固定**：M5Unified `0.2.28`、M5GFX `0.2.35`。Tab5以外の機種の音声処理は変更していません。
+- 旧正式版R61は[保管ブランチ](https://github.com/Layer812/vgmM5/tree/stable/tab5-r61-ym2151-unified028-20261025)に残しています。
 
-### 更新内容（2026年10月25日）
+### ファームウェアと書き込み
 
-- **M5Unified 0.2.28 / M5GFX 0.2.35に対応**
-- **YM2151を含む複数の音源処理を修正・改善**
-- Tab5実機で再生・音質を確認
+R67の実際のESP32-P4ネイティブビルドは[GitHub Actions R67の成果物](https://github.com/Layer812/vgmM5/actions/runs/41661806444)から取得できます（Actions成果物は保存期限があります）。生成されたアプリBINのサイズは **870,192バイト**、SHA-256 は
 
-### ソースとビルド
+```text
+ba26ef34a3eb9f9565c8a7e9e7159beef252d61eafbaa70d1dfc81abbe7607d8
+```
 
-最新のTab5ソースは [`firmware/src/`](firmware/src/) にあります。使用するプラットフォームは pioarduino `54.03.21`、ライブラリはM5Unified `0.2.28` とM5GFX `0.2.35` です。更新内容を含むソースは [GitHubの安定版ブランチ](https://github.com/Layer812/vgmM5/tree/stable/tab5-r61-ym2151-unified028-20261025) でも参照できます。
+既存のTab5で確認済みのパーティション配置を維持する場合、`firmware.bin` はアプリ領域 `0x10000` にのみ書き込みます（例：COM9）。
 
-ESP32-P4ネイティブビルド：[`GitHub Actions PASS`](https://github.com/Layer812/vgmM5/actions/runs/40199799670)。app-onlyビルドのSHA-256：`ea03ec333db0a220fe4f497130bd0f493ed489d7c651766bddb6f3491ad722fb`。
+```bat
+python -m esptool --chip esp32p4 --port COM9 --baud 460800 --before default_reset --after hard_reset write_flash 0x10000 firmware.bin
+```
 
-従来の [R61 FIX1ソースZIP](vgmM5_Tab5_R61_FIX1_source.zip)、[`RUN_THIS_TAB5_BUILD_ONLY.cmd`](RUN_THIS_TAB5_BUILD_ONLY.cmd)、[`BUILD_ONLY.md`](BUILD_ONLY.md) は**旧版の保管資料**です。最新版の依存関係や音源修正を含むビルド結果とは異なります。
+**アプリ領域以外（ブートローダー、パーティションテーブル、HumanXDFなど）を上書きしません。** 上記の書き込み先はR61以来のTab5用レイアウトを前提とします。R67のBIN自体のビルドは成功していますが、R67のBINへの再書き込みは未確認です。無音時PCM方式の実機での成功は、同じ方式を搭載したR66-Aの報告に基づきます。
 
-シェアコードで配信されるM5Burner側のBINと、上記GitHubビルドBINとのハッシュ照合は行っていません。フルフラッシュ書込では既存データが上書きされる場合があります。
+### M5Burner（別配布）
 
-この版ではオンラインモード、USBマスストレージ、USBキーボード操作は提供していません。楽曲データは同梱していません。ライセンスについては[プロジェクトREADME](../README.md#license)を参照してください。
+既存のTab5用M5Burnerシェアコード：`8i9Cp1C6ufGpGC5J`。
+
+**このコードで配布されるイメージはR67として更新・SHA照合されていません。** R67を使用する場合は上記のGitHubビルドを使ってください。M5Burnerへの新バージョン登録は別作業です。
+
+この版ではオンラインモード、USBマスストレージ、USBキーボード操作は提供していません。楽曲データは同梱していません。ライセンスは[プロジェクトREADME](../README.md#license)を参照してください。
 
 ---
 
 ## English
 
-vgmM5 for M5Stack Tab5 (ESP32-P4) plays local VGM/VGZ and MDX from microSD, with touch navigation, channel/spectrum display, and JPEG/PNG/BMP cover artwork.
+vgmM5 for M5Stack Tab5 (ESP32-P4) plays VGM/VGZ and MDX from microSD with touch navigation, channel/spectrum display, and JPEG/PNG/BMP cover artwork.
 
-### M5Burner
+### Official R67 (November 4, 2026)
 
-**Tab5 share code: `8i9Cp1C6ufGpGC5J`**
+**Merged into `main`.** [Merge PR #24](https://github.com/Layer812/vgmM5/pull/24) / [ESP32-P4 native build and host tests PASS](https://github.com/Layer812/vgmM5/actions/runs/41661806444).
 
-### What's new — October 25, 2026
+- Adopted the **R66-A faint ±1-LSB stereo PCM in digitally silent VGM frames**. On an actual Tab5 the user reported complete removal of repetitive note clicks. The note synthesizers and nonzero output samples are unchanged.
+- Rejected R66-B's 2ms note fade after severe noise on real hardware; its code is **not** included.
+- Includes R62–R65 AY noise divider, SCC/SCC+, C140, C352, MSM6258, physical-chip mixing, C140 level and end-of-track improvements.
+- Pinned M5Unified 0.2.28 / M5GFX 0.2.35. Previous R61 is preserved in the [R61 stable branch](https://github.com/Layer812/vgmM5/tree/stable/tab5-r61-ym2151-unified028-20261025).
 
-- Updated to **M5Unified 0.2.28 / M5GFX 0.2.35**
-- Improved several sound engines, including **YM2151**
-- Playback and audio confirmed on Tab5 hardware
+### Download and app-only flash
 
-### Source and build
+[Verified R67 CI artifact](https://github.com/Layer812/vgmM5/actions/runs/41661806444) (subject to GitHub retention). The native app image is 870,192 bytes with SHA-256 `ba26ef34a3eb9f9565c8a7e9e7159beef252d61eafbaa70d1dfc81abbe7607d8`. For a Tab5 with the established partition map, flash the app **only** at `0x10000` using the command above. Do not overwrite the bootloader, partition table, or HumanXDF. Firmware flashing was not carried out by CI; R67's exact BIN has not been separately device-tested, while R66-A with identical audio logic was verified by the user.
 
-Current source: [`firmware/src/`](firmware/src/) and the [stable branch](https://github.com/Layer812/vgmM5/tree/stable/tab5-r61-ym2151-unified028-20261025). Native ESP32-P4 build: [GitHub Actions PASS](https://github.com/Layer812/vgmM5/actions/runs/40199799670).
-
-The [R61 FIX1 source ZIP](vgmM5_Tab5_R61_FIX1_source.zip) and legacy build-only scripts are retained as **historical snapshots** and do not reproduce the updated libraries or sound corrections.
-
-The M5Burner image has not been independently compared by SHA-256 with the GitHub CI binary. Full-device flashing can overwrite existing data. Online mode, USB mass storage and USB keyboard controls are not part of this edition. Music files are not bundled.
+**M5Burner share code** `8i9Cp1C6ufGpGC5J` is a separate distribution and is **not yet verified or updated to R67**. To obtain R67, use the native build artifact instead. No bundled music or online/USB MSC/USB keyboard mode in this Tab5 edition.
