@@ -1,6 +1,9 @@
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
+#if defined(VGMM5_R66_PSG_GATE_RAMP)
+#include "tab5_r66_note_declick.h"
+#endif
 
 // ─────────────────────────────────────────
 // AY-3-8910 (SSG) - YM2610内蔵 / 単体チップ
@@ -33,6 +36,9 @@ typedef struct {
     uint32_t step_size;
     
     int32_t  vol_table[16]; // 非線形ボリュームテーブル
+#if defined(VGMM5_R66_PSG_GATE_RAMP)
+    tab5_r66_note_fade note_fade[3];
+#endif
 } SSGSoundEngine;
 
 extern SSGSoundEngine g_ssg_engine;
