@@ -735,8 +735,13 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
         if (final_namco_r > 32767) final_namco_r = 32767;
         else if (final_namco_r < -32768) final_namco_r = -32768;
 
-        mix_l += final_namco_l >> 1; // ±16384 (matches FM max)
-        mix_r += final_namco_r >> 1;
+        // R65: C140 8-bit linear samples are expanded only to 12-bit
+        // (see << 4 above). The old unconditional >>1 left this chip
+        // markedly quieter than other mono-chip VGM tracks. Give C140
+        // +6 dB inside the existing 16-bit saturation boundary, while
+        // preserving the prior C352 output gain unchanged.
+        mix_l += engine->c140_enabled ? final_namco_l : (final_namco_l >> 1);
+        mix_r += engine->c140_enabled ? final_namco_r : (final_namco_r >> 1);
     }
 
     pcm_engine_opn_tick(engine, &mix_l, &mix_r);
