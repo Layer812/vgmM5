@@ -25,6 +25,9 @@ void ssg_engine_init(SSGSoundEngine *engine, uint32_t sample_rate, uint32_t cloc
 
 void ssg_engine_write(SSGSoundEngine *engine, uint8_t reg, uint8_t val) {
     if (reg > 15) return;
+#if defined(VGMM5_R66_PSG_GATE_RAMP)
+    const uint8_t before = engine->regs[reg];
+#endif
     engine->regs[reg] = val;
 
     switch (reg) {
@@ -51,6 +54,24 @@ void ssg_engine_write(SSGSoundEngine *engine, uint8_t reg, uint8_t val) {
             }
             break;
     }
+#if defined(VGMM5_R66_PSG_GATE_RAMP)
+    // Only a VGM change to gate/volume, pitch or envelope re-key can
+    // introduce a note-boundary transition. Preserve original AY registers
+    // and waveform / LFSR / envelope timing; this is an output-only crossfade.
+    if (before != val || reg == 13u) {
+        if (reg == 7u) {
+            for (int i = 0; i < 3; ++i)
+                tab5_r66_note_begin(&engine->note_fade[i]);
+        } else if (reg <= 5u || (reg >= 8u && reg <= 10u)) {
+            const unsigned ch = reg <= 5u ? reg / 2u : reg - 8u;
+            tab5_r66_note_begin(&engine->note_fade[ch]);
+        } else if (reg == 13u) {
+            for (int i = 0; i < 3; ++i)
+                if (engine->regs[8+i] & 0x10u)
+                    tab5_r66_note_begin(&engine->note_fade[i]);
+        }
+    }
+#endif
 }
 
 void IRAM_ATTR ssg_engine_update(SSGSoundEngine *engine, int32_t *out_l, int32_t *out_r) {
@@ -142,7 +163,12 @@ void IRAM_ATTR ssg_engine_update(SSGSoundEngine *engine, int32_t *out_l, int32_t
         else if (noise_en)       out = engine->noise_out;
         else                     out = true; // ToneもNoiseもOFFの場合、常にHIGH
 
+#if defined(VGMM5_R66_PSG_GATE_RAMP)
+        const int32_t raw = out ? engine->vol_table[vol] : 0;
+        mix += tab5_r66_note_sample(&engine->note_fade[i], raw);
+#else
         if (out) mix += engine->vol_table[vol];
+#endif
     }
 
     *out_l += mix;
