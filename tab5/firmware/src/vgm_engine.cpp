@@ -1011,9 +1011,13 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
             pcm_engine_namco_init(&g_pcm_engine, vgm_c140_clock & 0x3FFFFFFF, 0xC1, c140_bank_type);
         }
         if (vgm_c352_clock != 0) {
-            uint8_t clkdiv = (vgmDataStart > 0xD6) ? header[0xD6] : 0;
-            Serial.printf("[VGM] C352 Clock: %lu (Div: %d)\n", vgm_c352_clock & 0x3FFFFFFF, clkdiv);
-            pcm_engine_namco_init(&g_pcm_engine, vgm_c352_clock & 0x3FFFFFFF, 0xC2, clkdiv);
+            // VGM 1.71 stores the real C352 divider / 4 at byte 0xD6.
+            // 0 is unspecified; the Namco engine will use the 288 default.
+            const uint8_t clkdiv4 = (vgmDataStart > 0xD6) ? header[0xD6] : 0;
+            Serial.printf("[VGM] C352 Clock: %lu, divider=%u\n",
+                          (unsigned long)(vgm_c352_clock & 0x3FFFFFFF),
+                          (unsigned)(clkdiv4 ? 4u * clkdiv4 : 288u));
+            pcm_engine_namco_init(&g_pcm_engine, vgm_c352_clock & 0x3FFFFFFF, 0xC2, clkdiv4);
         }
     }
 
