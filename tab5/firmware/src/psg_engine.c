@@ -42,6 +42,11 @@ void psg_engine_init(PSGSoundEngine *engine, uint32_t sample_rate, uint32_t sn_c
 // ─────────────────────────────────────────
 void psg_engine_write_sn76489(PSGSoundEngine *engine, uint8_t data) {
     SN76489 *sn = &engine->sn76489;
+#if defined(VGMM5_R66_PSG_GATE_RAMP)
+    uint8_t old_vol[4] = {sn->tone[0].vol, sn->tone[1].vol, sn->tone[2].vol, sn->noise.vol};
+    uint16_t old_freq[3] = {sn->tone[0].freq, sn->tone[1].freq, sn->tone[2].freq};
+    uint8_t old_noise_ctrl = sn->noise.ctrl;
+#endif
 
     if (data & 0x80) {
         // LATCHバイト (1ccctddd)
@@ -75,6 +80,16 @@ void psg_engine_write_sn76489(PSGSoundEngine *engine, uint8_t data) {
             else                    sn->noise.vol = data & 0x0F;
         }
     }
+#if defined(VGMM5_R66_PSG_GATE_RAMP)
+    // Only start a transition when a changed VGM write actually changes a
+    // voice's pitch/volume, not on every register write or every sample.
+    for (int i = 0; i < 3; ++i) {
+        if (sn->tone[i].vol != old_vol[i] || sn->tone[i].freq != old_freq[i])
+            tab5_r66_note_begin(&sn->tone[i].note_fade);
+    }
+    if (sn->noise.vol != old_vol[3] || sn->noise.ctrl != old_noise_ctrl)
+        tab5_r66_note_begin(&sn->noise.note_fade);
+#endif
 }
 
 // ─────────────────────────────────────────
@@ -135,13 +150,25 @@ void psg_engine_update(PSGSoundEngine *engine, int32_t *out_l, int32_t *out_r) {
     
     for (int i = 0; i < 3; i++) {
         // 出力状態(1 or -1) * ボリューム
+#if defined(VGMM5_R66_PSG_GATE_RAMP)
+        const int32_t amp = sn->vol_table[sn->tone[i].vol];
+        const int32_t raw = sn->tone[i].out_state > 0 ? amp : -amp;
+        mix += tab5_r66_note_sample(&sn->tone[i].note_fade, raw);
+#else
         if (sn->tone[i].out_state > 0) mix += sn->vol_table[sn->tone[i].vol];
         else                           mix -= sn->vol_table[sn->tone[i].vol];
+#endif
     }
     
     // ノイズ出力 (シフトレジスタのLSBが出力となる)
+#if defined(VGMM5_R66_PSG_GATE_RAMP)
+    const int32_t noise_amp = sn->vol_table[sn->noise.vol];
+    const int32_t noise_raw = (sn->noise.shift_reg & 0x0001) ? noise_amp : -noise_amp;
+    mix += tab5_r66_note_sample(&sn->noise.note_fade, noise_raw);
+#else
     if (sn->noise.shift_reg & 0x0001) mix += sn->vol_table[sn->noise.vol];
     else                              mix -= sn->vol_table[sn->noise.vol];
+#endif
 
     // L/Rに足し込む（SN76489はモノラル）
     *out_l += mix;
