@@ -47,28 +47,8 @@ jobs:
           # guard around the original C140/C352 premix int16 clipping.
           pcm=Path('lib/vgmM5lib/src/pcm_engine.c').read_text()
           tabpcm=Path('tab5/firmware/src/pcm_engine.c').read_text()
-          old='''        if (final_namco_l > 32767) final_namco_l = 32767;
-        else if (final_namco_l < -32768) final_namco_l = -32768;
-
-        if (final_namco_r > 32767) final_namco_r = 32767;
-        else if (final_namco_r < -32768) final_namco_r = -32768;'''
-          replacement='''#if defined(IS_CORES3)
-        // CoreS3 FIX7 regression recovery: vgmM5lib's Tab5-exact import
-        // reintroduced int16 pre-clipping of the 22-voice C140 submix.
-        // Keep all C140 voice amplitudes until the existing int64 FM+PCM
-        // sum, physical-chip /8 divider and final 16-bit soft limiter.
-        // Leave C352 exactly as before. Tab5's original C140 path is
-        // untouched (this library is only used by the CoreS3 build).
-        if (!engine->c140_enabled) {
-#endif
-        if (final_namco_l > 32767) final_namco_l = 32767;
-        else if (final_namco_l < -32768) final_namco_l = -32768;
-
-        if (final_namco_r > 32767) final_namco_r = 32767;
-        else if (final_namco_r < -32768) final_namco_r = -32768;
-#if defined(IS_CORES3)
-        }
-#endif'''
+          old="        if (final_namco_l > 32767) final_namco_l = 32767;\n        else if (final_namco_l < -32768) final_namco_l = -32768;\n\n        if (final_namco_r > 32767) final_namco_r = 32767;\n        else if (final_namco_r < -32768) final_namco_r = -32768;"
+          replacement="#if defined(IS_CORES3)\n        // CoreS3 FIX7 regression recovery: vgmM5lib's Tab5-exact import\n        // reintroduced int16 pre-clipping of the 22-voice C140 submix.\n        // Keep all C140 voice amplitudes until the existing int64 FM+PCM\n        // sum, physical-chip /8 divider and final 16-bit soft limiter.\n        // Leave C352 exactly as before. Tab5's original C140 path is\n        // untouched (this library is only used by the CoreS3 build).\n        if (!engine->c140_enabled) {\n#endif\n        if (final_namco_l > 32767) final_namco_l = 32767;\n        else if (final_namco_l < -32768) final_namco_l = -32768;\n\n        if (final_namco_r > 32767) final_namco_r = 32767;\n        else if (final_namco_r < -32768) final_namco_r = -32768;\n#if defined(IS_CORES3)\n        }\n#endif"
           assert tabpcm.count(old)==1
           assert pcm==tabpcm.replace(old,replacement)
           print('PASS 18 byte-identical Tab5 files; only C140 early clamp guarded on CoreS3')
