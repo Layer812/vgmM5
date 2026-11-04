@@ -1378,6 +1378,24 @@ void audio_generate_task(void *args) {
         while (isPlaying) {
             if (wav_count < (WAV_BUFF_COUNT - 4)) {
                 processAudioBlock();
+#if defined(IS_CORES3)
+                // R67: when the output queue is low, every millisecond of
+                // producer sleep worsens C140+YM2151 underruns. Restore R6's
+                // cooperative 1-tick rest only with at least 8 blocks
+                // already buffered. Preserve all synthesized PCM samples.
+                const int pending = wav_count.load(std::memory_order_acquire);
+                if (chip_type == CHIP_YM2151 || chip_type == CHIP_YM2608) {
+                    ++consecutive_blocks;
+                    if (consecutive_blocks >= 4 && pending >= (WAV_BUFF_COUNT / 2)) {
+                        vTaskDelay(1);
+                        consecutive_blocks = 0;
+                    } else {
+                        taskYIELD();
+                    }
+                } else {
+                    taskYIELD();
+                }
+#else
                 if (chip_type == CHIP_YM2151 || chip_type == CHIP_YM2608) {
                     consecutive_blocks++;
                     if (consecutive_blocks >= 4) {
@@ -1389,6 +1407,7 @@ void audio_generate_task(void *args) {
                 } else {
                     taskYIELD();
                 }
+#endif
             } else {
                 break;
             }
@@ -1456,6 +1475,21 @@ void audio_play_task(void *args) {
                 vTaskDelay(1);
             }
         } else {
+#if defined(IS_CORES3)
+            // R67: a transient producer underrun must NOT insert an entire
+            // extra 512-frame zero block into the DMA queue while a VGM is
+            // active. Previously a 1ms scheduling miss became ~11.6ms of
+            // guaranteed audible silence. Let the I2S hardware consume the
+            // PCM already queued and wake the generator to refill instead.
+            // Startup prebuffering / pause / genuine STOP retain the old
+            // silent-output behavior below.
+            if (any_playing && !prebuffering &&
+                wav_count.load(std::memory_order_acquire) == 0) {
+                xSemaphoreGive(xSemaphore);
+                vTaskDelay(1);
+                continue;
+            }
+#endif
             static const int16_t idle_silence[512 * 2] = {0};
             if (g_es8388_detected) {
                 size_t bytes_written = 0;
