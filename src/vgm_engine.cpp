@@ -122,24 +122,16 @@ volatile int wd = 0;
 std::atomic<int> wav_count(0); 
 
 #if defined(IS_CORES3)
-// PR44: low-overhead, 10-second streaming health indicators. Updated
-// outside the 44.1kHz inner loop; never print in the synthesis hot path.
-static std::atomic<uint32_t> s_cores3_gen_max_us{0};
-static std::atomic<uint32_t> s_cores3_gen_over_budget{0};
+// PR45: NO time queries in the synthesis/DMA real-time paths.
+// Health reporting uses completed 512-frame blocks, not wall-clock.
+// Serial I/O runs only in a separate low-priority CPU0 task.
+static std::atomic<uint32_t> s_cores3_gen_blocks{0};
+static std::atomic<uint32_t> s_cores3_play_blocks{0};
 static std::atomic<uint32_t> s_cores3_ring_empty{0};
 static std::atomic<uint32_t> s_cores3_i2s_write_fail{0};
 static std::atomic<uint32_t> s_cores3_i2s_short_write{0};
-static constexpr uint32_t k_cores3_block_budget_us =
-    (BUFF_SIZE * 1000000u) / 44100u; // 512 / 44.1k = 11609 us
-static void cores3_record_gen_us(uint32_t elapsed_us) {
-    uint32_t previous = s_cores3_gen_max_us.load(std::memory_order_relaxed);
-    while (elapsed_us > previous &&
-           !s_cores3_gen_max_us.compare_exchange_weak(
-                previous, elapsed_us, std::memory_order_relaxed)) {}
-    if (elapsed_us > k_cores3_block_budget_us) {
-        s_cores3_gen_over_budget.fetch_add(1, std::memory_order_relaxed);
-    }
-}
+static TaskHandle_t s_cores3_audio_health_handle = nullptr;
+static constexpr uint32_t k_cores3_report_blocks = 861u; // ~10s at 44100/512
 #endif
 
 
@@ -1157,8 +1149,8 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     vTaskDelay(pdMS_TO_TICKS(300));
 
 #if defined(IS_CORES3)
-    s_cores3_gen_max_us.store(0, std::memory_order_relaxed);
-    s_cores3_gen_over_budget.store(0, std::memory_order_relaxed);
+    s_cores3_gen_blocks.store(0, std::memory_order_relaxed);
+    s_cores3_play_blocks.store(0, std::memory_order_relaxed);
     s_cores3_ring_empty.store(0, std::memory_order_relaxed);
     s_cores3_i2s_write_fail.store(0, std::memory_order_relaxed);
     s_cores3_i2s_short_write.store(0, std::memory_order_relaxed);
@@ -1369,17 +1361,21 @@ void processVGM() {
 }
 
 
+#if !defined(IS_CORES3)
+// Retain historical profiling for other boards, which are not PR45 targets.
 static uint32_t prof_fm_time = 0;
 static uint32_t prof_pcm_time = 0;
 static uint32_t prof_vgm_time = 0;
-
 static uint32_t profile_start_time = 0;
 static uint32_t profile_total_time = 0;
 static uint32_t profile_blocks = 0;
+#endif
 
 void IRAM_ATTR processAudioBlock() {
     if (!isPlaying) return;
+#if !defined(IS_CORES3)
     uint32_t t_start = esp_timer_get_time();
+#endif
     
     int16_t *out_buf = wav_buff[wd];
 
@@ -1535,10 +1531,11 @@ if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t
     wd = (wd + 1) % WAV_BUFF_COUNT;
     wav_count++;
     
-    uint32_t t_end = esp_timer_get_time();
 #if defined(IS_CORES3)
-    cores3_record_gen_us(t_end - t_start);
-#endif
+    // One atomic increment per complete 512-frame block, no timing APIs.
+    s_cores3_gen_blocks.fetch_add(1, std::memory_order_relaxed);
+#else
+    uint32_t t_end = esp_timer_get_time();
     if (profile_start_time == 0) profile_start_time = t_end;
     profile_total_time += (t_end - t_start);
     profile_blocks++;
@@ -1557,6 +1554,7 @@ if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t
         profile_total_time = 0;
         profile_blocks = 0;
     }
+#endif
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -1620,10 +1618,31 @@ static bool g_es8388_detected = false;
 static uint8_t g_cores3_ui_volume = 48;
 #endif
 
+#if defined(IS_CORES3)
+// Offload infrequent UART output from the real-time I2S task.
+// This task only runs when it receives a 861-block notification.
+static void cores3_audio_health_task(void *) {
+    while (true) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        Serial.printf(
+            "[CoreS3 PR45][AUDIO] genBlocks=%lu playBlocks=%lu ring=%d/16 empty=%lu i2sErr=%lu shortWrite=%lu\n",
+            (unsigned long)s_cores3_gen_blocks.load(std::memory_order_relaxed),
+            (unsigned long)s_cores3_play_blocks.load(std::memory_order_relaxed),
+            (int)wav_count.load(std::memory_order_relaxed),
+            (unsigned long)s_cores3_ring_empty.load(std::memory_order_relaxed),
+            (unsigned long)s_cores3_i2s_write_fail.load(std::memory_order_relaxed),
+            (unsigned long)s_cores3_i2s_short_write.load(std::memory_order_relaxed));
+    }
+}
+#endif
+
 // ────────────────────────────────────────────────────────────────────────
 // Core 0：I2S（DMA）転送 ＆ 減衰検知時のセマフォ発行
 // ────────────────────────────────────────────────────────────────────────
 void audio_play_task(void *args) {
+#if defined(IS_CORES3)
+    uint32_t remaining_report_blocks = k_cores3_report_blocks;
+#endif
     while (true) {
         bool any_playing = (isPlaying && !isPaused) || mdx_engine_is_playing();
         if (prebuffering && wav_count >= (WAV_BUFF_COUNT - 4)) {
@@ -1672,21 +1691,14 @@ void audio_play_task(void *args) {
                     // FIX1: i2s_write(...,portMAX_DELAY) already waits for
                     // DMA consumption. Adding 8ms after every 512 frames
                     // risks starving the ES8388 at 44.1kHz (11.61ms/frame).
-                    // Report no more than once in 10 seconds, after DMA
-                    // playback is already queued. The full block has
-                    // been submitted before any serial communication.
-                    static int64_t last_health_us = 0;
-                    const int64_t health_now_us = esp_timer_get_time();
-                    if (last_health_us == 0) last_health_us = health_now_us;
-                    if (health_now_us - last_health_us >= 10000000LL) {
-                        last_health_us = health_now_us;
-                        Serial.printf("[CoreS3 PR44][AUDIO] ring=%d/16 empty=%lu maxGenUs=%lu over11609us=%lu i2sErr=%lu shortWrite=%lu\n",
-                            (int)wav_count.load(std::memory_order_relaxed),
-                            (unsigned long)s_cores3_ring_empty.load(std::memory_order_relaxed),
-                            (unsigned long)s_cores3_gen_max_us.load(std::memory_order_relaxed),
-                            (unsigned long)s_cores3_gen_over_budget.load(std::memory_order_relaxed),
-                            (unsigned long)s_cores3_i2s_write_fail.load(std::memory_order_relaxed),
-                            (unsigned long)s_cores3_i2s_short_write.load(std::memory_order_relaxed));
+                    // ~10 seconds of successfully submitted PCM frames.
+                    // No clock read, math division or Serial in this task.
+                    s_cores3_play_blocks.fetch_add(1, std::memory_order_relaxed);
+                    if (--remaining_report_blocks == 0u) {
+                        remaining_report_blocks = k_cores3_report_blocks;
+                        if (s_cores3_audio_health_handle != nullptr) {
+                            xTaskNotifyGive(s_cores3_audio_health_handle);
+                        }
                     }
                     taskYIELD();
                 } else {
@@ -1887,6 +1899,16 @@ skip_es8388_init:
 #endif
     
     // タスク起動
+#if defined(IS_CORES3)
+    // Lower-priority logger pinned to the I2S writer's CPU; no Serial
+    // calls in the synthesis or high-priority playback tasks.
+    if (xTaskCreatePinnedToCore(cores3_audio_health_task,
+            "AudioHealth", 3072, nullptr, 1,
+            &s_cores3_audio_health_handle, 0) != pdPASS) {
+        Serial.println("[CoreS3 PR45] AudioHealth task creation failed");
+        s_cores3_audio_health_handle = nullptr;
+    }
+#endif
     xSemaphore = xSemaphoreCreateBinary();
     xTaskCreatePinnedToCore(audio_generate_task, "AudioGenTask", 8192, NULL, 5, &playTaskHandle, 1);
     xTaskCreatePinnedToCore(audio_play_task, "AudioPlayTask", 4096, NULL, 4, NULL, 0);
