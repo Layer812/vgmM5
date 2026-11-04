@@ -8,9 +8,15 @@
 PCMSoundEngine g_pcm_engine;
 
 #define NAMCO_MCACHE_SIZE 32
-#define NAMCO_MCACHE_MASK (~(NAMCO_MCACHE_SIZE - 1))
+// Only CoreS3 C140 gains a longer ROM page. C352 and Tab5 retain their
+// original 32-byte mapping and sample contents.
+#if defined(IS_CORES3)
+#define NAMCO_C140_MCACHE_SIZE 128u
+#else
+#define NAMCO_C140_MCACHE_SIZE NAMCO_MCACHE_SIZE
+#endif
 static uint32_t namco_mcache_addr[32];
-static uint8_t  namco_mcache_data[32][NAMCO_MCACHE_SIZE];
+static uint8_t  namco_mcache_data[32][NAMCO_C140_MCACHE_SIZE];
 
 // ─────────────────────────────────────────
 // Forward declarations
@@ -669,15 +675,20 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
                     }
                 }
 
-                // ★ Namco用: 32バイトミニキャッシュ
-                uint32_t page = addr & NAMCO_MCACHE_MASK;
+                // PR42: C140 has 22 active PCM voices near ~28s in
+                // Dragon Saber. Four times fewer page misses without
+                // modifying pitch, interpolation, sample decoding or
+                // the existing C352 32-byte lookup.
+                const uint32_t page_size = engine->c140_enabled
+                    ? NAMCO_C140_MCACHE_SIZE : NAMCO_MCACHE_SIZE;
+                uint32_t page = addr & ~(page_size - 1u);
                 if (namco_mcache_addr[ch] != page) {
                     namco_mcache_addr[ch] = page;
                     int b = v->current_block;
-                    if (b >= 0 && b < engine->namco.block_count && engine->namco.blocks[b].data && page >= engine->namco.blocks[b].start_addr && (page + NAMCO_MCACHE_SIZE) <= (engine->namco.blocks[b].start_addr + engine->namco.blocks[b].size)) {
-                        memcpy(namco_mcache_data[ch], &engine->namco.blocks[b].data[page - engine->namco.blocks[b].start_addr], NAMCO_MCACHE_SIZE);
+                    if (b >= 0 && b < engine->namco.block_count && engine->namco.blocks[b].data && page >= engine->namco.blocks[b].start_addr && (page + page_size) <= (engine->namco.blocks[b].start_addr + engine->namco.blocks[b].size)) {
+                        memcpy(namco_mcache_data[ch], &engine->namco.blocks[b].data[page - engine->namco.blocks[b].start_addr], page_size);
                     } else {
-                        for (int i = 0; i < NAMCO_MCACHE_SIZE; i++) {
+                        for (uint32_t i = 0; i < page_size; i++) {
                             uint32_t ra = page + i;
                             uint8_t byte = 0; 
                             int fb = v->current_block;
@@ -696,7 +707,7 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
                         }
                     }
                 }
-                uint8_t dt = namco_mcache_data[ch][addr & (NAMCO_MCACHE_SIZE - 1)];
+                uint8_t dt = namco_mcache_data[ch][addr & (page_size - 1u)];
 
                 int16_t new_sample = 0;
                 if (engine->c352_enabled) {
