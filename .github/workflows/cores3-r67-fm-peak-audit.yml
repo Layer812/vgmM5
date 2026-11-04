@@ -1,0 +1,23 @@
+name: CoreS3 R67 FIX5 FM+C140 real-core headroom measurement
+on:
+  push:
+    branches: [dev/cores3-r67-fix5-fm-headroom-20261104]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fm-and-c140:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run real FM+C140 synthetic four-scenario test
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/core3_shims
+          printf '#pragma once\n#define IRAM_ATTR\n#define DRAM_ATTR\n' >/tmp/core3_shims/esp_attr.h
+          printf '#pragma once\n' >/tmp/core3_shims/esp_heap_caps.h
+          printf '#pragma once\n' >/tmp/core3_shims/esp_partition.h
+          printf '#pragma once\n' >/tmp/core3_shims/esp_spi_flash.h
+          gcc -std=gnu11 -O2 -g -DIS_CORES3=1 -ffunction-sections -fdata-sections -I/tmp/core3_shims -Isrc cores3/tests/r67_fix5_fm_peak_host.c src/fm_engine.c src/pcm_engine.c src/ssg_engine.c -Wl,--gc-sections -lm -o /tmp/cs3_fm_peak
+          /tmp/cs3_fm_peak
