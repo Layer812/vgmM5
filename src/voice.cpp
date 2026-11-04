@@ -279,7 +279,7 @@ static void cores3_show_splash() {
     // 下部にバージョン表示
     M5.Display.setTextSize(2);
     M5.Display.setTextColor(TFT_CYAN);
-    M5.Display.drawString("vgmM5 0.98", 100, 195);
+    M5.Display.drawString("vgmM5 R67", 100, 195);
     M5.Display.setTextSize(1);
     M5.Display.setTextColor(TFT_WHITE);
     M5.Display.drawString("by Layer812", 110, 220);
@@ -1846,9 +1846,9 @@ static void cores3_draw_playback() {
     // アプリ名の描画 (ボールド風に見せるため x=0 と x=1 に重ね描き)
     textSp.setTextColor(TFT_CYAN);
     textSp.setCursor(0, text_y);
-    textSp.print("vgmM5 v0.98");
+    textSp.print("vgmM5 R67");
     textSp.setCursor(1, text_y);
-    textSp.println("vgmM5 v0.98");
+    textSp.println("vgmM5 R67");
     text_y += 36; // 1行分文字を書き、さらに1行分(12ドット)空ける
 
     textSp.setTextSize(1);
@@ -2019,20 +2019,20 @@ void phase_playback() {
         int x = t.x;
         int y = t.y;
         
-        // サムネイル領域 (x=8~168, y=26~186) タップでボリューム調整
-        if (x >= 8 && x <= 168 && y >= 26 && y <= 186) {
-            int v = M5.Speaker.getVolume();
-            if (y < 106) {
-                // 上半分: ボリュームアップ
-                v += 10;
-                if (v > 255) v = 255;
-            } else {
-                // 下半分: ボリュームダウン
-                v -= 10;
-                if (v < 0) v = 0;
-            }
-            M5.Speaker.setVolume(v);
-            Serial.printf("Cardputer: Volume %d\n", v);
+        // R67 CoreS3: album thumbnail is x=[8,168), y=[26,180).
+        // The bottom toolbar begins at y=180, and must take precedence.
+        if (x >= 8 && x < 168 && y >= 26 && y < 180) {
+            const bool increase = y < 103; // top 77px / bottom 77px
+            int vol = (int)vgm_engine_get_volume();
+            vol += increase ? 10 : -10;
+            if (vol < 0) vol = 0;
+            else if (vol > 255) vol = 255;
+            // Codec-aware routing: ES8388 requires I2C register writes.
+            // M5.Speaker.setVolume() on Module Audio would wake the
+            // internal amplifier, breaking the verified R6 audio route.
+            vgm_engine_set_volume((uint8_t)vol);
+            Serial.printf("[CoreS3 R67] Thumbnail %s -> volume=%d\n",
+                          increase ? "UP" : "DOWN", vol);
             return;
         }
         
