@@ -13,6 +13,7 @@
 #endif
 #if defined(IS_CORES3)
 #include "../cores3/cores3_r7_audio_helpers.hpp"
+#include "../cores3/r67_vgm_wait_44100.hpp"
 #endif
 #include <USB.h>
 #include <USBMSC.h>
@@ -1300,24 +1301,33 @@ void IRAM_ATTR processAudioBlock() {
 
 
     for (int i = 0; i < BUFF_SIZE; i++) {
-        vgm_time_acc += 44100;
-        while (vgm_time_acc >= actual_sample_rate && isPlaying) {
-            if (waitSamples > 0) {
-                uint32_t consume = vgm_time_acc / actual_sample_rate;
-                if (consume > waitSamples) consume = waitSamples;
-                waitSamples -= consume;
-                vgm_time_acc -= consume * actual_sample_rate;
-            }
-            if (waitSamples == 0 && isPlaying) {
 #if defined(IS_CORES3)
-                // FIX1: VGM command processing is in the 44.1kHz inner loop.
-                // Avoid ESP timer reads per call on the ESP32-S3: C140+
-                // YM2151 tracks can issue thousands of writes per second.
-                processVGM();
+        // The ESP32-S3 path always renders at 44.1kHz, matching VGM's
+        // 44.1kHz timebase. Avoid the variable integer division and inner
+        // accumulator loop for every sample in C140+YM2151 workloads.
+        // Preserve the exact parser ordering, including one-sample waits.
+        // Keep the original path below if the rate/state ever differs.
+        if (actual_sample_rate == VGM_SAMPLE_RATE && vgm_time_acc == 0) {
+            cores3_vgm_step_44100(waitSamples, isPlaying, []() { processVGM(); });
+        } else
+#endif
+        {
+            vgm_time_acc += 44100;
+            while (vgm_time_acc >= actual_sample_rate && isPlaying) {
+                if (waitSamples > 0) {
+                    uint32_t consume = vgm_time_acc / actual_sample_rate;
+                    if (consume > waitSamples) consume = waitSamples;
+                    waitSamples -= consume;
+                    vgm_time_acc -= consume * actual_sample_rate;
+                }
+                if (waitSamples == 0 && isPlaying) {
+#if defined(IS_CORES3)
+                    processVGM();
 #else
-                uint32_t t_vgm = esp_timer_get_time(); processVGM(); prof_vgm_time += esp_timer_get_time() - t_vgm;
-#endif 
-                if (waitSamples == 0) continue;
+                    uint32_t t_vgm = esp_timer_get_time(); processVGM(); prof_vgm_time += esp_timer_get_time() - t_vgm;
+#endif
+                    if (waitSamples == 0) continue;
+                }
             }
         }
 
@@ -1388,6 +1398,9 @@ void IRAM_ATTR processAudioBlock() {
         mix_r = (int32_t)(dc_state_r / 16384);
 #endif
 
+// The Atom EQ is never selected on CoreS3: remove three M5.getBoard()
+// queries from each 44.1kHz output frame without changing any audio math.
+#if !defined(IS_CORES3)
 if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t::board_M5AtomVoiceS3R || M5.getBoard() == m5::board_t::board_M5AtomS3R) {
         // ☁E小型スピーカー用 EQ補正 (高音マイルド化 ＋ 低音ブースト)
         
@@ -1405,6 +1418,7 @@ if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t
         mix_l += (eq_bass_l * 2);
         mix_r += (eq_bass_r * 2);
 }
+#endif // !IS_CORES3
 
 #if defined(IS_CORES3)
         // FIX6: prevent hard-clipped peaks after simultaneous FM/PCM.
