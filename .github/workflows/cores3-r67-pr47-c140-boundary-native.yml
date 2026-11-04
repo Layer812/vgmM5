@@ -158,7 +158,7 @@ jobs:
             cmp /tmp/${name}_reference.log /tmp/${name}_optimized32.log
             echo "PASS 32B bit-identical reference for $name"
           done
-      - name: C140 boundary throughput: legacy 32B vs optimized 32B and experimental 64B
+      - name: "C140 boundary throughput: legacy 32B vs optimized 32B and experimental 64B"
         run: |
           set -euo pipefail
           name=r67_pr47_c140_boundary_host
