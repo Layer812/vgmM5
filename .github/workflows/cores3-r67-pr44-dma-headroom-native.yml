@@ -54,7 +54,7 @@ jobs:
           import re
           def i2s_fields(content):
               cfg=segment(content,'i2s_config_t i2s_config = {','};')
-              return dict(re.findall(r'^[ \\t]*\\.(\\w+)\\s*=\\s*([^,]+),',cfg,re.M))
+              return dict(re.findall(r'^[ \t]*\.(\w+)\s*=\s*([^,]+),',cfg,re.M))
           prior=i2s_fields(baseline)
           now=i2s_fields(current)
           assert prior['dma_buf_count'].strip()=='6'
