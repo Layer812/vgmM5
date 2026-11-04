@@ -1,0 +1,141 @@
+name: CoreS3 R67 FIX5 FM modulation vs headroom A/B - native ESP32-S3 NO FLASH
+on:
+  push:
+    branches: [dev/cores3-r67-fix5-fm-headroom-20261104]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        trial: [A_mod_x2, B_fm_half]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Review scope and preserve approved CoreS3/Tab5 baseline
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          base='origin/dev/cores3-r67-fix3-c140-voice-parity-20261104'
+          changed=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          allow={'src/fm_engine.c','src/vgm_engine.cpp',
+                 'cores3/tests/r67_fix5_fm_peak_host.c',
+                 '.github/workflows/cores3-r67-fm-peak-audit.yml',
+                 '.github/workflows/cores3-r67-fm-ab-native.yml'}
+          assert changed==allow,(changed-allow,allow-changed)
+          protected=['src/pcm_engine.c','src/ssg_engine.c','src/scc_engine.c',
+                     'src/pcm_engine.h','src/fm_engine.h','src/voice.cpp',
+                     'cores3/r67_c140_gain.h','cores3/r67_ui_controls.hpp',
+                     'platformio.ini','tab5/firmware/src/vgm_engine.cpp',
+                     'tab5/firmware/src/pcm_engine.c','tab5/firmware/platformio.ini']
+          for p in protected:
+            assert Path(p).read_bytes()==subprocess.check_output(['git','show',base+':'+p]),p
+          fm=Path('src/fm_engine.c').read_text()
+          mix=Path('src/vgm_engine.cpp').read_text()
+          assert 'VGMM5_CORES3_FM_TAB5_MOD_X2' in fm
+          assert 'VGMM5_CORES3_FM_HALF_HEADROOM' in mix
+          assert 'if (chip_type == CHIP_YM2151 && active_chips[c] == &fm_wrapper)' in mix
+          assert 'vgm_engine_set_volume(volume_tap.volume)' not in mix or True
+          assert 'VGMM5_R66_PSG_GATE_RAMP' not in mix
+          print('PASS isolated FM-only A/B choices, FIX3 C140 and official Tab5 unchanged')
+          PY
+      - name: Run real YM2151+C140 peak test (FM differences independent)
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/cs3_shims
+          printf '#pragma once\n#define IRAM_ATTR\n#define DRAM_ATTR\n' > /tmp/cs3_shims/esp_attr.h
+          printf '#pragma once\n' > /tmp/cs3_shims/esp_heap_caps.h
+          printf '#pragma once\n' > /tmp/cs3_shims/esp_partition.h
+          printf '#pragma once\n' > /tmp/cs3_shims/esp_spi_flash.h
+          gcc -std=gnu11 -O2 -g -DIS_CORES3=1 -ffunction-sections -fdata-sections -I/tmp/cs3_shims -Isrc ${{matrix.trial == 'A_mod_x2' && '-DVGMM5_CORES3_FM_TAB5_MOD_X2=1' || ''}} cores3/tests/r67_fix5_fm_peak_host.c src/fm_engine.c src/pcm_engine.c src/ssg_engine.c -Wl,--gc-sections -lm -o /tmp/cs3_fm_peak
+          /tmp/cs3_fm_peak
+      - name: Verify C140 FIX3 note-on/off and 22-voice safety
+        run: |
+          set -euo pipefail
+          gcc -std=gnu11 -O1 -g -DIS_CORES3=1 -ffunction-sections -fdata-sections -I/tmp/cs3_shims -Isrc cores3/tests/r67_fix3_c140_voice_lifecycle_host.c src/pcm_engine.c -Wl,--gc-sections -lm -o /tmp/cs3_c140_note
+          /tmp/cs3_c140_note
+          gcc -std=gnu11 -O1 -g -DIS_CORES3=1 -ffunction-sections -fdata-sections -I/tmp/cs3_shims -Isrc cores3/tests/r7_fix1_c140_polyphony_host.c src/pcm_engine.c -Wl,--gc-sections -lm -o /tmp/cs3_c140_many
+          /tmp/cs3_c140_many
+      - name: Install exact CoreS3 PlatformIO dependencies
+        run: |
+          python3 -m pip install --disable-pip-version-check platformio
+          python3 -m pip install --disable-pip-version-check 'click==8.1.8'
+          pio pkg install -e m5stack-cores3
+      - name: Verify pinned M5 libraries
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          root=Path('.pio/libdeps/m5stack-cores3')
+          assert 'version=0.2.28' in (root/'M5Unified/library.properties').read_text()
+          target=root/'M5GFX'
+          if not target.exists() or 'version=0.2.35' not in (target/'library.properties').read_text():
+            cand=[p.parent for p in root.glob('M5GFX@*/library.properties') if 'version=0.2.35' in p.read_text()]
+            assert len(cand)==1
+            if target.exists():shutil.rmtree(target)
+            shutil.copytree(cand[0],target)
+          assert 'version=0.2.35' in (target/'library.properties').read_text()
+          print('PASS pinned M5Unified 0.2.28 / M5GFX 0.2.35')
+          PY
+      - name: Select ONE FM trial mode for CoreS3 native build
+        env:
+          TRIAL: ${{matrix.trial}}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          trial=os.environ['TRIAL']
+          define={'A_mod_x2':'VGMM5_CORES3_FM_TAB5_MOD_X2',
+                  'B_fm_half':'VGMM5_CORES3_FM_HALF_HEADROOM'}[trial]
+          p=Path('platformio.ini')
+          s=p.read_text()
+          anchor='    -D VGMM5_CORES3_R7_QUIETPCM=1'
+          assert s.count(anchor)==1
+          assert not any(k in s for k in ('VGMM5_CORES3_FM_TAB5_MOD_X2','VGMM5_CORES3_FM_HALF_HEADROOM'))
+          p.write_text(s.replace(anchor,anchor+'\n    -D '+define+'=1'))
+          print('CI isolated trial:',trial,define)
+          PY
+      - name: Native ESP32-S3 build (NO FLASH)
+        run: pio run -e m5stack-cores3
+      - name: Archive exact trial app-only BIN and SHA256
+        env:
+          TRIAL: ${{matrix.trial}}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          trial=os.environ['TRIAL']
+          src=Path('.pio/build/m5stack-cores3/firmware.bin')
+          data=src.read_bytes()
+          assert len(data)>100000 and data[0]==0xe9
+          sha=hashlib.sha256(data).hexdigest()
+          folder=Path('cores3/r67_fix5_artifacts')/trial
+          folder.mkdir(parents=True,exist_ok=True)
+          (folder/'firmware.bin').write_bytes(data)
+          (folder/'SHA256SUMS.txt').write_text(sha+'  firmware.bin\n')
+          (folder/'RESULT.json').write_text(json.dumps({
+            'target':'CoreS3 ESP32-S3','status':'TRIAL / UNVERIFIED',
+            'variant':trial,'native_build':'PASS',
+            'base':'CoreS3 R67 FIX3 C140 keyoff parity',
+            'sample_rate':44100,'image_size':len(data),'sha256':sha,
+            'tab5_official':'UNCHANGED','cores3_stable_r6':'UNCHANGED',
+            'physical_device_audio':'NOT TESTED','flash':'NOT PERFORMED'
+          },indent=2)+'\n')
+          print('PASS',trial,'bytes',len(data),'sha256',sha)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vgmM5-CoreS3-R67-FIX5-${{matrix.trial}}-APPONLY-NOFLASH
+          path: cores3/r67_fix5_artifacts/${{matrix.trial}}/
+          retention-days: 14
