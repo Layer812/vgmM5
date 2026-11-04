@@ -69,7 +69,8 @@ jobs:
           assert 'vgm_engine_set_volume(uint8_t vol)' in v
           assert 'if (g_es8388_detected)' in v
           pcm=Path('src/pcm_engine.c').read_text()
-          assert pcm.count('cores3_r67_c140_linear_pcm(dt)')==1
+          assert pcm.count('cores3_r67_c140_linear_pcm(dt)')==2  # legacy source retained in #else (not compiled for CoreS3)
+          assert 'FIX3: Tab5 field-proven C140 key-on lifecycle' in pcm
           assert '#if defined(IS_CORES3)' in pcm
           assert 'if (engine->c140_enabled) continue;' in pcm
           assert 'ch->prev_sample = 0;' in pcm
