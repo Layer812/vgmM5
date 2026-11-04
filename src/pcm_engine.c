@@ -462,6 +462,19 @@ void pcm_engine_namco_write(PCMSoundEngine *engine, uint16_t addr, uint16_t data
                     ch->latched_end = ch->end;
                     ch->latched_loop = ch->loop;
                     
+#if defined(IS_CORES3)
+                    // FIX3: Tab5 field-proven C140 key-on lifecycle.  The
+                    // very first output begins with zero interpolation
+                    // history; do not inject a prefetched full-scale ROM
+                    // sample at the VGM register write boundary.
+                    ch->pos = ((uint32_t)ch->latched_bank << 16) | ch->start;
+                    ch->pos_frac = 0;
+                    ch->counter = 0;
+                    ch->prev_sample = 0;
+                    ch->last_sample = 0;
+                    ch->current_block = -1;
+                    namco_mcache_addr[ch_idx] = 0xFFFFFFFFu;
+#else
                     uint32_t start_addr = ((uint32_t)ch->latched_bank << 16) | (ch->latched_start & 0xFFFF);
                     ch->pos = start_addr;
                     ch->counter = 0; 
@@ -503,6 +516,7 @@ void pcm_engine_namco_write(PCMSoundEngine *engine, uint16_t addr, uint16_t data
                     }
                     ch->last_sample = new_sample;
                     ch->prev_sample = new_sample;
+#endif
                 } else {
                     ch->playing = false;
                 }
@@ -689,9 +703,16 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
         
         for (int ch = 0; ch < max_ch; ch++) {
             NamcoPCMChannel *v = &engine->namco.ch[ch];
-            // Pop noise prevention: fade out stopped voices smoothly instead of cutting to 0
+            // FIX3: Tab5 does not continue to mix C140 voices after
+            // key-off or sample end. CoreS3's old 255/256 tail kept
+            // adding previously stopped C140 voices in dense passages
+            // (up to 22 simultaneously in the supplied Dragon Saber VGM).
+            // Preserve the existing C352 tail, which is a separate chip.
             if (!v->playing) {
-                v->prev_sample = (v->prev_sample * 255) / 256; // ★ Smoother fade out (~25ms instead of ~1.6ms)
+#if defined(IS_CORES3)
+                if (engine->c140_enabled) continue;
+#endif
+                v->prev_sample = (v->prev_sample * 255) / 256;
                 v->last_sample = v->prev_sample;
                 if (v->prev_sample == 0) continue;
             }
