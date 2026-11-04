@@ -51,6 +51,62 @@ PSGSoundEngine g_psg_engine2;
 #include "scc_engine.h"
 }
 
+
+#if defined(IS_CORES3)
+// ESP-IDF allocates an external I2S/GDMA interrupt on the CPU calling
+// i2s_driver_install(). Previously setup() (Arduino CPU1) installed it
+// while AudioPlayTask ran on CPU0. Install from this one-shot CPU0
+// task instead. The synchronous rendezvous completes before codec setup
+// or either audio task starts; no changes to I2S settings/codec/PCM.
+struct CoreS3I2SCore0Init {
+    const i2s_config_t *config;
+    const i2s_pin_config_t *pins;
+    SemaphoreHandle_t done;
+    esp_err_t install_result;
+    esp_err_t pin_result;
+    int actual_core;
+};
+
+static void cores3_install_i2s_core0_task(void *opaque) {
+    auto *ctx = static_cast<CoreS3I2SCore0Init *>(opaque);
+    ctx->actual_core = xPortGetCoreID();
+    if (ctx->actual_core == 0) {
+        ctx->install_result = i2s_driver_install(I2S_NUM_0, ctx->config, 0, nullptr);
+        if (ctx->install_result == ESP_OK) {
+            ctx->pin_result = i2s_set_pin(I2S_NUM_0, ctx->pins);
+        }
+    }
+    xSemaphoreGive(ctx->done);
+    vTaskDelete(nullptr);
+}
+
+static bool cores3_install_i2s_on_cpu0(
+    const i2s_config_t *config, const i2s_pin_config_t *pins) {
+    const auto done = xSemaphoreCreateBinary();
+    if (done == nullptr) {
+        Serial.println("[CoreS3 R67] FAIL: CPU0 I2S init semaphore allocation");
+        return false;
+    }
+    CoreS3I2SCore0Init ctx{
+        config, pins, done, ESP_FAIL, ESP_FAIL, -1
+    };
+    const BaseType_t created = xTaskCreatePinnedToCore(
+        cores3_install_i2s_core0_task, "I2SInitCore0", 4096,
+        &ctx, 5, nullptr, 0);
+    if (created != pdPASS) {
+        vSemaphoreDelete(done);
+        Serial.println("[CoreS3 R67] FAIL: CPU0 I2S init task allocation");
+        return false;
+    }
+    xSemaphoreTake(done, portMAX_DELAY);
+    vSemaphoreDelete(done);
+    Serial.printf("[CoreS3 R67] I2S driver install CPU%d (AudioPlay CPU0, AudioGen CPU1): install=%d pins=%d\n",
+                  ctx.actual_core, (int)ctx.install_result, (int)ctx.pin_result);
+    return ctx.actual_core == 0 &&
+           ctx.install_result == ESP_OK && ctx.pin_result == ESP_OK;
+}
+#endif
+
 #define YM2151_CLOCK 3579545
 #define VGM_SAMPLE_RATE 44100
 
@@ -1649,8 +1705,14 @@ void vgm_engine_init() {
         .data_in_num = I2S_PIN_NO_CHANGE
     };
     
-    i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
-    i2s_set_pin(I2S_NUM_0, &pin_config);
+    // PR43: I2S/GDMA IRQ allocation follows the caller's CPU.
+    // Run installation and pin configuration from CPU0, just like
+    // AudioPlayTask. Never silently fall back to installing on CPU1.
+    const bool i2s_core0_ready = cores3_install_i2s_on_cpu0(
+        &i2s_config, &pin_config);
+    if (!i2s_core0_ready) {
+        Serial.println("[CoreS3 R67] ERROR: I2S CPU0 install failed (no CPU1 fallback)");
+    }
     delay(50);
     
     uint8_t addr = 0x10;
