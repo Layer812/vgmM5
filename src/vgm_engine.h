@@ -18,7 +18,14 @@ const char* vgm_engine_get_error(void);
 // 共有オーディオバッファ (mdx_engine から参照)
 // vgm_engine.cpp / audio_play_task が消費する
 // ─────────────────────────────────────────
+// CoreS3 FIX5: extend the shared PCM FIFO to absorb short C140+YM2151
+// synthesis stalls. MDX uses this same ring; both translation units must
+// agree on its dimensions. Other hardware keeps its established 16 blocks.
+#if defined(IS_CORES3)
+#define VGM_WAV_BUFF_COUNT 32
+#else
 #define VGM_WAV_BUFF_COUNT 16
+#endif
 #define VGM_BUFF_SIZE      512
 
 #ifdef __cplusplus
