@@ -53,9 +53,9 @@ jobs:
           assert 'page_size - 1u' in pcm
           assert 'NAMCO_MCACHE_SIZE 32' in pcm
           # Original C140 no-premature-clamp guard must remain exact.
-          guardstart=refpcm.index('#if defined(IS_CORES3)\\n        // CoreS3 FIX7 regression recovery')
+          guardstart=refpcm.index('#if defined(IS_CORES3)\n        // CoreS3 FIX7 regression recovery')
           guardend=refpcm.index('        // R65: C140 8-bit linear',guardstart)
-          assert refpcm[guardstart:guardend]==pcm[pcm.index('#if defined(IS_CORES3)\\n        // CoreS3 FIX7 regression recovery'):pcm.index('        // R65: C140 8-bit linear')]
+          assert refpcm[guardstart:guardend]==pcm[pcm.index('#if defined(IS_CORES3)\n        // CoreS3 FIX7 regression recovery'):pcm.index('        // R65: C140 8-bit linear')]
           print('PASS PCM change confined to CoreS3 C140 cache, PR41 unclipping intact')
           cfg=Path('platformio.ini').read_text().split('[env:m5stack-cores3]')[1]
           assert 'build_src_filter' in cfg
