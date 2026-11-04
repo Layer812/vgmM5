@@ -121,6 +121,27 @@ volatile int wd = 0;
 // ★ クリティカルセクションを全廃し、ロックフリーなアトミック変数に変更
 std::atomic<int> wav_count(0); 
 
+#if defined(IS_CORES3)
+// PR44: low-overhead, 10-second streaming health indicators. Updated
+// outside the 44.1kHz inner loop; never print in the synthesis hot path.
+static std::atomic<uint32_t> s_cores3_gen_max_us{0};
+static std::atomic<uint32_t> s_cores3_gen_over_budget{0};
+static std::atomic<uint32_t> s_cores3_ring_empty{0};
+static std::atomic<uint32_t> s_cores3_i2s_write_fail{0};
+static std::atomic<uint32_t> s_cores3_i2s_short_write{0};
+static constexpr uint32_t k_cores3_block_budget_us =
+    (BUFF_SIZE * 1000000u) / 44100u; // 512 / 44.1k = 11609 us
+static void cores3_record_gen_us(uint32_t elapsed_us) {
+    uint32_t previous = s_cores3_gen_max_us.load(std::memory_order_relaxed);
+    while (elapsed_us > previous &&
+           !s_cores3_gen_max_us.compare_exchange_weak(
+                previous, elapsed_us, std::memory_order_relaxed)) {}
+    if (elapsed_us > k_cores3_block_budget_us) {
+        s_cores3_gen_over_budget.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+#endif
+
 
 // ★ 追加：完全整数（固定小数点）型のDCブロッカー用状態変数
 int64_t dc_state_l = 0;
@@ -1597,24 +1618,6 @@ static bool g_es8388_detected = false;
 // Hardware codec volume defaults to 0x18 / 0x21 (24 of 33 steps); the
 // internal Speaker retains the established R6 default of 48 / 255.
 static uint8_t g_cores3_ui_volume = 48;
-// PR44: low-overhead, 10-second streaming health indicators. Updated
-// outside the 44.1kHz inner loop; never print in the synthesis hot path.
-static std::atomic<uint32_t> s_cores3_gen_max_us{0};
-static std::atomic<uint32_t> s_cores3_gen_over_budget{0};
-static std::atomic<uint32_t> s_cores3_ring_empty{0};
-static std::atomic<uint32_t> s_cores3_i2s_write_fail{0};
-static std::atomic<uint32_t> s_cores3_i2s_short_write{0};
-static constexpr uint32_t k_cores3_block_budget_us =
-    (BUFF_SIZE * 1000000u) / 44100u; // 512 / 44.1k = 11609 us
-static void cores3_record_gen_us(uint32_t elapsed_us) {
-    uint32_t previous = s_cores3_gen_max_us.load(std::memory_order_relaxed);
-    while (elapsed_us > previous &&
-           !s_cores3_gen_max_us.compare_exchange_weak(
-                previous, elapsed_us, std::memory_order_relaxed)) {}
-    if (elapsed_us > k_cores3_block_budget_us) {
-        s_cores3_gen_over_budget.fetch_add(1, std::memory_order_relaxed);
-    }
-}
 #endif
 
 // ────────────────────────────────────────────────────────────────────────
