@@ -1,3 +1,7 @@
+#if defined(IS_CORES3)
+// CoreS3 shares the exact Tab5 R67 sound-core ABI via vgmM5lib.
+#include "../lib/vgmM5lib/src/psg_engine.h"
+#else
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
@@ -59,3 +63,4 @@ void psg_engine_update(PSGSoundEngine *engine, int32_t *out_l, int32_t *out_r);
 #ifdef __cplusplus
 }
 #endif
+#endif // IS_CORES3

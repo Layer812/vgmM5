@@ -1,0 +1,14 @@
+{
+  "name": "vgmM5lib",
+  "version": "0.1.0",
+  "description": "Device-neutral sound cores imported byte-for-byte from Tab5 R67, used first on CoreS3",
+  "frameworks": [
+    "arduino"
+  ],
+  "platforms": [
+    "espressif32"
+  ],
+  "build": {
+    "srcDir": "src"
+  }
+}

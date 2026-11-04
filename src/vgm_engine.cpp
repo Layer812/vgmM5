@@ -5,6 +5,10 @@
 #include <SD.h>
 #include "vgm_engine.h"
 #if defined(IS_CORES3)
+// vgmM5lib provides byte-identical Tab5 R67 synthesis on ESP32-S3.
+#include <vgmM5lib.h>
+#endif
+#if defined(IS_CORES3)
 #include "../cores3/r67_fix6_mixer_safety.hpp"
 #endif
 #if defined(IS_CORES3)
@@ -184,6 +188,25 @@ class PsgChip final : public ISoundChip { public: PsgChip(TickFunc tf, PSGSoundE
 class SsgChip final : public ISoundChip { public: SsgChip() : ISoundChip(wrap_ssg_tick) {} void write(uint8_t port, uint16_t reg, uint8_t data) override { ssg_engine_write(&g_ssg_engine, reg, data); } };
 class SccChip final : public ISoundChip { public: SccChip() : ISoundChip(wrap_scc_tick) {} void write(uint8_t port, uint16_t reg, uint8_t data) override { scc_engine_write(&g_scc_engine, port, reg, data); } };
 
+#if defined(IS_CORES3)
+// Tab5 R31 YM2413 is a standalone sound chip, not an OPL2/YM2151 mode.
+// Keep its state on standard CoreS3 RAM; NO P4-only SPM/MALLOC_CAP_SPM.
+static r31_vgm_bridge g_vgmm5lib_opll{};
+static bool g_vgmm5lib_opll_active = false;
+void IRAM_ATTR wrap_vgmm5lib_opll_tick(ISoundChip*, int32_t* l, int32_t* r) {
+    if (g_vgmm5lib_opll_active)
+        r31_vgm_bridge_mix(&g_vgmm5lib_opll, l, r);
+}
+class VgmM5LibOpllChip final : public ISoundChip {
+public:
+    VgmM5LibOpllChip() : ISoundChip(wrap_vgmm5lib_opll_tick) {}
+    void write(uint8_t, uint16_t reg, uint8_t data) override {
+        if (g_vgmm5lib_opll_active)
+            r31_vgm_bridge_write(&g_vgmm5lib_opll, reg, data);
+    }
+};
+#endif
+
 extern FmChip fm_wrapper;
 
 class OpnxChip final : public ISoundChip {
@@ -231,6 +254,9 @@ PsgChip     psg_wrapper2(wrap_psg_tick2, &g_psg_engine2);
 SsgChip     ssg_wrapper;
 SccChip     scc_wrapper;
 OpnxChip    opnx_wrapper;
+#if defined(IS_CORES3)
+VgmM5LibOpllChip vgmm5lib_opll_wrapper;
+#endif
 
 int skipGzipHeader(const uint8_t *data, size_t size) {
     if (size < 10) return -1;
@@ -702,14 +728,20 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     }
     // ------------------------------------------
 
-    if (vgm_ym2612_clock != 0 || vgm_ym2151_clock != 0 || vgm_ym2610_clock != 0 || vgm_ym2203_clock != 0 || vgm_ym2608_clock != 0 || vgm_ym3812_clock != 0 || vgm_ym2413_clock != 0) {
+    if (vgm_ym2612_clock != 0 || vgm_ym2151_clock != 0 || vgm_ym2610_clock != 0 || vgm_ym2203_clock != 0 || vgm_ym2608_clock != 0 || vgm_ym3812_clock != 0
+#if !defined(IS_CORES3)
+        || vgm_ym2413_clock != 0
+#endif
+        ) {
         uint32_t fm_clock = 0;
         if      (vgm_ym2612_clock != 0) { chip_type = CHIP_YM2612; fm_clock = vgm_ym2612_clock & 0x3FFFFFFF; }
         else if (vgm_ym2608_clock != 0) { chip_type = CHIP_YM2608; fm_clock = vgm_ym2608_clock & 0x3FFFFFFF; }
         else if (vgm_ym2610_clock != 0) { chip_type = CHIP_YM2610; fm_clock = vgm_ym2610_clock & 0x3FFFFFFF; }
         else if (vgm_ym2203_clock != 0) { chip_type = CHIP_YM2203; fm_clock = vgm_ym2203_clock & 0x3FFFFFFF; }
         else if (vgm_ym3812_clock != 0) { chip_type = CHIP_YM3812; fm_clock = vgm_ym3812_clock & 0x3FFFFFFF; }
+#if !defined(IS_CORES3)
         else if (vgm_ym2413_clock != 0) { chip_type = CHIP_YM2413; fm_clock = vgm_ym2413_clock & 0x3FFFFFFF; }
+#endif
         else                            { chip_type = CHIP_YM2151; fm_clock = vgm_ym2151_clock & 0x3FFFFFFF; }
         fm_engine_init(&g_fm_engine, actual_sample_rate, fm_clock, chip_type);
         pcm_engine_opn_init(&g_pcm_engine, fm_clock, chip_type);
@@ -747,6 +779,25 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     }
 
 
+#if defined(IS_CORES3)
+    // Independent Tab5 R31 OPLL bridge instead of legacy generic OPL.
+    // Supports YM2413 alongside a distinct FM chip in the same VGM.
+    if (vgm_ym2413_clock != 0) {
+        if (active_chip_count >= MAX_CHIPS) {
+            Serial.println("[CoreS3][vgmM5lib] OPLL: chip count exceeded");
+            vgm_engine_stop();
+            return false;
+        }
+        r31_vgm_bridge_init(&g_vgmm5lib_opll,
+                            vgm_ym2413_clock & 0x3FFFFFFFu,
+                            actual_sample_rate, YM2413_SMOOTH);
+        g_vgmm5lib_opll_active = true;
+        active_chips[active_chip_count++] = &vgmm5lib_opll_wrapper;
+        active_channel_count += 9;
+        Serial.printf("[CoreS3][vgmM5lib] Tab5 R31 YM2413 rate=%lu\n",
+                      (unsigned long)actual_sample_rate);
+    }
+#endif
     is_dual_sn76489 = false;
     Serial.printf("[VGM] SN76489 Clock: %lu, Dual: %d\n", vgm_sn_clock & 0x3FFFFFFF, (vgm_sn_clock & 0x40000000) != 0);
     if (vgm_sn_clock != 0) {
@@ -1033,8 +1084,12 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     return true;
 }
 
-void vgm_engine_stop() { 
-    isPlaying = false; 
+void vgm_engine_stop() {
+    isPlaying = false;
+#if defined(IS_CORES3)
+    g_vgmm5lib_opll_active = false;
+#endif
+    
     delay(50); 
     pcm_engine_free(&g_pcm_engine); 
     if (vgm_mmap_handle) {
@@ -1083,10 +1138,14 @@ void processVGM() {
                 break; 
             }
             case 0x4F: { uint8_t val = readByte(); /* Game Gear Stereo - not supported yet */ break; }
-            case 0x51: { 
-                uint8_t reg = readByte(); uint8_t val = readByte(); 
+            case 0x51: {
+                uint8_t reg = readByte(); uint8_t val = readByte();
+#if defined(IS_CORES3)
+                vgmm5lib_opll_wrapper.write(0, reg, val);
+#else
                 fm_engine_register_write(&g_fm_engine, reg, val);
-                break; 
+#endif
+                break;
             }
             case 0x5A: { uint8_t reg = readByte(); uint8_t val = readByte(); fm_wrapper.write(0, reg, val); break; }
             case 0x52: case 0x53: {
