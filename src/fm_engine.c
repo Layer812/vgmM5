@@ -947,6 +947,23 @@ static void inject_instrument(FMSoundEngine *engine, int ch, int inst_id, int vo
     fm_engine_write_opl(engine, 0xC0 + ch, (fb << 1) | 0x00);
 }
 
+// YM2413 rhythm registers: $36=BD, $37=HH|SD, $38=TOM|CY.
+// Preserve the KSL bits provided by the injected drum instrument.
+static void opll_update_rhythm_volume(FMSoundEngine *engine, int ch) {
+    if (ch < 6 || ch > 8) return;
+    static const uint8_t car_op[3] = {19, 20, 21};
+    static const uint8_t mod_op[3] = {16, 17, 18};
+    const int slot = ch - 6;
+    const uint8_t low = engine->opll_vol[ch] & 0x0F;
+    const uint8_t car_ksl = (engine->ops[ch * 4 + 1].ksl & 3) << 6;
+    fm_engine_write_opl(engine, 0x40 + car_op[slot], car_ksl | (low << 2));
+    if (ch >= 7) {
+        const uint8_t high = engine->opll_inst[ch] & 0x0F;
+        const uint8_t mod_ksl = (engine->ops[ch * 4].ksl & 3) << 6;
+        fm_engine_write_opl(engine, 0x40 + mod_op[slot], mod_ksl | (high << 2));
+    }
+}
+
 static inline void update_ssg_eg_state(
     FMSoundEngine *engine,
     int op_row
@@ -1394,7 +1411,7 @@ void fm_engine_write_opl(FMSoundEngine *engine, uint8_t addr, uint8_t data) {
         return; 
     }
     // チャンネルレジスタ (0xA0-0xC8)
-    if ((addr >= 0xA0 && addr <= 0xA8) || (addr >= 0xB0 && addr <= 0xB8) || (addr >= 0xC0 && addr <= 0xC8)) {
+    if ((addr >= 0xA0 && addr <= 0xA8) || (addr >= 0xB0 && addr <= 0xB8) || (addr >= 0xC0 && addr <= 0xC8) || addr == 0xBD) {
         int ch;
         if (addr >= 0xA0 && addr <= 0xA8) {
 	    ch = addr - 0xA0;
@@ -1432,22 +1449,19 @@ void fm_engine_write_opl(FMSoundEngine *engine, uint8_t addr, uint8_t data) {
             update_algorithm_routing(engine, ch, engine->algo[ch]);
         } else if (addr == 0xBD) {
             uint8_t old_rhy = engine->rhythm_enable;
-            uint8_t old_val = engine->kc[8];
-            engine->kc[8] = data;
+            uint8_t old_val = engine->opll_rhythm_mode;
+            engine->opll_rhythm_mode = data;
             
             engine->rhythm_enable = (data & 0x20) ? 1 : 0;
             engine->amd = (data & 0x80) ? 1 : 0; // AM Depth
             engine->pmd = (data & 0x40) ? 1 : 0; // PM Depth
             
-            if (engine->rhythm_enable != old_rhy) {
-                
-                
-                
-            }
-            
-            if (engine->rhythm_enable) {
-                uint8_t trg = (data ^ old_val) & data;
-                uint8_t rel = (data ^ old_val) & ~data;
+            // The previous drum-key state is independent of melodic KC[8].
+            if (engine->rhythm_enable || old_rhy) {
+                uint8_t old_keys = old_rhy ? (old_val & 0x1F) : 0;
+                uint8_t new_keys = engine->rhythm_enable ? (data & 0x1F) : 0;
+                uint8_t trg = new_keys & ~old_keys;
+                uint8_t rel = old_keys & ~new_keys;
                 
                 int ops[5] = {24, 29, 32, 33, 28}; // BD(ch6c), SD(ch7c), TOM(ch8m), TC(ch8c), HH(ch7m)
                 int bits[5] = {0x10, 0x08, 0x04, 0x02, 0x01};
@@ -2065,16 +2079,22 @@ void fm_engine_register_write(FMSoundEngine *engine, uint16_t addr, uint8_t data
                 }
             }
         } else if (addr == 0x0E) {
-            engine->opll_rhythm_mode = data;
-            bool rhythm_en = (data & 0x20) != 0;
+            const bool rhythm_en = (data & 0x20) != 0;
+            const bool was_rhythm_en = engine->rhythm_enable != 0;
             // OPLL: 0x0E: 0(2) | RHYTHM_EN(1) | BD(1) | SD(1) | TOM(1) | TC(1) | HH(1)
             // OPL2: 0xBD: AM_DEP(1) | VIB_DEP(1) | RHYTHM_EN(1) | BD(1) | SD(1) | TOM(1) | TC(1) | HH(1)
-            fm_engine_write_opl(engine, 0xBD, data & 0x3F);
-            if (rhythm_en) {
-                // OPLL rhythm mapping: BD(ch6), HH/SD(ch7), TOM/TC(ch8)
+            if (rhythm_en && !was_rhythm_en) {
+                // Install drum patches BEFORE key-on, only on mode entry.
                 inject_instrument(engine, 6, 16, engine->opll_vol[6]); // BD
                 inject_instrument(engine, 7, 17, engine->opll_vol[7]); // HH / SD
-                inject_instrument(engine, 8, 18, engine->opll_vol[8]); // TOM / TC
+                inject_instrument(engine, 8, 18, engine->opll_vol[8]); // TOM / CY
+                for (int i = 6; i <= 8; ++i) opll_update_rhythm_volume(engine, i);
+            }
+            fm_engine_write_opl(engine, 0xBD, data & 0x3F);
+            if (!rhythm_en && was_rhythm_en) {
+                // Return channels 6..8 to their selected melodic patches.
+                for (int i = 6; i <= 8; ++i)
+                    inject_instrument(engine, i, engine->opll_inst[i], engine->opll_vol[i]);
             }
         } else if (addr >= 0x10 && addr <= 0x18) {
             // F-Num low
@@ -2099,6 +2119,8 @@ void fm_engine_register_write(FMSoundEngine *engine, uint16_t addr, uint8_t data
             bool rhythm_en = (engine->opll_rhythm_mode & 0x20) != 0;
             if (!(rhythm_en && ch >= 6)) {
                 inject_instrument(engine, ch, inst, vol);
+            } else {
+                opll_update_rhythm_volume(engine, ch);
             }
         }
     } else if (addr & 0x1000) {
