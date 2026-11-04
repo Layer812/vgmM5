@@ -139,6 +139,7 @@ void enter_usb_mode() {
 // ============================================================
 #if defined(IS_CORES3)
 #include <SD.h>
+#include "../cores3/r67_ui_controls.hpp"
 
 // Embedded binary file symbols (from platformio.ini board_build.embed_files)
 extern const uint8_t _binary_logo_png_start[] asm("_binary_logo_png_start");
@@ -2019,20 +2020,16 @@ void phase_playback() {
         int x = t.x;
         int y = t.y;
         
-        // R67 CoreS3: album thumbnail is x=[8,168), y=[26,180).
-        // The bottom toolbar begins at y=180, and must take precedence.
-        if (x >= 8 && x < 168 && y >= 26 && y < 180) {
-            const bool increase = y < 103; // top 77px / bottom 77px
-            int vol = (int)vgm_engine_get_volume();
-            vol += increase ? 10 : -10;
-            if (vol < 0) vol = 0;
-            else if (vol > 255) vol = 255;
-            // Codec-aware routing: ES8388 requires I2C register writes.
-            // M5.Speaker.setVolume() on Module Audio would wake the
-            // internal amplifier, breaking the verified R6 audio route.
-            vgm_engine_set_volume((uint8_t)vol);
-            Serial.printf("[CoreS3 R67] Thumbnail %s -> volume=%d\n",
-                          increase ? "UP" : "DOWN", vol);
+        // R67: two equal thumbnail halves, never cover transport controls.
+        const uint8_t current_volume = vgm_engine_get_volume();
+        const auto volume_tap = cores3_r67_thumbnail_volume_tap(x, y, current_volume);
+        if (volume_tap.handled) {
+            // Route to ES8388 codec registers OR internal M5 Speaker.
+            // Never wake the inactive internal amp when Module Audio is in use.
+            if (volume_tap.volume != current_volume)
+                vgm_engine_set_volume(volume_tap.volume);
+            Serial.printf("[CoreS3 R67] Thumbnail %s -> volume=%u\n",
+                          volume_tap.increase ? "UP" : "DOWN", (unsigned)volume_tap.volume);
             return;
         }
         
