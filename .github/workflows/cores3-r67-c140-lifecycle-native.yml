@@ -1,0 +1,182 @@
+name: CoreS3 R67 FIX3 C140 note lifecycle, Tab5 parity (NO FLASH)
+on:
+  push:
+    branches:
+      - dev/cores3-r67-fix3-c140-voice-parity-20261104
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core-s3:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Confirm CoreS3 changes only and preserve R6/Tab5/other board sources
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          base='origin/dev/cores3-r67-c140-gain-parity-20261104'
+          changed=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          allow={'src/pcm_engine.c',
+                 'cores3/tests/r67_fix3_c140_voice_lifecycle_host.c',
+                 '.github/workflows/cores3-r67-c140-lifecycle-native.yml'}
+          assert changed==allow,(changed-allow,allow-changed)
+          for path in ('src/fm_engine.c','src/psg_engine.c','src/mdx_engine.cpp',
+                       'src/pcm_engine.h',
+                       'src/scc_engine.c','src/scc_engine.h','src/ssg_engine.c',
+                       'platformio.ini','cores3/README.md',
+                       'tab5/firmware/platformio.ini','tab5/firmware/src/vgm_engine.cpp',
+                       'cardputer/README.md'):
+            original=subprocess.check_output(['git','show',base+':'+path])
+            assert Path(path).read_bytes()==original,path
+          for path in ('src/ssg_engine.c','src/scc_engine.c','src/scc_engine.h',
+                       'src/pcm_engine.c','src/pcm_engine.h','src/vgm_engine.cpp'):
+            assert '#if defined(IS_CORES3)' in Path(path).read_text(),path
+          cfg=Path('platformio.ini').read_text()
+          assert cfg.count('VGMM5_CORES3_R7_QUIETPCM=1')==1
+          assert 'm5stack/M5Unified@0.2.14' in cfg
+          assert 'M5Unified.git#368ad60807161625aa65baad37a4a3af2a7eccea' in cfg
+          assert 'M5GFX.git#65c816a38386062d2c3dc47d41237a9083acbc75' in cfg
+          assert 'VGMM5_R66_PSG_GATE_RAMP' not in cfg
+          v=Path('src/vgm_engine.cpp').read_text()
+          assert '#if defined(IS_CORES3)' in v
+          assert 'FIX1: no per-sample timer calls' in v
+          assert 'FIX1: i2s_write(...,portMAX_DELAY)' in v
+          assert 'taskYIELD();' in v
+          assert 'vTaskDelay(pdMS_TO_TICKS(8));' in v # internal Speaker unchanged
+          assert 'if (g_es8388_detected)' in v
+          assert 'cores3_fill_silent_pcm(' in v
+          assert 'VGMM5_R66_PSG_GATE_RAMP' not in v
+          ui=Path('src/voice.cpp').read_text()
+          h=Path('src/vgm_engine.h').read_text()
+          helper=Path('cores3/r67_ui_controls.hpp').read_text()
+          assert ui.count('vgmM5 R67')==3 # splash and two stereo drawing calls
+          assert 'cores3_r67_thumbnail_volume_tap(x, y, current_volume)' in ui
+          assert 'vgm_engine_set_volume(volume_tap.volume)' in ui
+          assert 'vgm_engine_get_volume' in h
+          assert 'y >= 180' in helper
+          assert 'if (isPlaying && !isPaused && !prebuffering' in v
+          assert 'pending >= (WAV_BUFF_COUNT / 2)' in v
+          assert 'vTaskDelay(pdMS_TO_TICKS(8));' in v # internal speaker pacing untouched
+          assert 'vgm_engine_set_volume(uint8_t vol)' in v
+          assert 'if (g_es8388_detected)' in v
+          pcm=Path('src/pcm_engine.c').read_text()
+          assert pcm.count('cores3_r67_c140_linear_pcm(dt)')==2  # legacy source retained in #else (not compiled for CoreS3)
+          assert 'FIX3: Tab5 field-proven C140 key-on lifecycle' in pcm
+          assert '#if defined(IS_CORES3)' in pcm
+          assert 'if (engine->c140_enabled) continue;' in pcm
+          assert 'ch->prev_sample = 0;' in pcm
+          assert 'ch->last_sample = 0;' in pcm
+          assert 'cores3_r67_c140_to_core_mixer(namco_mix_l)' in pcm
+          assert 'cores3_r67_c140_to_core_mixer(namco_mix_r)' in pcm
+          assert 'new_sample = vgm_safe_signed_pcm_byte(dt);' in pcm # C352 retained
+          assert 'VGMM5_R66_PSG_GATE_RAMP' not in pcm
+          print('PASS CoreS3 C140-only note lifecycle parity, inherited FIX2 gain, R67 UI and others protected')
+          PY
+      - name: CoreS3 R7 AY8910 and SCC+ real generator tests (ASan/UBSan)
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/cs3_shims
+          printf '#pragma once\n#define IRAM_ATTR\n#define DRAM_ATTR\n' > /tmp/cs3_shims/esp_attr.h
+          printf '#pragma once\n' > /tmp/cs3_shims/esp_heap_caps.h
+          printf '#pragma once\n' > /tmp/cs3_shims/esp_partition.h
+          printf '#pragma once\n' > /tmp/cs3_shims/esp_spi_flash.h
+          gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -DIS_CORES3=1 -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I/tmp/cs3_shims -Isrc tab5/tests/r62_ay_scc_host.c src/ssg_engine.c src/scc_engine.c -lm -o /tmp/cs3_ay_scc
+          ASAN_OPTIONS=detect_leaks=1 /tmp/cs3_ay_scc
+      - name: CoreS3 R7 C352 and MSM6258 clock regression (ASan/UBSan)
+        run: |
+          set -euo pipefail
+          gcc -std=gnu11 -O1 -g -DIS_CORES3=1 -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I/tmp/cs3_shims -Isrc tab5/tests/r63_c352_clock_host.c src/pcm_engine.c -Wl,--gc-sections -lm -o /tmp/cs3_c352
+          ASAN_OPTIONS=detect_leaks=1 /tmp/cs3_c352
+          gcc -std=gnu11 -O1 -g -DIS_CORES3=1 -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I/tmp/cs3_shims -Isrc tab5/tests/r64_msm6258_clock_host.c src/pcm_engine.c -Wl,--gc-sections -lm -o /tmp/cs3_msm
+          ASAN_OPTIONS=detect_leaks=1 /tmp/cs3_msm
+      - name: CoreS3 R7 PCM output helper regression (ASan/UBSan)
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer cores3/tests/r7_audio_helpers_host.cpp -o /tmp/cs3_r7_quietpcm
+          ASAN_OPTIONS=detect_leaks=1 /tmp/cs3_r7_quietpcm
+      - name: Preserve CoreS3 R6 signed-math regression
+        run: |
+          gcc -std=gnu11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer cores3/tests/sound_arithmetic_host.c -lm -o /tmp/cs3_r6_math
+          ASAN_OPTIONS=detect_leaks=1 /tmp/cs3_r6_math
+      - name: C140 22-voice polyphony with three noncontiguous ROM banks (ASan/UBSan)
+        run: |
+          set -euo pipefail
+          gcc -std=gnu11 -O1 -g -DIS_CORES3=1 -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I/tmp/cs3_shims -Isrc cores3/tests/r7_fix1_c140_polyphony_host.c src/pcm_engine.c -Wl,--gc-sections -lm -o /tmp/cs3_c140_22voices
+          ASAN_OPTIONS=detect_leaks=1 /tmp/cs3_c140_22voices
+      - name: CoreS3 R67 thumbnail tap/volume clamp geometry (host regression)
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer cores3/tests/r67_ui_controls_host.cpp -o /tmp/cs3_r67_ui
+          ASAN_OPTIONS=detect_leaks=1 /tmp/cs3_r67_ui
+      - name: C140 numeric amplitude vs Tab5 reference saturation regression
+        run: |
+          set -euo pipefail
+          gcc -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer cores3/tests/r67_c140_gain_host.c -o /tmp/c140_gain_parity
+          ASAN_OPTIONS=detect_leaks=1 /tmp/c140_gain_parity
+      - name: CoreS3 C140 note lifecycle zero-onset and no stopped ghost voices (real engine)
+        run: |
+          set -euo pipefail
+          gcc -std=gnu11 -O1 -g -DIS_CORES3=1 -ffunction-sections -fdata-sections -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I/tmp/cs3_shims -Isrc cores3/tests/r67_fix3_c140_voice_lifecycle_host.c src/pcm_engine.c -Wl,--gc-sections -lm -o /tmp/cs3_c140_lifecycle
+          ASAN_OPTIONS=detect_leaks=1 /tmp/cs3_c140_lifecycle
+      - name: Install pinned CoreS3 PlatformIO dependencies
+        run: |
+          python3 -m pip install --disable-pip-version-check platformio
+          python3 -m pip install --disable-pip-version-check 'click==8.1.8'
+          pio pkg install -e m5stack-cores3
+      - name: Check/preserve pinned Unified 0.2.28 and GFX 0.2.35
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          root=Path('.pio/libdeps/m5stack-cores3')
+          assert (root/'M5Unified/library.properties').exists()
+          assert 'version=0.2.28' in (root/'M5Unified/library.properties').read_text()
+          target=root/'M5GFX'
+          if not target.exists() or 'version=0.2.35' not in (target/'library.properties').read_text():
+            cand=[p.parent for p in root.glob('M5GFX@*/library.properties') if 'version=0.2.35' in p.read_text()]
+            assert len(cand)==1,[(str(p),p.read_text()[:50]) for p in root.glob('M5GFX*/library.properties')]
+            if target.exists():shutil.rmtree(target)
+            shutil.copytree(cand[0],target)
+          assert 'version=0.2.35' in (target/'library.properties').read_text()
+          print('PASS M5Unified0.2.28 / M5GFX0.2.35')
+          PY
+      - name: CoreS3 native ESP32-S3 app build (NO FLASH)
+        run: pio run -e m5stack-cores3
+      - name: Verify native app and archive test candidate
+        run: |
+          set -euo pipefail
+          mkdir -p cores3/r67_fix3_artifacts
+          python3 - <<'PY'
+          import hashlib,json,shutil
+          from pathlib import Path
+          b=Path('.pio/build/m5stack-cores3/firmware.bin').read_bytes()
+          assert 100000<len(b)<0x800000 and b[0]==0xE9
+          sha=hashlib.sha256(b).hexdigest()
+          shutil.copyfile('.pio/build/m5stack-cores3/firmware.bin','cores3/r67_fix3_artifacts/firmware.bin')
+          payload=dict(target='CoreS3 ESP32-S3',native_build='PASS',
+            user_hardware='PENDING (Tab5 R66-A validated, CoreS3 not yet)',
+            ModuleAudio_ES8388='existing direct I2S route unchanged',
+            InternalSpeaker='existing M5Unified speaker route unchanged',
+            lib_M5Unified='0.2.28',lib_M5GFX='0.2.35',
+            binary_sha256=sha,image_size=len(b),status='TRIAL_R67_FIX3',c140_22voice_host='PASS',c140_gain_tab5_parity='PASS',c140_voice_lifecycle='PASS',streaming_dma_wait_fix='PASS',per_sample_profiler_removed='PASS',no_extra_zero_block_on_underrun='YES',low_ring_priority='YES',volume_thumbnail_geometry='PASS',flash='NOT PERFORMED',
+            previously_tested='CoreS3 R6 preserved; only IS_CORES3 updates',source='dev/cores3-r67-fix3-c140-voice-parity-20261104',
+            note='No R66-B fade, no C140 duplicate boost, no /3 Tab5 mixer gain change.')
+          Path('cores3/r67_fix3_artifacts/RESULT.json').write_text(json.dumps(payload,ensure_ascii=False,indent=2)+'\n')
+          print(payload)
+          PY
+          sha256sum cores3/r67_fix3_artifacts/firmware.bin > cores3/r67_fix3_artifacts/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: vgmM5-CoreS3-R67-FIX3-C140-VOICE-PARITY-NOFLASH
+          path: cores3/r67_fix3_artifacts/
+          retention-days: 14
