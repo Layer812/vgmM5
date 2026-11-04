@@ -112,7 +112,7 @@ jobs:
           import re
           a=Path('/tmp/tab5_c140.log').read_text()
           b=Path('/tmp/cores3_c140.log').read_text()
-          find=lambda k,s:re.search(rf'{k}=(\\w+)',s).group(1)
+          find=lambda k,s:re.search(rf'{k}=([0-9a-fA-F]+)',s).group(1)
           assert find('QUIET_FINGERPRINT',a)==find('QUIET_FINGERPRINT',b)
           assert find('DENSE_FINGERPRINT',a)!=find('DENSE_FINGERPRINT',b)
           assert int(find('dense_peak',a))<=32767
