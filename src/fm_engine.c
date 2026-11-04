@@ -1792,12 +1792,14 @@ inline int32_t calc_op_ym2151_internal(
     // YM2151で確定する条件の簡約化:
     // - active_phase_step は常に op->phase_step
     // - pm_amount 加算は元の汎用OPN計算式を維持
-    // - CoreS3: preserve Cardputer R5 phase-domain modulation without extra x2
+    // CoreS3 FIX8: use the same operator-to-operator modulation depth
+    // as the field-tested Tab5 R67 YM2151 path. R6's CoreS3-only x1
+    // exception altered timbre, especially OPM algorithms 2,4,5.
+    // The phase-domain arithmetic is still widened in unsigned 32-bit;
+    // this does NOT touch any FM master volume or note pitch registers.
     uint32_t active_phase_step = op->phase_step;
-    
-#if !defined(IS_CORES3)
+
     modulation *= 2;
-#endif
     if (pm_amount != 0) {
         active_phase_step += (((int32_t)(active_phase_step >> 10)) * pm_amount) >> 3;
     }
@@ -2020,11 +2022,25 @@ __attribute__((optimize("O3"))) void IRAM_ATTR fm_engine_tick(FMSoundEngine *eng
         engine->prev_r = mix_r;
     }
 #else
+#if defined(IS_CORES3)
+    if (engine->chip_type == CHIP_YM2151) {
+        // FIX8: Tab5 does NOT run a recursive low-pass on YM2151.
+        // R6 CoreS3 did, changing the balance of harmonics. Preserve
+        // the R6 filter behavior for all NON-YM2151 FM chips.
+        engine->prev_l = mix_l;
+        engine->prev_r = mix_r;
+    } else {
+        mix_l = (mix_l + engine->prev_l) / 2;
+        mix_r = (mix_r + engine->prev_r) / 2;
+        engine->prev_l = mix_l;
+        engine->prev_r = mix_r;
+    }
+#else
     mix_l = (mix_l + engine->prev_l) / 2;
     mix_r = (mix_r + engine->prev_r) / 2;
-
     engine->prev_l = mix_l;
     engine->prev_r = mix_r;
+#endif
 #endif
 
     *out_l += mix_l;
