@@ -1,6 +1,7 @@
 #include "pcm_engine.h"
 #if defined(IS_CORES3)
 #include "sound_safe_math.h" // CoreS3 signed PCM safety only
+#include "../cores3/r67_c140_gain.h" // C140-only amplitude parity
 #endif
 #include "fm_engine.h"
 #include <stdlib.h>
@@ -495,7 +496,7 @@ void pcm_engine_namco_write(PCMSoundEngine *engine, uint16_t addr, uint16_t data
 #endif
                     } else {
                         #if defined(IS_CORES3)
-                        new_sample = vgm_safe_signed_pcm_byte(dt); // C140 8-bit signed PCM
+                        new_sample = cores3_r67_c140_linear_pcm(dt); // Tab5-equivalent signed 12-bit C140
 #else
                         new_sample = (int16_t)((int8_t)dt) << 8; // ★ C140 uncompressed PCM: correct shift from 4 to 8
 #endif
@@ -813,7 +814,7 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
 #endif
                     } else {
                         #if defined(IS_CORES3)
-                        new_sample = vgm_safe_signed_pcm_byte(dt); // C140 8-bit signed PCM
+                        new_sample = cores3_r67_c140_linear_pcm(dt); // Tab5-equivalent signed 12-bit C140
 #else
                         new_sample = (int16_t)((int8_t)dt) << 8; // ★ C140 uncompressed PCM: correct shift from 4 to 8
 #endif
@@ -845,10 +846,17 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
             final_namco_l = namco_mix_l >> 2;
             final_namco_r = namco_mix_r >> 2;
         } else {
-            // C140は元々音量が小さめなので2倍にブースト
-            // クリッピングはマスター側のvgm_engine.cppのソフトリミッターに任せる
+#if defined(IS_CORES3)
+            // Tab5 parity: saturate 16-bit C140 contribution BEFORE
+            // the global stage, then compensate ONLY this chip for the
+            // CoreS3 /8 headroom vs Tab5 /3. YM2151 and C352 untouched.
+            final_namco_l = cores3_r67_c140_to_core_mixer(namco_mix_l);
+            final_namco_r = cores3_r67_c140_to_core_mixer(namco_mix_r);
+#else
+            // Existing legacy boost for all non-CoreS3 builds.
             final_namco_l = namco_mix_l * 2;
             final_namco_r = namco_mix_r * 2;
+#endif
         }
 
         mix_l += final_namco_l;
