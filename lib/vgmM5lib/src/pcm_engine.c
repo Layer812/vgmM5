@@ -7,7 +7,12 @@
 
 PCMSoundEngine g_pcm_engine;
 
+// Default is 32 bytes on every board. PR47's 64-byte option is
+// host-benchmark-only: never enable without demonstrating faster S3
+// hardware/PCM parity. The production firmware remains 32 bytes.
+#ifndef NAMCO_MCACHE_SIZE
 #define NAMCO_MCACHE_SIZE 32
+#endif
 #define NAMCO_MCACHE_MASK (~(NAMCO_MCACHE_SIZE - 1))
 static uint32_t namco_mcache_addr[32];
 static uint8_t  namco_mcache_data[32][NAMCO_MCACHE_SIZE];
@@ -677,22 +682,87 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
                     if (b >= 0 && b < engine->namco.block_count && engine->namco.blocks[b].data && page >= engine->namco.blocks[b].start_addr && (page + NAMCO_MCACHE_SIZE) <= (engine->namco.blocks[b].start_addr + engine->namco.blocks[b].size)) {
                         memcpy(namco_mcache_data[ch], &engine->namco.blocks[b].data[page - engine->namco.blocks[b].start_addr], NAMCO_MCACHE_SIZE);
                     } else {
-                        for (int i = 0; i < NAMCO_MCACHE_SIZE; i++) {
-                            uint32_t ra = page + i;
-                            uint8_t byte = 0; 
-                            int fb = v->current_block;
-                            if (fb >= 0 && fb < engine->namco.block_count && engine->namco.blocks[fb].data && ra >= engine->namco.blocks[fb].start_addr && ra < engine->namco.blocks[fb].start_addr + engine->namco.blocks[fb].size) {
-                                byte = engine->namco.blocks[fb].data[ra - engine->namco.blocks[fb].start_addr];
-                            } else {
-                                for (int j = 0; j < engine->namco.block_count; j++) {
-                                    if (engine->namco.blocks[j].data && ra >= engine->namco.blocks[j].start_addr && ra < engine->namco.blocks[j].start_addr + engine->namco.blocks[j].size) {
-                                        v->current_block = j;
-                                        byte = engine->namco.blocks[j].data[ra - engine->namco.blocks[j].start_addr];
-                                        break;
+#if defined(IS_CORES3) && !defined(VGMM5_PR47_C140_REFERENCE)
+                        if (engine->c140_enabled) {
+                            // PR47: 32-byte page crossing ROM block boundaries.
+                            // Preserve old semantics: the last selected block
+                            // wins when it covers an address; otherwise use the
+                            // first matching block, with zero for unmapped gaps.
+                            // Copy whole contiguous runs instead of re-scanning
+                            // 9+ ROM blocks once for EACH individual byte.
+                            unsigned i = 0;
+                            while (i < NAMCO_MCACHE_SIZE) {
+                                const uint32_t ra = page + i;
+                                int b = v->current_block;
+                                if (!(b >= 0 && b < engine->namco.block_count &&
+                                      engine->namco.blocks[b].data &&
+                                      ra >= engine->namco.blocks[b].start_addr &&
+                                      ra < engine->namco.blocks[b].start_addr +
+                                           engine->namco.blocks[b].size)) {
+                                    b = -1;
+                                    for (int j = 0; j < engine->namco.block_count; ++j) {
+                                        const NamcoROMBlock *block = &engine->namco.blocks[j];
+                                        if (block->data && ra >= block->start_addr &&
+                                            ra < block->start_addr + block->size) {
+                                            b = j;
+                                            v->current_block = j;
+                                            break;
+                                        }
                                     }
                                 }
+                                unsigned run = NAMCO_MCACHE_SIZE - i;
+                                if (b >= 0) {
+                                    const NamcoROMBlock *block = &engine->namco.blocks[b];
+                                    const uint32_t remaining =
+                                        block->start_addr + block->size - ra;
+                                    if (run > remaining) run = remaining;
+                                    memcpy(&namco_mcache_data[ch][i],
+                                           &block->data[ra - block->start_addr], run);
+                                } else {
+                                    // Skip to the next mapped block's start,
+                                    // avoiding per-byte failed ROM scans.
+                                    for (int j = 0; j < engine->namco.block_count; ++j) {
+                                        const NamcoROMBlock *block = &engine->namco.blocks[j];
+                                        if (block->data && block->start_addr > ra &&
+                                            block->start_addr - ra < run) {
+                                            run = block->start_addr - ra;
+                                        }
+                                    }
+                                    memset(&namco_mcache_data[ch][i], 0, run);
+                                }
+                                i += run;
                             }
-                            namco_mcache_data[ch][i] = byte;
+                        } else
+#endif
+                        {
+                            // Legacy byte-for-byte reference, and all C352
+                            // / Tab5 paths untouched.
+                            for (int i = 0; i < NAMCO_MCACHE_SIZE; i++) {
+                                uint32_t ra = page + i;
+                                uint8_t byte = 0;
+                                int fb = v->current_block;
+                                if (fb >= 0 && fb < engine->namco.block_count &&
+                                    engine->namco.blocks[fb].data &&
+                                    ra >= engine->namco.blocks[fb].start_addr &&
+                                    ra < engine->namco.blocks[fb].start_addr +
+                                         engine->namco.blocks[fb].size) {
+                                    byte = engine->namco.blocks[fb].data[
+                                        ra - engine->namco.blocks[fb].start_addr];
+                                } else {
+                                    for (int j = 0; j < engine->namco.block_count; j++) {
+                                        if (engine->namco.blocks[j].data &&
+                                            ra >= engine->namco.blocks[j].start_addr &&
+                                            ra < engine->namco.blocks[j].start_addr +
+                                                 engine->namco.blocks[j].size) {
+                                            v->current_block = j;
+                                            byte = engine->namco.blocks[j].data[
+                                                ra - engine->namco.blocks[j].start_addr];
+                                            break;
+                                        }
+                                    }
+                                }
+                                namco_mcache_data[ch][i] = byte;
+                            }
                         }
                     }
                 }
