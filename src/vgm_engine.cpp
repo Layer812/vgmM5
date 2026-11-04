@@ -1483,7 +1483,7 @@ void audio_play_task(void *args) {
             // PCM already queued and wake the generator to refill instead.
             // Startup prebuffering / pause / genuine STOP retain the old
             // silent-output behavior below.
-            if (any_playing && !prebuffering &&
+            if (isPlaying && !isPaused && !prebuffering &&
                 wav_count.load(std::memory_order_acquire) == 0) {
                 xSemaphoreGive(xSemaphore);
                 vTaskDelay(1);
