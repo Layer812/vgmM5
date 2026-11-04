@@ -761,6 +761,38 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
                 if (namco_mcache_addr[ch] != page) {
                     namco_mcache_addr[ch] = page;
                     int b = v->current_block;
+#if defined(IS_CORES3) && !defined(VGMM5_C140_CACHE_REFERENCE)
+                    if (engine->c140_enabled) {
+                        // FIX4: Most 128-byte pages belong entirely to one ROM
+                        // block. When switching among the nine sparse C140 ROM
+                        // segments, locate that block ONCE instead of searching
+                        // for it again for each of the 128 PCM bytes.
+                        //
+                        // Preserve the legacy first-match priority and slow
+                        // byte-wise path for block boundaries, gaps and overlaps.
+                        bool current_covers_first = false;
+                        if (b >= 0 && b < engine->namco.block_count) {
+                            const NamcoROMBlock *prev = &engine->namco.blocks[b];
+                            current_covers_first =
+                                prev->data && page >= prev->start_addr &&
+                                (uint64_t)page < (uint64_t)prev->start_addr + prev->size;
+                        }
+                        if (!current_covers_first) {
+                            for (uint32_t j = 0; j < engine->namco.block_count; j++) {
+                                const NamcoROMBlock *rom = &engine->namco.blocks[j];
+                                if (rom->data && page >= rom->start_addr &&
+                                    (uint64_t)page < (uint64_t)rom->start_addr + rom->size) {
+                                    if ((uint64_t)page + NAMCO_MCACHE_SIZE <=
+                                        (uint64_t)rom->start_addr + rom->size) {
+                                        b = (int)j;
+                                        v->current_block = b;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+#endif
                     if (b >= 0 && b < engine->namco.block_count && engine->namco.blocks[b].data && page >= engine->namco.blocks[b].start_addr && (page + NAMCO_MCACHE_SIZE) <= (engine->namco.blocks[b].start_addr + engine->namco.blocks[b].size)) {
                         memcpy(namco_mcache_data[ch], &engine->namco.blocks[b].data[page - engine->namco.blocks[b].start_addr], NAMCO_MCACHE_SIZE);
                     } else {
