@@ -55,7 +55,7 @@ jobs:
           assert segment(baseline,'i2s_pin_config_t pin_config = {','};') == segment(current,'i2s_pin_config_t pin_config = {','};')
           assert current.count('i2s_driver_install(I2S_NUM_0') == 1
           assert 'ctx->install_result = i2s_driver_install(I2S_NUM_0, ctx->config, 0, nullptr);' in current
-          assert 'xTaskCreatePinnedToCore(\\n        cores3_install_i2s_core0_task' in current
+          assert 'xTaskCreatePinnedToCore(\n        cores3_install_i2s_core0_task' in current
           assert '&ctx, 5, nullptr, 0);' in current
           assert 'xSemaphoreTake(done, portMAX_DELAY);' in current
           assert 'xTaskCreatePinnedToCore(audio_generate_task, "AudioGenTask", 8192, NULL, 5, &playTaskHandle, 1);' in current
