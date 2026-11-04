@@ -4,6 +4,9 @@
 #include <FFat.h>
 #include <SD.h>
 #include "vgm_engine.h"
+#if defined(IS_CORES3)
+#include "../cores3/cores3_r7_audio_helpers.hpp"
+#endif
 #include <USB.h>
 #include <USBMSC.h>
 #include <esp_partition.h>
@@ -764,7 +767,11 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     if (vgm_scc_clock != 0) {
         bool is_scc_plus = (vgm_scc_clock & 0x80000000) != 0;
         Serial.printf("[VGM] SCC Clock: %lu, SCC+: %d\n", vgm_scc_clock & 0x3FFFFFFF, is_scc_plus);
-        scc_engine_init(&g_scc_engine, actual_sample_rate, vgm_scc_clock & 0x3FFFFFFF); active_chips[active_chip_count++] = &scc_wrapper;
+        scc_engine_init(&g_scc_engine, actual_sample_rate, vgm_scc_clock & 0x3FFFFFFF);
+#if defined(IS_CORES3)
+        scc_engine_set_variant(&g_scc_engine, is_scc_plus);
+#endif
+        active_chips[active_chip_count++] = &scc_wrapper;
         active_channel_count += 5;
     }
 
@@ -775,11 +782,27 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     if (vgm_msm6258_clock != 0 || vgm_oki_clock != 0 || vgm_segapcm_clock != 0 || vgm_ym2612_clock != 0 || vgm_ym2608_clock != 0 || vgm_ym2610_clock != 0 || vgm_c140_clock != 0 || vgm_c352_clock != 0) {
         active_chips[active_chip_count++] = &pcm_wrapper;
         active_channel_count += 1;
-        if (vgm_msm6258_clock != 0) pcm_engine_set_msm6258_clock(&g_pcm_engine, vgm_msm6258_clock & 0x3FFFFFFF);
+        if (vgm_msm6258_clock != 0) {
+#if defined(IS_CORES3)
+            // R64: header byte 0x94 defines /1024, /768, /512, /512.
+            const uint8_t div_code = (vgmDataStart > 0x94) ? (header[0x94] & 3u) : 0u;
+            pcm_engine_set_msm6258_clock(&g_pcm_engine, vgm_msm6258_clock & 0x3FFFFFFFu, div_code);
+#else
+            pcm_engine_set_msm6258_clock(&g_pcm_engine, vgm_msm6258_clock & 0x3FFFFFFF);
+#endif
+        }
         if (vgm_oki_clock != 0)     pcm_engine_set_oki_clock(&g_pcm_engine, vgm_oki_clock & 0x3FFFFFFF);
         if (vgm_segapcm_clock != 0) pcm_engine_segapcm_init(&g_pcm_engine, vgm_segapcm_clock & 0x3FFFFFFF, vgm_spcm_intf);
         if (vgm_c140_clock != 0) {
+#if defined(IS_CORES3)
+            // R62: VGM 1.71 subtype comes from header byte 0x96.
+            const uint8_t raw_type = vgmDataStart > 0x96 ? header[0x96] : 0u;
+            const uint8_t c140_bank_type = raw_type <= 1u ? raw_type : 0u;
+            if (raw_type > 1u)
+                Serial.printf("[CoreS3 R7] C140 type %u unsupported; use System2 fallback\n", unsigned(raw_type));
+#else
             uint8_t c140_bank_type = (vgm_c140_clock >> 31) & 1; // 0 = System 2, 1 = System 21
+#endif
             Serial.printf("[VGM] C140 Clock: %lu, Type: %d\n", vgm_c140_clock & 0x3FFFFFFF, c140_bank_type);
             pcm_engine_namco_init(&g_pcm_engine, vgm_c140_clock & 0x3FFFFFFF, 0xC1, c140_bank_type);
         }
@@ -793,8 +816,25 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     // ========================================================
     // ★ ミキサー用の除数（チップ数）をグローバルに一度だけ事前計算
     // ========================================================
+#if defined(IS_CORES3)
+    // R65: count distinct VGM clock fields instead of FM/DAC/SSG
+    // software wrappers. Keep CoreS3's existing conservative /8
+    // master headroom (Tab5 uses a different /3 mixer).
+    const uint32_t clocks[] = {
+        vgm_ym2413_clock, vgm_ym2612_clock, vgm_ym2151_clock,
+        vgm_ym2203_clock, vgm_ym2608_clock, vgm_ym2610_clock,
+        vgm_ym3812_clock, vgm_ay8910_clock, vgm_msm6258_clock,
+        vgm_oki_clock, vgm_segapcm_clock, vgm_scc_clock,
+        vgm_c140_clock, vgm_c352_clock
+    };
+    global_chip_count = int(cores3_physical_chip_count(vgm_sn_clock,
+                          clocks, sizeof(clocks) / sizeof(clocks[0])));
+    Serial.printf("[CoreS3 R7] Physical chips=%d wrappers=%d; /8 headroom\n",
+                  global_chip_count, active_chip_count);
+#else
     global_chip_count = (active_chip_count > 0) ? active_chip_count : 1;
     Serial.printf("[VGM] Mixer: chip_count=%d\n", global_chip_count);
+#endif
 
     waitSamples = 8820; vgm_time_acc = 0; ym2612_pcm_offset = 0;
     sn76489_writes = 0;
@@ -1277,6 +1317,13 @@ if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t
 
         out_buf[i * 2]     = (int16_t)mix_l;
         out_buf[i * 2 + 1] = (int16_t)mix_r;
+#if defined(IS_CORES3) && defined(VGMM5_CORES3_R7_QUIETPCM)
+        // Same R66-A treatment that eliminated popping on Tab5.
+        // Shared PCM buffer feeds both the CoreS3 internal Speaker
+        // and the Module Audio ES8388 direct-I2S paths.
+        static uint32_t quiet_seed = 0xA56959A5u;
+        cores3_fill_silent_pcm(&out_buf[i*2], &out_buf[i*2+1], &quiet_seed);
+#endif
     }
     wav_buff_size[wd] = BUFF_SIZE;
     wd = (wd + 1) % WAV_BUFF_COUNT;

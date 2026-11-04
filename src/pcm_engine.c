@@ -189,11 +189,21 @@ uint8_t pcm_engine_get_ym2612_byte(PCMSoundEngine *engine, uint32_t offset) {
 // ─────────────────────────────────────────
 // MSM6258 クロック設定
 // ─────────────────────────────────────────
+#if defined(IS_CORES3)
+void pcm_engine_set_msm6258_clock(PCMSoundEngine *engine, uint32_t clock, uint8_t divider_code) {
+    // VGM header 0x94 bits 0-1: /1024, /768, /512, /512.
+    static const uint16_t dividers[4] = {1024, 768, 512, 512};
+    engine->msm6258.clock = clock;
+    const uint32_t sr = clock ? (clock / dividers[divider_code & 3u]) : 15625u;
+    engine->msm6258.step_size = ((uint64_t)sr * 65536) / engine->sample_rate;
+}
+#else
 void pcm_engine_set_msm6258_clock(PCMSoundEngine *engine, uint32_t clock) {
     engine->msm6258.clock = clock;
     uint32_t sr = (clock > 0) ? (clock / 512) : 15625;
     engine->msm6258.step_size = ((uint64_t)sr * 65536) / engine->sample_rate;
 }
+#endif
 
 // ─────────────────────────────────────────
 // MSM6258 レジスタ書き込み (0xB7コマンド)
@@ -348,7 +358,14 @@ void pcm_engine_namco_init(PCMSoundEngine *engine, uint32_t clock, uint8_t type,
     if (type == 0xC1) {
         native_rate = (clock > 0) ? (clock / 192) : (21390000 / 192);
     } else {
+#if defined(IS_CORES3)
+        // VGM 1.71 header byte 0xD6 = C352 clock divider / 4.
+        // Zero means unspecified, retain established /288 divisor.
+        const uint32_t divider = c140_type ? (uint32_t)c140_type * 4u : 288u;
+        native_rate = clock ? (clock / divider) : (24000000u / divider);
+#else
         native_rate = (clock > 0) ? (clock / 288) : 83333; // C352
+#endif
     }
     engine->namco.step_scale = (uint32_t)(((uint64_t)native_rate << 16) / engine->sample_rate);
 }
