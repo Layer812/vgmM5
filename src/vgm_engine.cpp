@@ -5,6 +5,9 @@
 #include <SD.h>
 #include "vgm_engine.h"
 #if defined(IS_CORES3)
+#include "../cores3/r67_fix6_mixer_safety.hpp"
+#endif
+#if defined(IS_CORES3)
 #include "../cores3/cores3_r7_audio_helpers.hpp"
 #endif
 #include <USB.h>
@@ -1262,8 +1265,15 @@ void IRAM_ATTR processAudioBlock() {
         // =====================================
         // ミキサー処理（各チップの出力を合計し、チップ数で割る）
         // =====================================
+#if defined(IS_CORES3)
+        // FIX6: chip outputs are int32 but 16+ channels can sum into
+        // larger values. Never narrow until AFTER the master divide.
+        int64_t mix_l = 0;
+        int64_t mix_r = 0;
+#else
         int32_t mix_l = 0;
         int32_t mix_r = 0;
+#endif
 
         for (int c = 0; c < active_chip_count; c++) {
             int32_t ch_l = 0, ch_r = 0;
@@ -1286,20 +1296,38 @@ void IRAM_ATTR processAudioBlock() {
 
         // グローバルに計算済みのチップ数で割る
         // （YM2612等は最大出力が20万を超えるため、8で割って音割れとメロディ消失を防ぐ）
+#if defined(IS_CORES3)
+        // Preserve R6's chip-count/8 master level exactly. Divide in
+        // 64-bit, then saturate before the DC blocker.
+        mix_l = cores3_r67_divide_mix(mix_l, global_chip_count);
+        mix_r = cores3_r67_divide_mix(mix_r, global_chip_count);
+#else
         mix_l /= (global_chip_count * 8);
         mix_r /= (global_chip_count * 8);
+#endif
 
-        int32_t in_l = mix_l;
-        int32_t in_r = mix_r;
+        int32_t in_l = (int32_t)mix_l;
+        int32_t in_r = (int32_t)mix_r;
         
+#if defined(IS_CORES3)
+        // Also widen the subtraction BEFORE multiplying by 16384.
+        dc_state_l = ((int64_t)in_l - (int64_t)dc_prev_l) * 16384 + (dc_state_l * 1019) / 1024;
+        dc_state_r = ((int64_t)in_r - (int64_t)dc_prev_r) * 16384 + (dc_state_r * 1019) / 1024;
+#else
         dc_state_l = (int64_t)(in_l - dc_prev_l) * 16384 + (dc_state_l * 1019) / 1024;
         dc_state_r = (int64_t)(in_r - dc_prev_r) * 16384 + (dc_state_r * 1019) / 1024;
+#endif
         
         dc_prev_l = in_l;
         dc_prev_r = in_r;
         
+#if defined(IS_CORES3)
+        mix_l = cores3_r67_saturate_i32(dc_state_l / 16384);
+        mix_r = cores3_r67_saturate_i32(dc_state_r / 16384);
+#else
         mix_l = (int32_t)(dc_state_l / 16384);
         mix_r = (int32_t)(dc_state_r / 16384);
+#endif
 
 if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t::board_M5AtomVoiceS3R || M5.getBoard() == m5::board_t::board_M5AtomS3R) {
         // ☁E小型スピーカー用 EQ補正 (高音マイルド化 ＋ 低音ブースト)
@@ -1319,11 +1347,19 @@ if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t
         mix_r += (eq_bass_r * 2);
 }
 
+#if defined(IS_CORES3)
+        // FIX6: prevent hard-clipped peaks after simultaneous FM/PCM.
+        // Normal PCM below +/-26000 is unchanged, with no global gain
+        // reduction and no envelope/frequency changes to FM or C140.
+        mix_l = cores3_r67_true_peak_limiter(cores3_r67_saturate_i32(mix_l));
+        mix_r = cores3_r67_true_peak_limiter(cores3_r67_saturate_i32(mix_r));
+#else
         int32_t limit = 26000;
         if (mix_l > limit) mix_l = limit + (mix_l - limit) / 2;
         else if (mix_l < -limit) mix_l = -limit + (mix_l + limit) / 2;
         if (mix_r > limit) mix_r = limit + (mix_r - limit) / 2;
         else if (mix_r < -limit) mix_r = -limit + (mix_r + limit) / 2;
+#endif
 
         if (mix_l > 32767) mix_l = 32767; else if (mix_l < -32768) mix_l = -32768;
         if (mix_r > 32767) mix_r = 32767; else if (mix_r < -32768) mix_r = -32768;
