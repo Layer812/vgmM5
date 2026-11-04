@@ -46,8 +46,8 @@ PSGSoundEngine g_psg_engine2;
 #define YM2151_CLOCK 3579545
 #define VGM_SAMPLE_RATE 44100
 
-#define WAV_BUFF_COUNT 16
-#define BUFF_SIZE 512
+#define WAV_BUFF_COUNT VGM_WAV_BUFF_COUNT
+#define BUFF_SIZE VGM_BUFF_SIZE
 
 int16_t wav_buff[WAV_BUFF_COUNT][BUFF_SIZE * 2];
 size_t wav_buff_size[WAV_BUFF_COUNT];
@@ -1460,6 +1460,13 @@ void audio_play_task(void *args) {
                 vTaskDelay(1);
             }
         } else {
+#if defined(IS_CORES3)
+            // Keep the generator runnable even if its queue has already
+            // drained during a particularly expensive 22-voice C140 burst.
+            if (isPlaying && !isPaused && !prebuffering && wav_count.load() == 0) {
+                xSemaphoreGive(xSemaphore);
+            }
+#endif
             static const int16_t idle_silence[512 * 2] = {0};
             if (g_es8388_detected) {
                 size_t bytes_written = 0;
@@ -1494,8 +1501,10 @@ void vgm_engine_init() {
         .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count = 6,
-        .dma_buf_len = 160,
+        // FIX5: 8x256 frames (~46ms) instead of 6x160 (~22ms).
+        // Helps the external ES8388 survive transient CPU/flash stalls.
+        .dma_buf_count = 8,
+        .dma_buf_len = 256,
         .use_apll = false,
         .tx_desc_auto_clear = true,
         .fixed_mclk = 0,
