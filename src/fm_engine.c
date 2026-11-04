@@ -2011,15 +2011,22 @@ __attribute__((optimize("O3"))) void IRAM_ATTR fm_engine_tick(FMSoundEngine *eng
         engine->prev_l = raw_mix_l;
         engine->prev_r = raw_mix_r;
     } else {
-        /*
-         * Preserve the existing behavior for every
-         * non-YM2612 chip.
-         */
-        mix_l = (mix_l + engine->prev_l) / 2;
-        mix_r = (mix_r + engine->prev_r) / 2;
-
-        engine->prev_l = mix_l;
-        engine->prev_r = mix_r;
+#if defined(IS_CORES3)
+        if (engine->chip_type == CHIP_YM2151) {
+            // FIX8: Match Tab5: YM2151 must not get the CoreS3 R6
+            // recursive LPF. Preserve the actual FM waveform and the
+            // envelope/phase timbre; this is independent of PCM gain.
+            engine->prev_l = mix_l;
+            engine->prev_r = mix_r;
+        } else
+#endif
+        {
+            // Preserve R6 smoothing for OPN/OPL and non-CoreS3 boards.
+            mix_l = (mix_l + engine->prev_l) / 2;
+            mix_r = (mix_r + engine->prev_r) / 2;
+            engine->prev_l = mix_l;
+            engine->prev_r = mix_r;
+        }
     }
 #else
 #if defined(IS_CORES3)
