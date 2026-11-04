@@ -61,7 +61,7 @@ int main(void) {
     // C352 channel 0: volume, frequency, key-on, bank, start/end/loop.
     pcm_engine_namco_write(&e, 0, 0x6060);
     pcm_engine_namco_write(&e, 2, 0x6000);
-    pcm_engine_namco_write(&e, 3, 0x4000);
+    pcm_engine_namco_write(&e, 3, 0x4002); // key-on with loop to exercise 2s C352 playback
     pcm_engine_namco_write(&e, 4, 0);
     pcm_engine_namco_write(&e, 5, 0x1080);
     pcm_engine_namco_write(&e, 6, 0x1400);
