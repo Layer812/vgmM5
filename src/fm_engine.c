@@ -1795,7 +1795,10 @@ inline int32_t calc_op_ym2151_internal(
     // - CoreS3: preserve Cardputer R5 phase-domain modulation without extra x2
     uint32_t active_phase_step = op->phase_step;
     
-#if !defined(IS_CORES3)
+#if !defined(IS_CORES3) || defined(VGMM5_CORES3_FM_TAB5_MOD_X2)
+    // FIX5-A trial: generic/Tab5 YM2151 operator modulation uses x2.
+    // Existing CoreS3 R6 dedicated OPM path deliberately omitted x2.
+    // Switch ONLY in the trial binary; retain the R6 path by default.
     modulation *= 2;
 #endif
     if (pm_amount != 0) {
