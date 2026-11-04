@@ -1,3 +1,7 @@
+#if defined(IS_CORES3)
+// CoreS3 shares the exact Tab5 R67 sound-core ABI via vgmM5lib.
+#include "../lib/vgmM5lib/src/fm_engine.h"
+#else
 #pragma once
 #include <esp_attr.h>
 #include <stdint.h>
@@ -167,3 +171,4 @@ void fm_engine_write_opl(FMSoundEngine *engine, uint8_t addr, uint8_t data);
 #ifdef __cplusplus
 }
 #endif
+#endif // IS_CORES3

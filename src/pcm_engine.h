@@ -1,3 +1,7 @@
+#if defined(IS_CORES3)
+// CoreS3 shares the exact Tab5 R67 sound-core ABI via vgmM5lib.
+#include "../lib/vgmM5lib/src/pcm_engine.h"
+#else
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
@@ -306,3 +310,5 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
 #ifdef __cplusplus
 }
 #endif
+
+#endif // IS_CORES3
