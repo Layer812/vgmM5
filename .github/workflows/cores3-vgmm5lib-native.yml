@@ -1,0 +1,92 @@
+name: CoreS3 vgmM5lib exact Tab5 R67 sound-core native build
+on:
+  push:
+    branches: [dev/cores3-r67-tab5-all-sound-cores-20261104]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cores3:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact Tab5 sources and P4 separation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          names='fm_engine.c fm_engine.h pcm_engine.c pcm_engine.h psg_engine.c psg_engine.h ssg_engine.c ssg_engine.h scc_engine.c scc_engine.h ym2413_core.c ym2413_core.h ym2413_eg.c ym2413_eg.h ym2413_native.c ym2413_native.h ym2413_tables.h r31_vgm_bridge.c r31_vgm_bridge.h'.split()
+          for n in names:
+              lib=Path('lib/vgmM5lib/src',n).read_bytes()
+              tab=Path('tab5/firmware/src',n).read_bytes()
+              assert lib==tab,n
+              assert b'MALLOC_CAP_SPM' not in lib,n
+              assert b'M5.Speaker' not in lib,n
+          cfg=Path('platformio.ini').read_text().split('[env:m5stack-cores3]')[1]
+          assert 'build_src_filter' in cfg
+          for n in ('fm','pcm','psg','ssg','scc'):
+              assert '-<'+n+'_engine.c>' in cfg
+          src=Path('src/vgm_engine.cpp').read_text()
+          assert '#include <vgmM5lib.h>' in src
+          assert 'r31_vgm_bridge_init' in src
+          print('PASS 19 Tab5-exact cores, no P4 SPM/device dependencies')
+          PY
+      - name: Host synth smoke checks on Tab5-exact library
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/vgm_shims
+          printf '#pragma once\n#define IRAM_ATTR\n#define DRAM_ATTR\n' >/tmp/vgm_shims/esp_attr.h
+          printf '#pragma once\n' >/tmp/vgm_shims/esp_partition.h
+          printf '#pragma once\n' >/tmp/vgm_shims/esp_heap_caps.h
+          gcc -std=gnu11 -O1 -DIS_CORES3=1 -I/tmp/vgm_shims -Ilib/vgmM5lib/src tab5/tests/r62_ay_scc_host.c lib/vgmM5lib/src/ssg_engine.c lib/vgmM5lib/src/scc_engine.c -lm -o /tmp/ay_scc
+          /tmp/ay_scc
+          for n in fm_engine pcm_engine psg_engine ssg_engine scc_engine ym2413_core ym2413_eg ym2413_native r31_vgm_bridge; do
+            gcc -std=gnu11 -O2 -DIS_CORES3=1 -I/tmp/vgm_shims -Ilib/vgmM5lib/src -c lib/vgmM5lib/src/$n.c -o /tmp/$n.o
+          done
+          echo 'PASS all 9 synthesizer units compiled without ESP32-P4'
+      - name: Install CoreS3 PlatformIO and pinned M5Unified/M5GFX
+        run: |
+          pip install --disable-pip-version-check platformio 'click==8.1.8'
+          pio pkg install -e m5stack-cores3
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          r=Path('.pio/libdeps/m5stack-cores3')
+          assert 'version=0.2.28' in (r/'M5Unified/library.properties').read_text()
+          target=r/'M5GFX'
+          if not target.exists() or 'version=0.2.35' not in (target/'library.properties').read_text():
+              cand=[p.parent for p in r.glob('M5GFX@*/library.properties') if 'version=0.2.35' in p.read_text()]
+              assert len(cand)==1,cand
+              if target.exists(): shutil.rmtree(target)
+              shutil.copytree(cand[0],target)
+          assert 'version=0.2.35' in (target/'library.properties').read_text()
+          PY
+      - name: Real CoreS3 ESP32-S3 native firmware build NO FLASH
+        run: pio run -e m5stack-cores3
+      - name: Validate shared library used exactly once and archive app
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('.pio/build/m5stack-cores3')
+          fm=list(root.rglob('fm_engine.c.o'))
+          pcm=list(root.rglob('pcm_engine.c.o'))
+          assert len(fm)==1 and 'vgmM5lib' in str(fm[0]),fm
+          assert len(pcm)==1 and 'vgmM5lib' in str(pcm[0]),pcm
+          b=(root/'firmware.bin').read_bytes()
+          assert len(b)>100000 and b[0]==0xe9
+          sha=hashlib.sha256(b).hexdigest()
+          d=Path('cores3/vgmM5lib_artifact'); d.mkdir(parents=True,exist_ok=True)
+          (d/'firmware.bin').write_bytes(b)
+          result=dict(target='CoreS3 ESP32-S3',native_build='PASS',synth='vgmM5lib / Tab5 R67 19 exact files',p4_dependency='NONE',tab5_changed=False,flash='NOT PERFORMED',hardware_audio='UNTESTED',app_offset='0x10000',binary_sha256=sha,image_size=len(b))
+          (d/'RESULT.json').write_text(json.dumps(result,indent=2)+'\n')
+          print(result)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CoreS3-R67-vgmM5lib-Tab5-SOUND-NOFLASH
+          path: cores3/vgmM5lib_artifact/
+          retention-days: 14
