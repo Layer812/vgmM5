@@ -1247,7 +1247,14 @@ void IRAM_ATTR processAudioBlock() {
                 vgm_time_acc -= consume * actual_sample_rate;
             }
             if (waitSamples == 0 && isPlaying) {
-                uint32_t t_vgm = esp_timer_get_time(); processVGM(); prof_vgm_time += esp_timer_get_time() - t_vgm; 
+#if defined(IS_CORES3)
+                // FIX1: VGM command processing is in the 44.1kHz inner loop.
+                // Avoid ESP timer reads per call on the ESP32-S3: C140+
+                // YM2151 tracks can issue thousands of writes per second.
+                processVGM();
+#else
+                uint32_t t_vgm = esp_timer_get_time(); processVGM(); prof_vgm_time += esp_timer_get_time() - t_vgm;
+#endif 
                 if (waitSamples == 0) continue;
             }
         }
@@ -1261,11 +1268,17 @@ void IRAM_ATTR processAudioBlock() {
         for (int c = 0; c < active_chip_count; c++) {
             int32_t ch_l = 0, ch_r = 0;
             
+#if defined(IS_CORES3)
+            // FIX1: no per-sample timer calls in 44.1kHz generator hot path.
+            // One block still has start/end timing; chip timing was diagnostic.
+            active_chips[c]->tick(&ch_l, &ch_r);
+#else
             uint32_t t_tick = esp_timer_get_time();
             active_chips[c]->tick(&ch_l, &ch_r);
             uint32_t t_diff = esp_timer_get_time() - t_tick;
             if (active_chips[c] == &fm_wrapper) prof_fm_time += t_diff;
             else if (active_chips[c] == &pcm_wrapper) prof_pcm_time += t_diff;
+#endif
 
             mix_l += ch_l;
             mix_r += ch_r;
@@ -1420,7 +1433,20 @@ void audio_play_task(void *args) {
                 if (wav_count <= (WAV_BUFF_COUNT / 2)) {
                     xSemaphoreGive(xSemaphore);
                 }
+#if defined(IS_CORES3)
+                if (g_es8388_detected) {
+                    // FIX1: i2s_write(...,portMAX_DELAY) already waits for
+                    // DMA consumption. Adding 8ms after every 512 frames
+                    // risks starving the ES8388 at 44.1kHz (11.61ms/frame).
+                    taskYIELD();
+                } else {
+                    // M5Unified playRaw has different buffering semantics:
+                    // retain its established R6 rate limiting.
+                    vTaskDelay(pdMS_TO_TICKS(8));
+                }
+#else
                 vTaskDelay(pdMS_TO_TICKS(8));
+#endif
             } else {
                 vTaskDelay(1);
             }
