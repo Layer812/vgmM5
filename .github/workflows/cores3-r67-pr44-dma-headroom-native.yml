@@ -1,0 +1,174 @@
+name: CoreS3 R67 PR44 DMA headroom and stream health native (NO FLASH)
+on:
+  push:
+    branches: [dev/cores3-r67-pr44-i2s-dma-headroom-20261105]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cores3:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact Tab5 sources and P4 separation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          base='origin/dev/cores3-r67-pr43-i2s-dma-core0-20261105'
+          changed=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          expected={'src/vgm_engine.cpp',
+                    '.github/workflows/cores3-r67-pr44-dma-headroom-native.yml'}
+          assert changed==expected,(changed-expected,expected-changed)
+          for path in ('src/voice.cpp','src/vgm_engine.h','platformio.ini',
+                       'cores3/r67_ui_controls.hpp',
+                       'tab5/firmware/src/pcm_engine.c',
+                       'tab5/firmware/src/fm_engine.c'):
+              assert Path(path).read_bytes()==subprocess.check_output(['git','show',base+':'+path]),path
+          src=Path('src/vgm_engine.cpp').read_text()
+          assert 'cores3_vgm_step_44100(waitSamples, isPlaying' in src
+          assert 'if (actual_sample_rate == VGM_SAMPLE_RATE && vgm_time_acc == 0)' in src
+          assert '#if !defined(IS_CORES3)\nif (M5.getBoard()' in src
+          names='fm_engine.c fm_engine.h pcm_engine.h psg_engine.c psg_engine.h ssg_engine.c ssg_engine.h scc_engine.c scc_engine.h ym2413_core.c ym2413_core.h ym2413_eg.c ym2413_eg.h ym2413_native.c ym2413_native.h ym2413_tables.h r31_vgm_bridge.c r31_vgm_bridge.h'.split()
+          for n in names:
+              lib=Path('lib/vgmM5lib/src',n).read_bytes()
+              tab=Path('tab5/firmware/src',n).read_bytes()
+              assert lib==tab,n
+              assert b'MALLOC_CAP_SPM' not in lib,n
+              assert b'M5.Speaker' not in lib,n
+          # PR41 PCM, every vgmM5lib/Tab5 synth, codec/UI, and I2S
+          # parameters must remain exactly unchanged in this PR.
+          import subprocess
+          assert Path('lib/vgmM5lib/src/pcm_engine.c').read_bytes() == subprocess.check_output(
+              ['git','show',base+':lib/vgmM5lib/src/pcm_engine.c'])
+          baseline=subprocess.check_output(['git','show',base+':src/vgm_engine.cpp'],text=True)
+          current=Path('src/vgm_engine.cpp').read_text()
+          def segment(content,start,end):
+              return content.split(start,1)[1].split(end,1)[0]
+          import re
+          def i2s_fields(content):
+              cfg=segment(content,'i2s_config_t i2s_config = {','};')
+              return dict(re.findall(r'^[ \\t]*\\.(\\w+)\\s*=\\s*([^,]+),',cfg,re.M))
+          prior=i2s_fields(baseline)
+          now=i2s_fields(current)
+          assert prior['dma_buf_count'].strip()=='6'
+          assert prior['dma_buf_len'].strip()=='160'
+          assert now['dma_buf_count'].strip()=='8'
+          assert now['dma_buf_len'].strip()=='512'
+          assert {k:v for k,v in prior.items() if k not in ('dma_buf_count','dma_buf_len')} == {
+                 k:v for k,v in now.items() if k not in ('dma_buf_count','dma_buf_len')}
+          assert segment(baseline,'i2s_pin_config_t pin_config = {','};') == segment(current,'i2s_pin_config_t pin_config = {','};')
+          assert 's_cores3_gen_over_budget.fetch_add(1, std::memory_order_relaxed)' in current
+          assert 's_cores3_ring_empty.fetch_add(1, std::memory_order_relaxed)' in current
+          assert 's_cores3_i2s_short_write.fetch_add(1, std::memory_order_relaxed)' in current
+          assert '[CoreS3 PR44][AUDIO] ring=' in current
+          assert 8 * 512 / 44100 > 0.09
+          print('PASS CoreS3 only: 8x512 DMA buffer, prior 6x160, unchanged I2S pins/clock/format')
+          assert current.count('i2s_driver_install(I2S_NUM_0') == 1
+          assert 'ctx->install_result = i2s_driver_install(I2S_NUM_0, ctx->config, 0, nullptr);' in current
+          assert 'xTaskCreatePinnedToCore(\n        cores3_install_i2s_core0_task' in current
+          assert '&ctx, 5, nullptr, 0);' in current
+          assert 'xSemaphoreTake(done, portMAX_DELAY);' in current
+          assert 'xTaskCreatePinnedToCore(audio_generate_task, "AudioGenTask", 8192, NULL, 5, &playTaskHandle, 1);' in current
+          assert 'xTaskCreatePinnedToCore(audio_play_task, "AudioPlayTask", 4096, NULL, 4, NULL, 0);' in current
+          print('PASS pinned I2S allocation CPU0; PCM writer CPU0; synth CPU1; ES8388 codec unchanged')
+          cfg=Path('platformio.ini').read_text().split('[env:m5stack-cores3]')[1]
+          assert 'build_src_filter' in cfg
+          for n in ('fm','pcm','psg','ssg','scc'):
+              assert '-<'+n+'_engine.c>' in cfg
+          src=Path('src/vgm_engine.cpp').read_text()
+          assert '#include <vgmM5lib.h>' in src
+          assert 'r31_vgm_bridge_init' in src
+          print('PASS PR44 DMA-only capacity change and 10s health counters; PR43 FM/C140/codec/UI unchanged')
+          PY
+      - name: Host synth smoke checks on Tab5-exact library
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/vgm_shims
+          printf '#pragma once\n#define IRAM_ATTR\n#define DRAM_ATTR\n' >/tmp/vgm_shims/esp_attr.h
+          printf '#pragma once\n' >/tmp/vgm_shims/esp_partition.h
+          printf '#pragma once\n' >/tmp/vgm_shims/esp_heap_caps.h
+          gcc -std=gnu11 -O1 -DIS_CORES3=1 -I/tmp/vgm_shims -Ilib/vgmM5lib/src tab5/tests/r62_ay_scc_host.c lib/vgmM5lib/src/ssg_engine.c lib/vgmM5lib/src/scc_engine.c -lm -o /tmp/ay_scc
+          /tmp/ay_scc
+          for n in fm_engine pcm_engine psg_engine ssg_engine scc_engine ym2413_core ym2413_eg ym2413_native r31_vgm_bridge; do
+            gcc -std=gnu11 -O2 -DIS_CORES3=1 -I/tmp/vgm_shims -Ilib/vgmM5lib/src -c lib/vgmM5lib/src/$n.c -o /tmp/$n.o
+          done
+          echo 'PASS all 9 synthesizer units compiled without ESP32-P4'
+      - name: CoreS3 100-second dense VGM register timing parity (UBSan)
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all cores3/tests/r67_c140_vgm_44100_timing_host.cpp -o /tmp/cores3_44100_timing
+          /tmp/cores3_44100_timing
+      - name: Real C140 22-voice pre-mix test, low-level parity & high-level headroom
+        run: |
+          set -euo pipefail
+          gcc -std=gnu11 -O2 -I/tmp/vgm_shims -Ilib/vgmM5lib/src cores3/tests/r67_pr41_c140_premix_host.c lib/vgmM5lib/src/pcm_engine.c -lm -o /tmp/tab5_c140
+          gcc -std=gnu11 -O2 -DIS_CORES3=1 -I/tmp/vgm_shims -Ilib/vgmM5lib/src cores3/tests/r67_pr41_c140_premix_host.c lib/vgmM5lib/src/pcm_engine.c -lm -o /tmp/cores3_c140
+          /tmp/tab5_c140 >/tmp/tab5_c140.log
+          /tmp/cores3_c140 >/tmp/cores3_c140.log
+          cat /tmp/tab5_c140.log /tmp/cores3_c140.log
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          a=Path('/tmp/tab5_c140.log').read_text()
+          b=Path('/tmp/cores3_c140.log').read_text()
+          find=lambda k,s:re.search(rf'{k}=([0-9a-fA-F]+)',s).group(1)
+          assert find('QUIET_FINGERPRINT',a)==find('QUIET_FINGERPRINT',b)
+          assert find('DENSE_FINGERPRINT',a)!=find('DENSE_FINGERPRINT',b)
+          assert int(find('dense_peak',a))<=32767
+          assert int(find('dense_peak',b))>32767
+          print('PASS quiet C140 exact parity; 22-voice C140 bus has no early int16 flattening')
+          PY
+      - name: CoreS3 master limiter and signed64 mix regression
+        run: |
+          g++ -std=c++17 -O2 cores3/tests/r67_fix6_mixer_safety_host.cpp -o /tmp/r67_master
+          /tmp/r67_master
+      - name: Install CoreS3 PlatformIO and pinned M5Unified/M5GFX
+        run: |
+          pip install --disable-pip-version-check platformio 'click==8.1.8'
+          pio pkg install -e m5stack-cores3
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          r=Path('.pio/libdeps/m5stack-cores3')
+          assert 'version=0.2.28' in (r/'M5Unified/library.properties').read_text()
+          target=r/'M5GFX'
+          if not target.exists() or 'version=0.2.35' not in (target/'library.properties').read_text():
+              cand=[p.parent for p in r.glob('M5GFX@*/library.properties') if 'version=0.2.35' in p.read_text()]
+              assert len(cand)==1,cand
+              if target.exists(): shutil.rmtree(target)
+              shutil.copytree(cand[0],target)
+          assert 'version=0.2.35' in (target/'library.properties').read_text()
+          PY
+      - name: Real CoreS3 ESP32-S3 native firmware build NO FLASH
+        run: pio run -e m5stack-cores3
+      - name: Validate shared library used exactly once and archive app
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('.pio/build/m5stack-cores3')
+          fm=list(root.rglob('fm_engine.c.o'))
+          pcm=list(root.rglob('pcm_engine.c.o'))
+          assert len(fm)==1 and 'vgmM5lib' in str(fm[0]),fm
+          assert len(pcm)==1 and 'vgmM5lib' in str(pcm[0]),pcm
+          b=(root/'firmware.bin').read_bytes()
+          assert len(b)>100000 and b[0]==0xe9
+          sha=hashlib.sha256(b).hexdigest()
+          d=Path('cores3/r67_pr44_dma_headroom_artifact'); d.mkdir(parents=True,exist_ok=True)
+          (d/'firmware.bin').write_bytes(b)
+          result=dict(target='CoreS3 ESP32-S3',native_build='PASS',synth='vgmM5lib: 18 Tab5-exact files; CoreS3-only C140 preclip guard in PCM',p4_dependency='NONE',tab5_changed=False,flash='NOT PERFORMED',hardware_audio='UNTESTED',app_offset='0x10000',binary_sha256=sha,image_size=len(b),change='CoreS3 PR44 ES8388 I2S DMA 6x160 to 8x512 frames, 10s generation/underrun summaries; PR43 CPU0 allocation retained',source='dev/cores3-r67-pr44-i2s-dma-headroom-20261105',c140_sound='HARDWARE_UNVERIFIED')
+          (d/'RESULT.json').write_text(json.dumps(result,indent=2)+'\n')
+          print(result)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CoreS3-R67-PR44-DMA-HEADROOM-NOFLASH
+          path: cores3/r67_pr44_dma_headroom_artifact/
+          retention-days: 14
