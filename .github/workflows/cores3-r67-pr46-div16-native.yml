@@ -92,12 +92,12 @@ jobs:
           assert 'cores3_r67_divide_mix_fast2' not in baseline
           # Confirm PR46 source change only uses the tested signed-64 helper.
           assert current==baseline.replace(
-              '        mix_l = cores3_r67_divide_mix(mix_l, global_chip_count);\\n'
+              '        mix_l = cores3_r67_divide_mix(mix_l, global_chip_count);\n'
               '        mix_r = cores3_r67_divide_mix(mix_r, global_chip_count);',
-              '        // PR46: 2 physical chips (Dragon Saber YM2151+C140) use\\n'
-              '        // bit-exact signed /16 shift instead of runtime int64 divide.\\n'
-              '        // All other chip counts retain the R67 FIX6 implementation.\\n'
-              '        mix_l = cores3_r67_divide_mix_fast2(mix_l, global_chip_count);\\n'
+              '        // PR46: 2 physical chips (Dragon Saber YM2151+C140) use\n'
+              '        // bit-exact signed /16 shift instead of runtime int64 divide.\n'
+              '        // All other chip counts retain the R67 FIX6 implementation.\n'
+              '        mix_l = cores3_r67_divide_mix_fast2(mix_l, global_chip_count);\n'
               '        mix_r = cores3_r67_divide_mix_fast2(mix_r, global_chip_count);')
           print('PASS PR46 only signed64 /16 FM+C140 mixer, no audio/codec/I2S/UI changes')
           PY
