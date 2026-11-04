@@ -18,6 +18,24 @@ static inline int32_t cores3_r67_divide_mix(int64_t sum, int physical_chips) {
     return cores3_r67_saturate_i32(sum / ((int64_t)physical_chips * 8));
 }
 
+// PR46: for two physical VGM chips (YM2151 + C140 on Dragon
+// Saber), the established CoreS3 R6 /8 headroom divisor is exactly
+// 2 * 8 = 16. The old variable signed 64-bit division is expensive
+// on ESP32-S3. This uses unsigned magnitude and a constant shift,
+// returning the SAME C++ truncation-towards-zero quotient for every
+// int64_t value, including INT64_MIN and negative nonmultiples of 16.
+// Other physical chip counts retain the legacy division unchanged.
+static inline int32_t cores3_r67_divide_mix_fast2(int64_t sum, int physical_chips) {
+    if (physical_chips != 2) return cores3_r67_divide_mix(sum, physical_chips);
+    const bool negative = sum < 0;
+    // Avoid undefined signed negation of INT64_MIN.
+    const uint64_t magnitude = negative
+        ? static_cast<uint64_t>(-(sum + 1)) + 1u
+        : static_cast<uint64_t>(sum);
+    const int64_t quotient = static_cast<int64_t>(magnitude >> 4);
+    return cores3_r67_saturate_i32(negative ? -quotient : quotient);
+}
+
 // The old '26000 + (abs(x)-26000)/2' is NOT a limiter; for input
 // greater than 39534 it ultimately hard-clips at +/-32767.
 // Compress only ABOVE 26000 with a continuous soft ceiling that can
