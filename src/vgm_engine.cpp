@@ -1448,8 +1448,11 @@ void IRAM_ATTR processAudioBlock() {
 #if defined(IS_CORES3)
         // Preserve R6's chip-count/8 master level exactly. Divide in
         // 64-bit, then saturate before the DC blocker.
-        mix_l = cores3_r67_divide_mix(mix_l, global_chip_count);
-        mix_r = cores3_r67_divide_mix(mix_r, global_chip_count);
+        // PR46: 2 physical chips (Dragon Saber YM2151+C140) use
+        // bit-exact signed /16 shift instead of runtime int64 divide.
+        // All other chip counts retain the R67 FIX6 implementation.
+        mix_l = cores3_r67_divide_mix_fast2(mix_l, global_chip_count);
+        mix_r = cores3_r67_divide_mix_fast2(mix_r, global_chip_count);
 #else
         mix_l /= (global_chip_count * 8);
         mix_r /= (global_chip_count * 8);
