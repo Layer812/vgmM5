@@ -1135,6 +1135,13 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     // アンプの起動遅延（ミュート解除）を待つため、300ミリ秒間無音を流してアンプを完全に起こす
     vTaskDelay(pdMS_TO_TICKS(300));
 
+#if defined(IS_CORES3)
+    s_cores3_gen_max_us.store(0, std::memory_order_relaxed);
+    s_cores3_gen_over_budget.store(0, std::memory_order_relaxed);
+    s_cores3_ring_empty.store(0, std::memory_order_relaxed);
+    s_cores3_i2s_write_fail.store(0, std::memory_order_relaxed);
+    s_cores3_i2s_short_write.store(0, std::memory_order_relaxed);
+#endif
     prebuffering = true;
     isPlaying = true;
     xSemaphoreGive(xSemaphore); 
@@ -1508,6 +1515,9 @@ if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t
     wav_count++;
     
     uint32_t t_end = esp_timer_get_time();
+#if defined(IS_CORES3)
+    cores3_record_gen_us(t_end - t_start);
+#endif
     if (profile_start_time == 0) profile_start_time = t_end;
     profile_total_time += (t_end - t_start);
     profile_blocks++;
@@ -1587,6 +1597,24 @@ static bool g_es8388_detected = false;
 // Hardware codec volume defaults to 0x18 / 0x21 (24 of 33 steps); the
 // internal Speaker retains the established R6 default of 48 / 255.
 static uint8_t g_cores3_ui_volume = 48;
+// PR44: low-overhead, 10-second streaming health indicators. Updated
+// outside the 44.1kHz inner loop; never print in the synthesis hot path.
+static std::atomic<uint32_t> s_cores3_gen_max_us{0};
+static std::atomic<uint32_t> s_cores3_gen_over_budget{0};
+static std::atomic<uint32_t> s_cores3_ring_empty{0};
+static std::atomic<uint32_t> s_cores3_i2s_write_fail{0};
+static std::atomic<uint32_t> s_cores3_i2s_short_write{0};
+static constexpr uint32_t k_cores3_block_budget_us =
+    (BUFF_SIZE * 1000000u) / 44100u; // 512 / 44.1k = 11609 us
+static void cores3_record_gen_us(uint32_t elapsed_us) {
+    uint32_t previous = s_cores3_gen_max_us.load(std::memory_order_relaxed);
+    while (elapsed_us > previous &&
+           !s_cores3_gen_max_us.compare_exchange_weak(
+                previous, elapsed_us, std::memory_order_relaxed)) {}
+    if (elapsed_us > k_cores3_block_budget_us) {
+        s_cores3_gen_over_budget.fetch_add(1, std::memory_order_relaxed);
+    }
+}
 #endif
 
 // ────────────────────────────────────────────────────────────────────────
@@ -1610,7 +1638,21 @@ void audio_play_task(void *args) {
             bool queued = false;
             if (g_es8388_detected) {
                 size_t bytes_written = 0;
-                i2s_write(I2S_NUM_0, (const void *)wav_buff[rd], wav_buff_size[rd] * 4, &bytes_written, portMAX_DELAY);
+                const size_t requested = wav_buff_size[rd] * 4u;
+                const esp_err_t i2s_result = i2s_write(
+                    I2S_NUM_0, (const void *)wav_buff[rd],
+                    requested, &bytes_written, portMAX_DELAY);
+#if defined(IS_CORES3)
+                // A short write is evidence of damaged PCM delivery,
+                // not proof of DAC/sample clipping. Count, don't print
+                // or change the established buffer ownership contract.
+                if (i2s_result != ESP_OK) {
+                    s_cores3_i2s_write_fail.fetch_add(1, std::memory_order_relaxed);
+                }
+                if (bytes_written != requested) {
+                    s_cores3_i2s_short_write.fetch_add(1, std::memory_order_relaxed);
+                }
+#endif
                 queued = (bytes_written > 0);
             } else {
                 queued = M5.Speaker.playRaw((const int16_t *)wav_buff[rd], wav_buff_size[rd] * 2, actual_sample_rate, true, 1, 0, false);
@@ -1627,6 +1669,22 @@ void audio_play_task(void *args) {
                     // FIX1: i2s_write(...,portMAX_DELAY) already waits for
                     // DMA consumption. Adding 8ms after every 512 frames
                     // risks starving the ES8388 at 44.1kHz (11.61ms/frame).
+                    // Report no more than once in 10 seconds, after DMA
+                    // playback is already queued. The full block has
+                    // been submitted before any serial communication.
+                    static int64_t last_health_us = 0;
+                    const int64_t health_now_us = esp_timer_get_time();
+                    if (last_health_us == 0) last_health_us = health_now_us;
+                    if (health_now_us - last_health_us >= 10000000LL) {
+                        last_health_us = health_now_us;
+                        Serial.printf("[CoreS3 PR44][AUDIO] ring=%d/16 empty=%lu maxGenUs=%lu over11609us=%lu i2sErr=%lu shortWrite=%lu\n",
+                            (int)wav_count.load(std::memory_order_relaxed),
+                            (unsigned long)s_cores3_ring_empty.load(std::memory_order_relaxed),
+                            (unsigned long)s_cores3_gen_max_us.load(std::memory_order_relaxed),
+                            (unsigned long)s_cores3_gen_over_budget.load(std::memory_order_relaxed),
+                            (unsigned long)s_cores3_i2s_write_fail.load(std::memory_order_relaxed),
+                            (unsigned long)s_cores3_i2s_short_write.load(std::memory_order_relaxed));
+                    }
                     taskYIELD();
                 } else {
                     // M5Unified playRaw has different buffering semantics:
@@ -1650,6 +1708,9 @@ void audio_play_task(void *args) {
             // silent-output behavior below.
             if (isPlaying && !isPaused && !prebuffering &&
                 wav_count.load(std::memory_order_acquire) == 0) {
+                if (g_es8388_detected) {
+                    s_cores3_ring_empty.fetch_add(1, std::memory_order_relaxed);
+                }
                 xSemaphoreGive(xSemaphore);
                 vTaskDelay(1);
                 continue;
@@ -1689,8 +1750,12 @@ void vgm_engine_init() {
         .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count = 6,
-        .dma_buf_len = 160,
+        // PR44: 6x160 gave only 960 frames (~21.8 ms) of DMA headroom.
+        // 8x512 gives 4096 frames (~92.9 ms), same DMA dimensions
+        // requested by production Tab5's Speaker path. Only external
+        // CoreS3 ES8388 direct-I2S uses this config.
+        .dma_buf_count = 8,
+        .dma_buf_len = 512,
         .use_apll = false,
         .tx_desc_auto_clear = true,
         .fixed_mclk = 0,
