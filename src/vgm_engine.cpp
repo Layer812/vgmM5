@@ -1279,7 +1279,17 @@ void IRAM_ATTR processAudioBlock() {
             if (active_chips[c] == &fm_wrapper) prof_fm_time += t_diff;
             else if (active_chips[c] == &pcm_wrapper) prof_pcm_time += t_diff;
 #endif
-
+#if defined(IS_CORES3) && defined(VGMM5_CORES3_FM_HALF_HEADROOM)
+            // FIX5-B trial: leave the dedicated R6 YM2151 oscillator and
+            // algorithm untouched, reduce only the FM contribution by 6dB
+            // BEFORE combining with C140. FM-only experiment to separate
+            // level-related clipping from the tone-generator waveform.
+            // Other Yamaha chips, PCM/C140, MDX and Tab5 are unchanged.
+            if (chip_type == CHIP_YM2151 && active_chips[c] == &fm_wrapper) {
+                ch_l /= 2;
+                ch_r /= 2;
+            }
+#endif
             mix_l += ch_l;
             mix_r += ch_r;
         }
