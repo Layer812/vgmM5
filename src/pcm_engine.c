@@ -868,11 +868,15 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
             final_namco_r = namco_mix_r >> 2;
         } else {
 #if defined(IS_CORES3)
-            // Tab5 parity: saturate 16-bit C140 contribution BEFORE
-            // the global stage, then compensate ONLY this chip for the
-            // CoreS3 /8 headroom vs Tab5 /3. YM2151 and C352 untouched.
-            final_namco_l = cores3_r67_c140_to_core_mixer(namco_mix_l);
-            final_namco_r = cores3_r67_c140_to_core_mixer(namco_mix_r);
+            // FIX7: do NOT clamp the C140 polyphonic sum to int16
+            // before the FM+C140 final mixer. That early saturation
+            // destroys peaks from many simultaneous C140 voices, even
+            // when the final 16-bit speaker signal would be well within
+            // range. Preserve FIX2's Tab5 level ratio below the knee,
+            // and rely on FIX6's int64 sum and true soft ceiling.
+            // No change to C352, FM, C140 ROM, or note lifecycle.
+            final_namco_l = cores3_r67_c140_to_core_mixer_unclipped(namco_mix_l);
+            final_namco_r = cores3_r67_c140_to_core_mixer_unclipped(namco_mix_r);
 #else
             // Existing legacy boost for all non-CoreS3 builds.
             final_namco_l = namco_mix_l * 2;
