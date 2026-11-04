@@ -100,7 +100,7 @@ static bool cores3_install_i2s_on_cpu0(
     }
     xSemaphoreTake(done, portMAX_DELAY);
     vSemaphoreDelete(done);
-    Serial.printf("[CoreS3 R67] I2S driver install CPU%d (AudioPlay CPU0, AudioGen CPU1): install=%d pins=%d\\n",
+    Serial.printf("[CoreS3 R67] I2S driver install CPU%d (AudioPlay CPU0, AudioGen CPU1): install=%d pins=%d\n",
                   ctx.actual_core, (int)ctx.install_result, (int)ctx.pin_result);
     return ctx.actual_core == 0 &&
            ctx.install_result == ESP_OK && ctx.pin_result == ESP_OK;
