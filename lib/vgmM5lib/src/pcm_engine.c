@@ -729,11 +729,23 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
         int32_t final_namco_l = namco_mix_l * 4;
         int32_t final_namco_r = namco_mix_r * 4;
 
+#if defined(IS_CORES3)
+        // CoreS3 FIX7 regression recovery: vgmM5lib's Tab5-exact import
+        // reintroduced int16 pre-clipping of the 22-voice C140 submix.
+        // Keep all C140 voice amplitudes until the existing int64 FM+PCM
+        // sum, physical-chip /8 divider and final 16-bit soft limiter.
+        // Leave C352 exactly as before. Tab5's original C140 path is
+        // untouched (this library is only used by the CoreS3 build).
+        if (!engine->c140_enabled) {
+#endif
         if (final_namco_l > 32767) final_namco_l = 32767;
         else if (final_namco_l < -32768) final_namco_l = -32768;
 
         if (final_namco_r > 32767) final_namco_r = 32767;
         else if (final_namco_r < -32768) final_namco_r = -32768;
+#if defined(IS_CORES3)
+        }
+#endif
 
         // R65: C140 8-bit linear samples are expanded only to 12-bit
         // (see << 4 above). The old unconditional >>1 left this chip
