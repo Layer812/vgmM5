@@ -1,0 +1,35 @@
+name: Export Tab5 R67 shared sound cores for VGM host waveform parity
+on:
+  push:
+    branches: [dev/cores3-r67-tab5-all-sound-cores-20261104]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify selected cores exact and compile with no P4 special memory
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          names='fm_engine.c fm_engine.h pcm_engine.c pcm_engine.h psg_engine.c psg_engine.h ssg_engine.c ssg_engine.h scc_engine.c scc_engine.h ym2413_core.c ym2413_core.h ym2413_eg.c ym2413_eg.h ym2413_native.c ym2413_native.h ym2413_tables.h r31_vgm_bridge.c r31_vgm_bridge.h'.split()
+          for n in names:
+            assert Path('lib/vgmM5lib/src',n).read_bytes()==Path('tab5/firmware/src',n).read_bytes(),n
+          print('PASS',len(names),'source-identical sound files')
+          PY
+      - name: Bundle exact sources from both paths and mix hosts
+        run: |
+          mkdir -p host_wave_sources
+          cp -a lib/vgmM5lib/src host_wave_sources/vgmM5lib
+          cp -a tab5/firmware/src host_wave_sources/tab5_src
+          cp src/vgm_engine.cpp host_wave_sources/CoreS3_vgm_engine.cpp
+          cp tab5/firmware/src/vgm_engine.cpp host_wave_sources/Tab5_vgm_engine.cpp
+          cp src/vgm_engine.h host_wave_sources/CoreS3_vgm_engine.h
+          cp tab5/firmware/src/vgm_engine.h host_wave_sources/Tab5_vgm_engine.h
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CoreS3-Tab5-WAVE-HOST-SOURCES-NO-VGM
+          path: host_wave_sources/
+          retention-days: 14
