@@ -1380,7 +1380,16 @@ void audio_generate_task(void *args) {
                 processAudioBlock();
                 if (chip_type == CHIP_YM2151 || chip_type == CHIP_YM2608) {
                     consecutive_blocks++;
-                    if (consecutive_blocks >= 4) {
+                    // FIX3 (CoreS3 C140+YM2151): the legacy 1-tick sleep
+                    // every four 512-frame blocks can starve a heavy C140
+                    // track and force the I2S task to insert silence.
+                    // Keep a periodic blocking yield for idle/WDT safety.
+#if defined(IS_CORES3)
+                    const uint32_t sleep_interval = g_pcm_engine.c140_enabled ? 16u : 4u;
+#else
+                    const uint32_t sleep_interval = 4u;
+#endif
+                    if (consecutive_blocks >= sleep_interval) {
                         vTaskDelay(1);
                         consecutive_blocks = 0;
                     } else {
