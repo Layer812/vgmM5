@@ -1408,6 +1408,10 @@ void audio_generate_task(void *args) {
 
 // 前方宣言
 static bool g_es8388_detected = false;
+#if defined(IS_CORES3)
+// Same UI-volume memory as previously used by CoreS3 R67.
+static uint8_t g_cores3_ui_volume = 48;
+#endif
 
 // ────────────────────────────────────────────────────────────────────────
 // Core 0：I2S（DMA）転送 ＆ 減衰検知時のセマフォ発行
@@ -1612,6 +1616,11 @@ skip_es8388_init:
     M5.Speaker.begin();
 #endif
 
+#if defined(IS_CORES3)
+    // ES8388 boots at register 0x18 / 0x21; internal speaker at 48/255.
+    g_cores3_ui_volume = g_es8388_detected ? 185u : 48u;
+#endif
+
     // ボード固有のデフォルトボリューム設定
 #if defined(IS_CARDPUTER)
     M5.Speaker.setVolume(168);
@@ -1634,7 +1643,16 @@ bool vgm_engine_is_playing(void) {
     return isPlaying;
 }
 
+#if defined(IS_CORES3)
+uint8_t vgm_engine_get_volume(void) {
+    return g_cores3_ui_volume;
+}
+#endif
+
 void vgm_engine_set_volume(uint8_t vol) {
+#if defined(IS_CORES3)
+    g_cores3_ui_volume = vol;
+#endif
     if (g_es8388_detected) {
         // M5Stackのボリューム(0〜255)を ES8388のハードウェアボリューム(0〜0x21)に変換
         uint8_t reg = 0;
