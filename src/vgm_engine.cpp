@@ -1570,28 +1570,21 @@ void audio_generate_task(void *args) {
     while (true) {
         xSemaphoreTake(xSemaphore, portMAX_DELAY);
 
+#if !defined(IS_CORES3)
         uint32_t consecutive_blocks = 0;
+#endif
 
         while (isPlaying) {
             if (wav_count < (WAV_BUFF_COUNT - 4)) {
                 processAudioBlock();
 #if defined(IS_CORES3)
-                // R67: when the output queue is low, every millisecond of
-                // producer sleep worsens C140+YM2151 underruns. Restore R6's
-                // cooperative 1-tick rest only with at least 8 blocks
-                // already buffered. Preserve all synthesized PCM samples.
-                const int pending = wav_count.load(std::memory_order_acquire);
-                if (chip_type == CHIP_YM2151 || chip_type == CHIP_YM2608) {
-                    ++consecutive_blocks;
-                    if (consecutive_blocks >= 4 && pending >= (WAV_BUFF_COUNT / 2)) {
-                        vTaskDelay(1);
-                        consecutive_blocks = 0;
-                    } else {
-                        taskYIELD();
-                    }
-                } else {
-                    taskYIELD();
-                }
+                // PR52: NO deliberate 1-tick stall after four PCM blocks.
+                // A mandatory tick sleep repeatedly removes producer
+                // headroom during YM2151+C140 playback. The full synth
+                // loop naturally blocks on xSemaphore when ring>=12;
+                // give equal/higher-priority tasks a scheduling point
+                // without sleeping or changing any PCM samples.
+                taskYIELD();
 #else
                 if (chip_type == CHIP_YM2151 || chip_type == CHIP_YM2608) {
                     consecutive_blocks++;
