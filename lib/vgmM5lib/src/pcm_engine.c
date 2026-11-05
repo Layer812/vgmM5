@@ -621,6 +621,12 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
         int32_t namco_mix_l = 0;
         int32_t namco_mix_r = 0;
         uint8_t max_ch = engine->c352_enabled ? 32 : 24;
+#if defined(IS_CORES3)
+        // PR51: fixed 16-channel C140 experiment; NO adaptive budget,
+        // priority selection, deadline polling or timing changes.
+        // Ignore C140 hardware channels 16..23 outright. C352 keeps 32.
+        if (engine->c140_enabled) max_ch = 16;
+#endif
         
         for (int ch = 0; ch < max_ch; ch++) {
             NamcoPCMChannel *v = &engine->namco.ch[ch];
