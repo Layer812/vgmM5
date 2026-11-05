@@ -7,6 +7,8 @@
 #if defined(IS_CORES3)
 // vgmM5lib provides byte-identical Tab5 R67 synthesis on ESP32-S3.
 #include <vgmM5lib.h>
+#include "../cores3/r67_pr58_c140_rom_stage.hpp"
+#include <esp_heap_caps.h>
 #endif
 #if defined(IS_CORES3)
 #include "../cores3/r67_fix6_mixer_safety.hpp"
@@ -1124,6 +1126,26 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
 
 
     
+#if defined(IS_CORES3)
+    // PR58: reduce external PSRAM/Flash-MMAP C140 sample ROM traffic.
+    // Run once after the 0x67 ROM pre-scan, before AudioGenTask wakes.
+    // If internal RAM is tight, retain all original external ROM pointers.
+    // No C140 synthesis, 32-byte mini-cache, VGM parser or I2S change.
+    if (g_pcm_engine.c140_enabled && !g_pcm_engine.c352_enabled) {
+        const auto staged = cores3_c140_stage_small_rom(
+            &g_pcm_engine, 64u * 1024u, 96u * 1024u,
+            []() -> size_t {
+                return heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            },
+            [](size_t bytes) -> void * {
+                return heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            });
+        Serial.printf("[CoreS3 PR58] C140 internal ROM: %lu blocks, %lu bytes, %lu alloc failures\\n",
+                      (unsigned long)staged.blocks, (unsigned long)staged.bytes,
+                      (unsigned long)staged.alloc_failures);
+    }
+#endif
+
     // 曲の開始時にDCブロッカーの状態を完全にクリアする
     dc_state_l = 0; dc_state_r = 0; dc_prev_l = 0; dc_prev_r = 0;
     eq_lpf_l = 0; eq_lpf_r = 0; eq_bass_l = 0; eq_bass_r = 0;
