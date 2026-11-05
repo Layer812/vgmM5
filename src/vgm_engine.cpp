@@ -1950,7 +1950,7 @@ void vgm_engine_set_volume(uint8_t vol) {
         if (ok) {
             g_cores3_ui_volume = vol;
         } else {
-            Serial.printf("[CoreS3 PR56] ES8388 volume I2C FAILED: addr=0x%02x vol=%u hw=%u\\n",
+            Serial.printf("[CoreS3 PR56] ES8388 volume I2C FAILED: addr=0x%02x vol=%u hw=%u\n",
                           addr, (unsigned)vol, (unsigned)hw);
         }
 #else
