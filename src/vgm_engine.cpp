@@ -10,6 +10,7 @@
 #endif
 #if defined(IS_CORES3)
 #include "../cores3/r67_fix6_mixer_safety.hpp"
+#include "../cores3/r67_pr54_dc32_exact.hpp"
 #endif
 #if defined(IS_CORES3)
 #include "../cores3/cores3_r7_audio_helpers.hpp"
@@ -1463,8 +1464,8 @@ void IRAM_ATTR processAudioBlock() {
         
 #if defined(IS_CORES3)
         // Also widen the subtraction BEFORE multiplying by 16384.
-        dc_state_l = ((int64_t)in_l - (int64_t)dc_prev_l) * 16384 + (dc_state_l * 1019) / 1024;
-        dc_state_r = ((int64_t)in_r - (int64_t)dc_prev_r) * 16384 + (dc_state_r * 1019) / 1024;
+        dc_state_l = ((int64_t)in_l - (int64_t)dc_prev_l) * 16384 + cores3_pr54_dc_decay(dc_state_l);
+        dc_state_r = ((int64_t)in_r - (int64_t)dc_prev_r) * 16384 + cores3_pr54_dc_decay(dc_state_r);
 #else
         dc_state_l = (int64_t)(in_l - dc_prev_l) * 16384 + (dc_state_l * 1019) / 1024;
         dc_state_r = (int64_t)(in_r - dc_prev_r) * 16384 + (dc_state_r * 1019) / 1024;
