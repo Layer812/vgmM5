@@ -98,26 +98,26 @@ jobs:
           assert current==baseline, 'PR53 must not touch YM2151, C140, VGM, PCM queue, DMA, I2S or chip clocks'
           old_cfg=subprocess.check_output(['git','show',base+':platformio.ini'],text=True)
           now_cfg=Path('platformio.ini').read_text()
-          old_flags='build_flags =\\n    -D IS_CORES3=1\\n    -D VGMM5_CORES3_R7_QUIETPCM=1'
-          new_flags=('build_flags =\\n    -D IS_CORES3=1\\n'
-                     '    ; PR53: give CPU1 exclusively to AudioGenTask (priority 5).\\n'
-                     '    ; Arduino setup/loop and async Arduino event dispatch move to\\n'
-                     '    ; CPU0 with OS, UI and AudioPlayTask (priority 4). Keep the\\n'
-                     '    ; codec I2S driver/IRQ installation on CPU0.\\n'
-                     '    -D ARDUINO_RUNNING_CORE=0\\n'
-                     '    -D ARDUINO_EVENT_RUNNING_CORE=0\\n'
+          old_flags='build_flags =\n    -D IS_CORES3=1\n    -D VGMM5_CORES3_R7_QUIETPCM=1'
+          new_flags=('build_flags =\n    -D IS_CORES3=1\n'
+                     '    ; PR53: give CPU1 exclusively to AudioGenTask (priority 5).\n'
+                     '    ; Arduino setup/loop and async Arduino event dispatch move to\n'
+                     '    ; CPU0 with OS, UI and AudioPlayTask (priority 4). Keep the\n'
+                     '    ; codec I2S driver/IRQ installation on CPU0.\n'
+                     '    -D ARDUINO_RUNNING_CORE=0\n'
+                     '    -D ARDUINO_EVENT_RUNNING_CORE=0\n'
                      '    -D VGMM5_CORES3_R7_QUIETPCM=1')
           assert old_cfg.count(old_flags)==1
           assert now_cfg==old_cfg.replace(old_flags,new_flags)
           old_ui=subprocess.check_output(['git','show',base+':src/voice.cpp'],text=True)
           new_ui=Path('src/voice.cpp').read_text()
           old_boot='    Serial.println("--- Boot Start ---"); // ★これがシリアルモニタに出るか確認！'
-          new_boot=('#if defined(IS_CORES3)\\n'
-                    '    // One-time proof of actual Arduino setup/loop CPU, no audio timers.\\n'
-                    '    Serial.printf("[CoreS3 PR53] Arduino/UI CPU=%d; AudioGen CPU1; I2S CPU0\\\\n",\\n'
-                    '                  (int)xPortGetCoreID());\\n'
-                    '#else\\n'
-                    '    Serial.println("--- Boot Start ---"); // ★これがシリアルモニタに出るか確認！\\n'
+          new_boot=('#if defined(IS_CORES3)\n'
+                    '    // One-time proof of actual Arduino setup/loop CPU, no audio timers.\n'
+                    '    Serial.printf("[CoreS3 PR53] Arduino/UI CPU=%d; AudioGen CPU1; I2S CPU0\\n",\n'
+                    '                  (int)xPortGetCoreID());\n'
+                    '#else\n'
+                    '    Serial.println("--- Boot Start ---"); // ★これがシリアルモニタに出るか確認！\n'
                     '#endif')
           assert old_ui.count(old_boot)==1
           assert new_ui==old_ui.replace(old_boot,new_boot), 'only one-time CPU identification changes in voice.cpp'
