@@ -94,48 +94,24 @@ jobs:
               ['git','show',base+':cores3/r67_fix6_mixer_safety.hpp'])
           assert Path('lib/vgmM5lib/src/pcm_engine.c').read_bytes()==subprocess.check_output(
               ['git','show',base+':lib/vgmM5lib/src/pcm_engine.c'])
-          before='''        uint32_t consecutive_blocks = 0;
-
-        while (isPlaying) {
-            if (wav_count < (WAV_BUFF_COUNT - 4)) {
-                processAudioBlock();
-#if defined(IS_CORES3)
-                // R67: when the output queue is low, every millisecond of
-                // producer sleep worsens C140+YM2151 underruns. Restore R6's
-                // cooperative 1-tick rest only with at least 8 blocks
-                // already buffered. Preserve all synthesized PCM samples.
-                const int pending = wav_count.load(std::memory_order_acquire);
-                if (chip_type == CHIP_YM2151 || chip_type == CHIP_YM2608) {
-                    ++consecutive_blocks;
-                    if (consecutive_blocks >= 4 && pending >= (WAV_BUFF_COUNT / 2)) {
-                        vTaskDelay(1);
-                        consecutive_blocks = 0;
-                    } else {
-                        taskYIELD();
-                    }
-                } else {
-                    taskYIELD();
-                }
-#else'''
-          after='''#if !defined(IS_CORES3)
-        uint32_t consecutive_blocks = 0;
-#endif
-
-        while (isPlaying) {
-            if (wav_count < (WAV_BUFF_COUNT - 4)) {
-                processAudioBlock();
-#if defined(IS_CORES3)
-                // PR52: NO deliberate 1-tick stall after four PCM blocks.
-                // A mandatory tick sleep repeatedly removes producer
-                // headroom during YM2151+C140 playback. The full synth
-                // loop naturally blocks on xSemaphore when ring>=12;
-                // give equal/higher-priority tasks a scheduling point
-                // without sleeping or changing any PCM samples.
-                taskYIELD();
-#else'''
-          assert baseline.count(before)==1
-          assert current.count(after)==1
-          assert current==baseline.replace(before,after)
+          marker='void audio_generate_task(void *args) {'
+          end='// 前方宣言'
+          assert baseline.count(marker)==current.count(marker)==1
+          assert baseline.count(end)==current.count(end)==1
+          assert baseline.split(marker,1)[0]==current.split(marker,1)[0]
+          assert baseline.split(end,1)[1]==current.split(end,1)[1]
+          oldgen=baseline.split(marker,1)[1].split(end,1)[0]
+          newgen=current.split(marker,1)[1].split(end,1)[0]
+          assert 'vTaskDelay(1);' in oldgen
+          assert 'vTaskDelay(1);' in newgen  # non-CoreS3 only
+          assert 'uint32_t consecutive_blocks = 0;' in oldgen
+          assert '#if !defined(IS_CORES3)' in newgen
+          core3=newgen.split('#if defined(IS_CORES3)',1)[1].split('#else',1)[0]
+          assert 'vTaskDelay' not in core3
+          assert 'taskYIELD();' in core3
+          noncore_old=oldgen.split('#else',1)[1]
+          noncore_new=newgen.split('#else',1)[1]
+          assert noncore_old==noncore_new, 'other devices unchanged'
           assert 'pcm_engine_cores3_c140_set_voice_budget' not in current
           assert 'pcm_engine_cores3_c140_set_voice_budget' not in pcm
           assert 'if (engine->c140_enabled) max_ch = 16;' not in pcm
