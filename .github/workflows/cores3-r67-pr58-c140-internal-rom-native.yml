@@ -1,0 +1,148 @@
+name: CoreS3 PR58 bounded C140 ROM internal SRAM staging (NO FLASH)
+on:
+  push:
+    branches: [dev/cores3-r67-pr58-c140-internal-rom-staging-20261106]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cores3:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Protect PR56 baseline and validate exact CoreS3-only staging
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          base='origin/dev/cores3-r67-pr56-es8388-volume-repair-20261105'
+          changed=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          expected={'src/vgm_engine.cpp','cores3/r67_pr58_c140_rom_stage.hpp',
+                    'cores3/tests/r67_pr58_c140_rom_stage_host.cpp',
+                    '.github/workflows/cores3-r67-pr58-c140-internal-rom-native.yml'}
+          assert changed==expected,(changed-expected,expected-changed)
+          original=subprocess.check_output(['git','show',base+':src/vgm_engine.cpp'],text=True)
+          now=Path('src/vgm_engine.cpp').read_text()
+          incl='#include <vgmM5lib.h>'+chr(10)+'#endif'
+          add='#include <vgmM5lib.h>'+chr(10)+'#include "../cores3/r67_pr58_c140_rom_stage.hpp"'+chr(10)+'#include <esp_heap_caps.h>'+chr(10)+'#endif'
+          assert original.count(incl)==1
+          expected_source=original.replace(incl,add)
+          marker='    // 曲の開始時にDCブロッカーの状態を完全にクリア'
+          assert expected_source.count(marker)==1
+          stage=now.split('#if defined(IS_CORES3)'+chr(10)+'    // PR58: reduce external PSRAM/Flash-MMAP C140 sample ROM traffic.',1)[1].split('#endif',1)[0]
+          insert='#if defined(IS_CORES3)'+chr(10)+'    // PR58: reduce external PSRAM/Flash-MMAP C140 sample ROM traffic.'+stage+'#endif'+chr(10)+chr(10)
+          assert 'cores3_c140_stage_small_rom(' in insert
+          assert '64u * 1024u, 96u * 1024u' in insert
+          assert 'MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT' in insert
+          expected_source=expected_source.replace(marker,insert+marker)
+          assert now==expected_source, 'Unexpected change to audio pipeline or command parser'
+          for protected in ('src/voice.cpp','src/vgm_engine.h','platformio.ini',
+                            'cores3/r67_ui_controls.hpp','cores3/r67_fix6_mixer_safety.hpp',
+                            'lib/vgmM5lib/src/pcm_engine.c',
+                            'lib/vgmM5lib/src/pcm_engine.h',
+                            'lib/vgmM5lib/src/fm_engine.c',
+                            'tab5/firmware/src/pcm_engine.c','tab5/firmware/src/fm_engine.c'):
+              assert Path(protected).read_bytes()==subprocess.check_output(['git','show',base+':'+protected]),protected
+          assert 'g_cores3_es8388_addr = addr;' in now
+          assert 'cores3_r67_es8388_volume_register(vol)' in now
+          print('PASS exact PR56 parity: C140/ES8388/UI/I2S/mixer/Tab5, startup-only staging')
+          PY
+      - name: C140 24-voice exact PCM/state parity with partial staging and OOM fallback
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/vgm_shims
+          printf '#pragma once\n#define IRAM_ATTR\n#define DRAM_ATTR\n' > /tmp/vgm_shims/esp_attr.h
+          printf '#pragma once\n' > /tmp/vgm_shims/esp_partition.h
+          printf '#pragma once\n' > /tmp/vgm_shims/esp_heap_caps.h
+          gcc -std=gnu11 -O3 -DIS_CORES3=1 -I/tmp/vgm_shims -Ilib/vgmM5lib/src -c lib/vgmM5lib/src/pcm_engine.c -o /tmp/pcm_stage.o
+          g++ -std=c++17 -O3 -Wall -Wextra -Werror -DIS_CORES3=1 -I/tmp/vgm_shims -Ilib/vgmM5lib/src cores3/tests/r67_pr58_c140_rom_stage_host.cpp /tmp/pcm_stage.o -lm -o /tmp/pr58_stage
+          /tmp/pr58_stage
+      - name: Preserve existing real C140/C352 32-byte parity
+        run: |
+          set -euo pipefail
+          for name in r67_pr47_c140_boundary_host r67_pr47_c140_c352_parity_host; do
+            gcc -std=gnu11 -O3 -DIS_CORES3=1 -I/tmp/vgm_shims -Ilib/vgmM5lib/src cores3/tests/${name}.c lib/vgmM5lib/src/pcm_engine.c -lm -o /tmp/${name}
+            /tmp/${name}
+          done
+      - name: Preserve PR56 ES8388 volume and thumbnail hitboxes
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all cores3/tests/r67_pr56_es8388_volume_host.cpp -o /tmp/pr56_volume
+          /tmp/pr56_volume
+      - name: Preserve exact 100-second 44.1kHz VGM command timing
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all cores3/tests/r67_c140_vgm_44100_timing_host.cpp -o /tmp/vgm_timing
+          /tmp/vgm_timing
+      - name: Install pinned CoreS3 platform and M5Unified/M5GFX
+        run: |
+          pip install --disable-pip-version-check platformio 'click==8.1.8'
+          pio pkg install -e m5stack-cores3
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          r=Path('.pio/libdeps/m5stack-cores3')
+          assert 'version=0.2.28' in (r/'M5Unified/library.properties').read_text()
+          target=r/'M5GFX'
+          if not target.exists() or 'version=0.2.35' not in (target/'library.properties').read_text():
+            cand=[p.parent for p in r.glob('M5GFX@*/library.properties') if 'version=0.2.35' in p.read_text()]
+            assert len(cand)==1,cand
+            if target.exists(): shutil.rmtree(target)
+            shutil.copytree(cand[0],target)
+          assert 'version=0.2.35' in (target/'library.properties').read_text()
+          PY
+      - name: Native ESP32-S3 firmware build — NO FLASH
+        run: pio run -e m5stack-cores3
+      - name: Check native artifact and genuine vgmM5lib PCM unit
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          r=Path('.pio/build/m5stack-cores3')
+          a=list(r.rglob('pcm_engine.c.o'))
+          assert len(a)==1 and 'vgmM5lib' in str(a[0]),a
+          b=(r/'firmware.bin').read_bytes()
+          assert len(b)>100000 and b[0]==0xe9
+          print('PASS native CoreS3; firmware bytes=',len(b))
+          PY
+      - name: Package SHA256-verified APP-ONLY artifact (no flash in CI)
+        run: |
+          python3 - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          p=Path('cores3/r67_pr58_c140_rom_artifact')
+          p.mkdir(parents=True,exist_ok=True)
+          firmware=Path('.pio/build/m5stack-cores3/firmware.bin').read_bytes()
+          digest=hashlib.sha256(firmware).hexdigest()
+          (p/'firmware.bin').write_bytes(firmware)
+          manifest={'build':'ESP32-S3 CoreS3 PR58','baseline':'PR56 (no PR55 cache, no PR57 IRAM)',
+                    'change':'bounded song-start C140 ROM staging into internal SRAM only',
+                    'c140_voices':24,'rom_budget_bytes':65536,'internal_free_reserve_bytes':98304,
+                    'native_build':'PASS','real_hardware':'UNTESTED','flash':'NOT PERFORMED',
+                    'app_only_offset':'0x10000','sha256':digest,'size_bytes':len(firmware)}
+          (p/'RESULT.json').write_text(json.dumps(manifest,indent=2)+'\n')
+          cmd='''@echo off
+          setlocal
+          if "%~1"=="" (
+              echo Usage: %~nx0 COM9
+              exit /b 2
+          )
+          python -c "import hashlib,json,sys; from pathlib import Path; f=Path(sys.argv[1]); expected=json.loads(Path(sys.argv[2]).read_text())['sha256']; actual=hashlib.sha256(f.read_bytes()).hexdigest(); print('SHA256:',actual); sys.exit(0 if actual==expected else 1)" "%~dp0firmware.bin" "%~dp0RESULT.json"
+          if errorlevel 1 (
+              echo ERROR: SHA256 mismatch. NOTHING FLASHED.
+              exit /b 1
+          )
+          python -m esptool --chip esp32s3 -p "%~1" -b 460800 --before default_reset --after hard_reset write_flash 0x10000 "%~dp0firmware.bin"
+          if errorlevel 1 exit /b 1
+          echo PASS: CoreS3 app-only programmed.
+          '''
+          (p/'RUN_THIS_CORES3_PR58_APP_ONLY.cmd').write_text(cmd)
+          print('PASS packaged SHA256:',digest)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CORES3-PR58-C140-INTERNAL-ROM-APP-ONLY-NOFLASH
+          path: cores3/r67_pr58_c140_rom_artifact/
+          retention-days: 14
