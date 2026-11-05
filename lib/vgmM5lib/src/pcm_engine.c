@@ -31,7 +31,13 @@ void pcm_engine_cores3_c140_set_voice_budget(PCMSoundEngine *engine, unsigned li
         s_cores3_c140_audible_mask = 0x00FFFFFFu;
         return;
     }
-    if (limit == 0u) limit = 1u;
+    // Queue-exhausted emergency mode: allow 0 audible C140 voices.
+    // Each hidden C140 channel still updates its phase/end/loop state.
+    // The YM2151 stream and the 44.1kHz VGM clock remain untouched.
+    if (limit == 0u) {
+        s_cores3_c140_audible_mask = 0u;
+        return;
+    }
     uint32_t selected = 0u;
     const uint32_t previous = s_cores3_c140_audible_mask;
     for (unsigned count = 0; count < limit; ++count) {
