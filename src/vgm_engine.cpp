@@ -10,6 +10,7 @@
 #endif
 #if defined(IS_CORES3)
 #include "../cores3/r67_fix6_mixer_safety.hpp"
+#include "../cores3/r67_ui_controls.hpp"
 #endif
 #if defined(IS_CORES3)
 #include "../cores3/cores3_r7_audio_helpers.hpp"
@@ -1612,6 +1613,9 @@ static bool g_es8388_detected = false;
 // Hardware codec volume defaults to 0x18 / 0x21 (24 of 33 steps); the
 // internal Speaker retains the established R6 default of 48 / 255.
 static uint8_t g_cores3_ui_volume = 48;
+// ES8388 probe can legitimately use 0x11 in a nonstandard setup.
+// Never write the absent codec on every volume tap (I2C timeout).
+static uint8_t g_cores3_es8388_addr = 0x10;
 #endif
 
 #if defined(IS_CORES3)
@@ -1800,6 +1804,7 @@ void vgm_engine_init() {
             addr = 0x11;
         }
     }
+    g_cores3_es8388_addr = addr;
     
     {
         auto write_reg = [&](uint8_t reg, uint8_t val) { M5.In_I2C.writeRegister8(addr, reg, val, 400000); };
@@ -1923,18 +1928,39 @@ uint8_t vgm_engine_get_volume(void) {
 #endif
 
 void vgm_engine_set_volume(uint8_t vol) {
-#if defined(IS_CORES3)
-    g_cores3_ui_volume = vol;
-#endif
     if (g_es8388_detected) {
-        // M5Stackのボリューム(0〜255)を ES8388のハードウェアボリューム(0〜0x21)に変換
+#if defined(IS_CORES3)
+        // PR56: Module Audio ES8388 has ONE active I2C address (normally
+        // 0x10). Previous code wrote to both 0x10 and 0x11, including
+        // an absent device, without checking failures. Each touch could
+        // introduce needless I2C timeouts on the Arduino/UI CPU.
+        const uint8_t hw = cores3_r67_es8388_volume_register(vol);
+        const uint8_t addr = g_cores3_es8388_addr;
+        bool ok = true;
+        // DAC analog output level controls. A small +/-10 UI step was
+        // only ~1 codec count; PR56 uses +/-30 for audible feedback.
+        // Set the actual active codec only; leave I2S PCM untouched.
+        ok &= M5.In_I2C.writeRegister8(addr, 0x2E, hw, 400000);
+        ok &= M5.In_I2C.writeRegister8(addr, 0x2F, hw, 400000);
+        ok &= M5.In_I2C.writeRegister8(addr, 0x30, hw, 400000);
+        ok &= M5.In_I2C.writeRegister8(addr, 0x31, hw, 400000);
+        // 0x19 bit2 is ES8388 DAC mute. Analog volume zero alone
+        // need not produce complete silence on every output circuit.
+        ok &= M5.In_I2C.writeRegister8(addr, 0x19, vol == 0u ? 0x04 : 0x00, 400000);
+        if (ok) {
+            g_cores3_ui_volume = vol;
+        } else {
+            Serial.printf("[CoreS3 PR56] ES8388 volume I2C FAILED: addr=0x%02x vol=%u hw=%u\n",
+                          addr, (unsigned)vol, (unsigned)hw);
+        }
+#else
+        // Keep legacy behavior on every non-CoreS3 platform.
         uint8_t reg = 0;
         if (vol > 0) {
-            reg = (vol * 33) / 255; // 0x21(最大) = 33
+            reg = (vol * 33) / 255;
             if (reg > 0x21) reg = 0x21;
-            if (reg == 0 && vol > 0) reg = 1; // 最小でもミュートにはしない
+            if (reg == 0 && vol > 0) reg = 1;
         }
-        
         M5.In_I2C.writeRegister8(0x10, 0x2E, reg, 400000);
         M5.In_I2C.writeRegister8(0x10, 0x2F, reg, 400000);
         M5.In_I2C.writeRegister8(0x10, 0x30, reg, 400000);
@@ -1943,11 +1969,11 @@ void vgm_engine_set_volume(uint8_t vol) {
         M5.In_I2C.writeRegister8(0x11, 0x2F, reg, 400000);
         M5.In_I2C.writeRegister8(0x11, 0x30, reg, 400000);
         M5.In_I2C.writeRegister8(0x11, 0x31, reg, 400000);
-        
-        // ★重要：外部モジュール接続時は M5.Speaker.setVolume(vol) を「絶対に呼ばない」
-        // （呼ぶとM5Unifiedが内蔵スピーカーの電源を勝手に再投入してしまうため）
+#endif
     } else {
-        // モジュールが無い場合のみ内蔵スピーカーの音量を変更する
         M5.Speaker.setVolume(vol);
+#if defined(IS_CORES3)
+        g_cores3_ui_volume = vol;
+#endif
     }
 }
