@@ -44,6 +44,9 @@ extern "C" {
 #include <esp_spi_flash.h>
 #include "fm_engine.h"
 #include "pcm_engine.h"
+#if defined(IS_CORES3)
+void pcm_engine_cores3_c140_set_voice_budget(PCMSoundEngine *engine, unsigned limit);
+#endif
 #include "psg_engine.h"
 PSGSoundEngine g_psg_engine;
 PSGSoundEngine g_psg_engine2;
@@ -132,6 +135,13 @@ static std::atomic<uint32_t> s_cores3_i2s_write_fail{0};
 static std::atomic<uint32_t> s_cores3_i2s_short_write{0};
 static TaskHandle_t s_cores3_audio_health_handle = nullptr;
 static constexpr uint32_t k_cores3_report_blocks = 861u; // ~10s at 44100/512
+// PR49: emergency adaptive C140 voice budget. All VGM events and each
+// channel's playback cursor continue even when expensive sample output
+// is omitted. No wall clock in the generator or DMA tasks.
+static unsigned s_cores3_c140_budget = 24u;
+static unsigned s_cores3_c140_recovery = 0u;
+static std::atomic<uint32_t> s_cores3_c140_reduced_blocks{0};
+static std::atomic<uint32_t> s_cores3_c140_current_budget{24u};
 #endif
 
 
@@ -1154,6 +1164,11 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     s_cores3_ring_empty.store(0, std::memory_order_relaxed);
     s_cores3_i2s_write_fail.store(0, std::memory_order_relaxed);
     s_cores3_i2s_short_write.store(0, std::memory_order_relaxed);
+    s_cores3_c140_reduced_blocks.store(0, std::memory_order_relaxed);
+    s_cores3_c140_current_budget.store(24u, std::memory_order_relaxed);
+    s_cores3_c140_budget = 24u;
+    s_cores3_c140_recovery = 0u;
+    pcm_engine_cores3_c140_set_voice_budget(&g_pcm_engine, 24u);
 #endif
     prebuffering = true;
     isPlaying = true;
@@ -1377,6 +1392,45 @@ void IRAM_ATTR processAudioBlock() {
     uint32_t t_start = esp_timer_get_time();
 #endif
     
+#if defined(IS_CORES3)
+    // PR49: use queue depth as the deadline proxy, NOT a time getter.
+    // Choose once per 512-frame block. The goal is to trade a few
+    // quiet C140 voices for uninterrupted FM and remaining C140 music.
+    // Never degrade during startup prebuffering or for non-C140 tracks.
+    if (g_pcm_engine.c140_enabled && !prebuffering) {
+        const int queued = wav_count.load(std::memory_order_acquire);
+        unsigned desired = 24u;
+        if (queued <= 2) desired = 12u;
+        else if (queued <= 5) desired = 16u;
+        else if (queued <= 8) desired = 20u;
+        if (desired < s_cores3_c140_budget) {
+            s_cores3_c140_budget = desired; // respond immediately
+            s_cores3_c140_recovery = 0u;
+        } else if (desired > s_cores3_c140_budget && queued >= 10) {
+            // Recover only after sustained buffer headroom; then
+            // restore gradually (four channels every four blocks).
+            if (++s_cores3_c140_recovery >= 4u) {
+                s_cores3_c140_budget += 4u;
+                if (s_cores3_c140_budget > desired)
+                    s_cores3_c140_budget = desired;
+                s_cores3_c140_recovery = 0u;
+            }
+        } else {
+            s_cores3_c140_recovery = 0u;
+        }
+        pcm_engine_cores3_c140_set_voice_budget(&g_pcm_engine,
+                                                  s_cores3_c140_budget);
+        if (s_cores3_c140_budget < 24u) {
+            s_cores3_c140_reduced_blocks.fetch_add(1, std::memory_order_relaxed);
+        }
+    } else {
+        s_cores3_c140_budget = 24u;
+        s_cores3_c140_recovery = 0u;
+        pcm_engine_cores3_c140_set_voice_budget(&g_pcm_engine, 24u);
+    }
+    s_cores3_c140_current_budget.store(s_cores3_c140_budget,
+                                        std::memory_order_relaxed);
+#endif
     int16_t *out_buf = wav_buff[wd];
 
 
@@ -1628,13 +1682,15 @@ static void cores3_audio_health_task(void *) {
     while (true) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         Serial.printf(
-            "[CoreS3 PR45][AUDIO] genBlocks=%lu playBlocks=%lu ring=%d/16 empty=%lu i2sErr=%lu shortWrite=%lu\n",
+            "[CoreS3 PR49][AUDIO] genBlocks=%lu playBlocks=%lu ring=%d/16 empty=%lu i2sErr=%lu shortWrite=%lu c140Limit=%lu reducedBlocks=%lu\n",
             (unsigned long)s_cores3_gen_blocks.load(std::memory_order_relaxed),
             (unsigned long)s_cores3_play_blocks.load(std::memory_order_relaxed),
             (int)wav_count.load(std::memory_order_relaxed),
             (unsigned long)s_cores3_ring_empty.load(std::memory_order_relaxed),
             (unsigned long)s_cores3_i2s_write_fail.load(std::memory_order_relaxed),
-            (unsigned long)s_cores3_i2s_short_write.load(std::memory_order_relaxed));
+            (unsigned long)s_cores3_i2s_short_write.load(std::memory_order_relaxed),
+            (unsigned long)s_cores3_c140_current_budget.load(std::memory_order_relaxed),
+            (unsigned long)s_cores3_c140_reduced_blocks.load(std::memory_order_relaxed));
     }
 }
 #endif
