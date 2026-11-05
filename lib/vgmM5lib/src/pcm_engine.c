@@ -23,7 +23,8 @@ static uint8_t  namco_mcache_data[32][NAMCO_MCACHE_SIZE];
 // still advance counter, position, loop and playback/end state.
 // Default allows all 24 channels. C352 and other PCM are not affected.
 static uint32_t s_cores3_c140_audible_mask = 0x00FFFFFFu;
-static uint32_t s_cores3_c140_select_round = 0;
+// Prefer previously audible channels at equal volume, preventing
+// block-edge voice churn when the emergency budget is unchanged.
 
 void pcm_engine_cores3_c140_set_voice_budget(PCMSoundEngine *engine, unsigned limit) {
     if (!engine || !engine->c140_enabled || limit >= 24u) {
@@ -32,19 +33,18 @@ void pcm_engine_cores3_c140_set_voice_budget(PCMSoundEngine *engine, unsigned li
     }
     if (limit == 0u) limit = 1u;
     uint32_t selected = 0u;
-    // Rotate only equal-volume tie order across blocks to avoid
-    // permanently silencing the same physical channels.
-    const uint32_t rotation = ++s_cores3_c140_select_round % 24u;
+    const uint32_t previous = s_cores3_c140_audible_mask;
     for (unsigned count = 0; count < limit; ++count) {
         int best = -1;
         int best_volume = -1;
-        for (unsigned j = 0; j < 24u; ++j) {
-            const unsigned ch = (j + rotation) % 24u;
+        for (unsigned ch = 0; ch < 24u; ++ch) {
             const uint32_t flag = 1u << ch;
             const NamcoPCMChannel *v = &engine->namco.ch[ch];
             if ((selected & flag) != 0u || !v->playing) continue;
             const int score = (int)v->mix_vol_l + (int)v->mix_vol_r;
-            if (score > best_volume) {
+            if (score > best_volume ||
+                (score == best_volume && best >= 0 &&
+                 (previous & flag) && !(previous & (1u << best)))) {
                 best_volume = score;
                 best = (int)ch;
             }
@@ -149,8 +149,7 @@ void pcm_engine_free(PCMSoundEngine *engine) {
     engine->namco.block_count = 0;
 #if defined(IS_CORES3)
     s_cores3_c140_audible_mask = 0x00FFFFFFu;
-    s_cores3_c140_select_round = 0;
-#endif
+ #endif
 }
 
 // ─────────────────────────────────────────
