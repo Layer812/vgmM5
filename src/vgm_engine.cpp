@@ -1177,7 +1177,15 @@ void vgm_engine_stop() {
     }
 }
 
-static inline uint8_t readByte() {
+#if defined(IS_CORES3)
+// PR57: VGM commands are parsed by AudioGenTask. Stage only the parser
+// instructions in internal IRAM; leave all byte/PCM/math/codec semantics intact.
+#define VGM_PARSER_HOT_ATTR IRAM_ATTR
+#else
+#define VGM_PARSER_HOT_ATTR
+#endif
+
+static inline VGM_PARSER_HOT_ATTR uint8_t readByte() {
     if (vgm_ptr >= vgm_file_size) { isPlaying = false; return 0x66; }
     if (vgm_is_streaming) {
         if (vgm_ptr < vgm_stream_buf_start || vgm_ptr >= vgm_stream_buf_start + vgm_stream_buf_len) {
@@ -1197,7 +1205,7 @@ static inline uint8_t readByte() {
 
 
 
-void processVGM() {
+VGM_PARSER_HOT_ATTR void processVGM() {
     if (!isPlaying || (!vgm_is_streaming && vgm_data == nullptr)) return;
 
     while (isPlaying && vgm_ptr < vgm_file_size && waitSamples == 0) {
