@@ -328,7 +328,7 @@ void setup() {
 
 #if defined(IS_CORES3)
     // One-time proof of actual Arduino setup/loop CPU, no audio timers.
-    Serial.printf("[CoreS3 PR53] Arduino/UI CPU=%d; AudioGen CPU1; I2S CPU0\\n",
+    Serial.printf("[CoreS3 PR53] Arduino/UI CPU=%d; AudioGen CPU1; I2S CPU0\n",
                   (int)xPortGetCoreID());
 #else
     Serial.println("--- Boot Start ---"); // ★これがシリアルモニタに出るか確認！
