@@ -14,6 +14,7 @@
 #if defined(IS_CORES3)
 #include "../cores3/cores3_r7_audio_helpers.hpp"
 #include "../cores3/r67_vgm_wait_44100.hpp"
+#include "../cores3/r67_pr50_queue_policy.hpp"
 #endif
 #include <USB.h>
 #include <USBMSC.h>
@@ -1399,25 +1400,11 @@ void IRAM_ATTR processAudioBlock() {
     // Never degrade during startup prebuffering or for non-C140 tracks.
     if (g_pcm_engine.c140_enabled && !prebuffering) {
         const int queued = wav_count.load(std::memory_order_acquire);
-        unsigned desired = 24u;
-        if (queued <= 2) desired = 12u;
-        else if (queued <= 5) desired = 16u;
-        else if (queued <= 8) desired = 20u;
-        if (desired < s_cores3_c140_budget) {
-            s_cores3_c140_budget = desired; // respond immediately
-            s_cores3_c140_recovery = 0u;
-        } else if (desired > s_cores3_c140_budget && queued >= 10) {
-            // Recover only after sustained buffer headroom; then
-            // restore gradually (four channels every four blocks).
-            if (++s_cores3_c140_recovery >= 4u) {
-                s_cores3_c140_budget += 4u;
-                if (s_cores3_c140_budget > desired)
-                    s_cores3_c140_budget = desired;
-                s_cores3_c140_recovery = 0u;
-            }
-        } else {
-            s_cores3_c140_recovery = 0u;
-        }
+        // PR50: no timestamp or timer. Earlier queue-pressure
+        // response avoids draining the last 2 blocks before throttling.
+        // Recovery only after a sustained >=12-block lead.
+        s_cores3_c140_budget = cores3_pr50_update_c140_budget(
+            queued, s_cores3_c140_budget, &s_cores3_c140_recovery);
         pcm_engine_cores3_c140_set_voice_budget(&g_pcm_engine,
                                                   s_cores3_c140_budget);
         if (s_cores3_c140_budget < 24u) {
@@ -1627,25 +1614,18 @@ void audio_generate_task(void *args) {
         uint32_t consecutive_blocks = 0;
 
         while (isPlaying) {
+#if defined(IS_CORES3)
+            // PR50: fill to 14 blocks. The consumer wakes us at <=12;
+            // never sleep a full RTOS tick inside a synth refill burst.
+            if (cores3_pr50_should_generate(wav_count.load(std::memory_order_acquire))) {
+#else
             if (wav_count < (WAV_BUFF_COUNT - 4)) {
+#endif
                 processAudioBlock();
 #if defined(IS_CORES3)
-                // R67: when the output queue is low, every millisecond of
-                // producer sleep worsens C140+YM2151 underruns. Restore R6's
-                // cooperative 1-tick rest only with at least 8 blocks
-                // already buffered. Preserve all synthesized PCM samples.
-                const int pending = wav_count.load(std::memory_order_acquire);
-                if (chip_type == CHIP_YM2151 || chip_type == CHIP_YM2608) {
-                    ++consecutive_blocks;
-                    if (consecutive_blocks >= 4 && pending >= (WAV_BUFF_COUNT / 2)) {
-                        vTaskDelay(1);
-                        consecutive_blocks = 0;
-                    } else {
-                        taskYIELD();
-                    }
-                } else {
-                    taskYIELD();
-                }
+                // Remain responsive to equal-priority tasks, but NO
+                // vTaskDelay(1): repeated sleeps undercut the PCM headroom.
+                taskYIELD();
 #else
                 if (chip_type == CHIP_YM2151 || chip_type == CHIP_YM2608) {
                     consecutive_blocks++;
@@ -1742,9 +1722,16 @@ void audio_play_task(void *args) {
             if (queued) {
                 rd = (rd + 1) % WAV_BUFF_COUNT;
                 wav_count--;
+#if defined(IS_CORES3)
+                if (cores3_pr50_wake_producer(
+                        wav_count.load(std::memory_order_acquire))) {
+                    xSemaphoreGive(xSemaphore);
+                }
+#else
                 if (wav_count <= (WAV_BUFF_COUNT / 2)) {
                     xSemaphoreGive(xSemaphore);
                 }
+#endif
 #if defined(IS_CORES3)
                 if (g_es8388_detected) {
                     // FIX1: i2s_write(...,portMAX_DELAY) already waits for
