@@ -16,84 +16,36 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Guard PR56 codec and PCM code; accept only CoreS3 refill scheduling changes
+      - name: Guard exact reviewed PR59 audio source and unchanged PR56 codec/PCM
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import subprocess
           base='origin/dev/cores3-r67-pr56-es8388-volume-repair-20261105'
-          changed=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
-          expected={'src/vgm_engine.cpp','cores3/r67_pr59_smooth_refill.hpp',
-                    'cores3/tests/r67_pr59_smooth_refill_host.cpp',
-                    '.github/workflows/cores3-r67-pr59-smooth-dma-refill-native.yml'}
-          assert changed==expected,(changed-expected,expected-changed)
-          old=subprocess.check_output(['git','show',base+':src/vgm_engine.cpp'],text=True)
-          new=Path('src/vgm_engine.cpp').read_text()
-          modifications=[
-            ('#include "../cores3/r67_vgm_wait_44100.hpp"\n#endif',
-             '#include "../cores3/r67_vgm_wait_44100.hpp"\n#include "../cores3/r67_pr59_smooth_refill.hpp"\n#endif'),
-            ('static TaskHandle_t s_cores3_audio_health_handle = nullptr;',
-             'static TaskHandle_t s_cores3_audio_health_handle = nullptr;\nstatic TaskHandle_t s_cores3_audio_play_handle = nullptr;'),
-            ('    wav_count++;\n    \n#if defined(IS_CORES3)',
-             '''#if defined(IS_CORES3)
-              // PR59: publish the completed block before waking a writer that was
-              // waiting for an empty -> nonempty ring. No per-sample notification.
-              const int previous_count = wav_count.fetch_add(1, std::memory_order_release);
-              if (cores3_r67_pr59_wake_i2s_writer(previous_count) &&
-                  s_cores3_audio_play_handle != nullptr) {
-                  xTaskNotifyGive(s_cores3_audio_play_handle);
-              }
-              #else
-              wav_count++;
-              #endif
-
-              #if defined(IS_CORES3)'''),
-            ('                if (wav_count <= (WAV_BUFF_COUNT / 2)) {\n                    xSemaphoreGive(xSemaphore);\n                }',
-             '''#if defined(IS_CORES3)
-              // PR59: replenish one block after consuming one block,
-              // rather than waiting for a four-block burst at ring<=8.
-              // Producer stays capped at 12; no buffer-count changes.
-              if (cores3_r67_pr59_request_refill(
-                      wav_count.load(std::memory_order_acquire),
-                      WAV_BUFF_COUNT)) {
-                  xSemaphoreGive(xSemaphore);
-              }
-              #else
-              if (wav_count <= (WAV_BUFF_COUNT / 2)) {
-                  xSemaphoreGive(xSemaphore);
-              }
-              #endif'''),
-            ('                xSemaphoreGive(xSemaphore);\n                vTaskDelay(1);\n                continue;',
-             '''                xSemaphoreGive(xSemaphore);
-              // PR59: sleep until the producer publishes its first
-              // fully rendered PCM block, with a one-tick safety timeout.
-              // Avoid the old unconditional 1ms polling delay.
-              ulTaskNotifyTake(pdTRUE, 1);
-              continue;'''),
-            ('    xTaskCreatePinnedToCore(audio_play_task, "AudioPlayTask", 4096, NULL, 4, NULL, 0);',
-             '''#if defined(IS_CORES3)
-              xTaskCreatePinnedToCore(audio_play_task, "AudioPlayTask", 4096,
-                                      NULL, 4, &s_cores3_audio_play_handle, 0);
-              #else
-              xTaskCreatePinnedToCore(audio_play_task, "AudioPlayTask", 4096, NULL, 4, NULL, 0);
-              #endif'''),
-          ]
-          for index,(from_text,to_text) in enumerate(modifications):
-              # Indentation of Python triple-quoted blocks above is stripped.
-              if index in (2,3,4,5):
-                  to_text='\n'.join(line[12:] if line.startswith(' '*12) else line for line in to_text.split('\n'))
-              assert old.count(from_text)==1,(index,old.count(from_text))
-              old=old.replace(from_text,to_text)
-          assert old==new, 'Unexpected changes to synthesis/I2S volume or codec'
-          for path in ('src/voice.cpp','cores3/r67_ui_controls.hpp','cores3/r67_fix6_mixer_safety.hpp',
-                       'platformio.ini','lib/vgmM5lib/src/pcm_engine.c',
-                       'lib/vgmM5lib/src/fm_engine.c','tab5/firmware/src/pcm_engine.c'):
-              now=Path(path).read_bytes()
+          changed=set(subprocess.check_output(
+              ['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          allowed={'src/vgm_engine.cpp','cores3/r67_pr59_smooth_refill.hpp',
+                   'cores3/tests/r67_pr59_smooth_refill_host.cpp',
+                   '.github/workflows/cores3-r67-pr59-smooth-dma-refill-native.yml'}
+          assert changed==allowed,(changed-allowed,allowed-changed)
+          actual=subprocess.check_output(['git','hash-object','src/vgm_engine.cpp'],text=True).strip()
+          assert actual=='09c5f68248945a83d9ea577948ef715efa3cb1cb',actual
+          # Fixed Git blob ID requires exact, byte-for-byte vetted scheduler
+          # changes, not merely passing a grep or code-shape check.
+          for path in ('src/voice.cpp','cores3/r67_ui_controls.hpp',
+                       'cores3/r67_fix6_mixer_safety.hpp','platformio.ini',
+                       'lib/vgmM5lib/src/pcm_engine.c',
+                       'lib/vgmM5lib/src/fm_engine.c',
+                       'tab5/firmware/src/pcm_engine.c'):
               before=subprocess.check_output(['git','show',base+':'+path])
-              assert now==before,path
-          assert 'g_cores3_es8388_addr = addr;' in new
-          assert 'cores3_r67_es8388_volume_register(vol)' in new
-          print('PASS: only CPU0/CPU1 refill handoff differs from PR56; PCM, ES8388, Tab5 unchanged')
+              assert Path(path).read_bytes()==before,path
+          now=Path('src/vgm_engine.cpp').read_text()
+          assert 'xTaskNotifyGive(s_cores3_audio_play_handle);' in now
+          assert 'ulTaskNotifyTake(pdTRUE, 1);' in now
+          assert 'cores3_r67_pr59_request_refill(' in now
+          assert 'g_cores3_es8388_addr = addr;' in now
+          assert 'cores3_r67_es8388_volume_register(vol)' in now
+          print('PASS byte-exact reviewed CoreS3 PR59 source and PR56 volume/I2S/PCM/Tab5 preservation')
           PY
       - name: FIFO producer batch, exact ordering and underrun notification regression
         run: |
