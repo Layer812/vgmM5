@@ -137,6 +137,11 @@ jobs:
             echo This is APP-ONLY at 0x10000. No partition or bootloader operations.
             exit /b 2
           )
+          python -c "import hashlib,json,sys; from pathlib import Path; p=Path(sys.argv[1]); manifest=json.loads(Path(sys.argv[2]).read_text()); actual=hashlib.sha256(p.read_bytes()).hexdigest(); print('SHA256:',actual); sys.exit(0 if actual==manifest['sha256'] else 1)" "%~dp0firmware.bin" "%~dp0RESULT.json"
+          if errorlevel 1 (
+            echo ERROR: firmware SHA256 mismatch; NO FLASH.
+            exit /b 1
+          )
           python -m esptool --chip esp32s3 -p "%~1" -b 460800 --before default_reset --after hard_reset write_flash 0x10000 "%~dp0firmware.bin"
           if errorlevel 1 exit /b 1
           echo PASS: CoreS3 PR57 app-only flashed.
