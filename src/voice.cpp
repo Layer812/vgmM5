@@ -326,7 +326,13 @@ void setup() {
     M5.begin(cfg);
     Serial.begin(115200);
 
+#if defined(IS_CORES3)
+    // One-time proof of actual Arduino setup/loop CPU, no audio timers.
+    Serial.printf("[CoreS3 PR53] Arduino/UI CPU=%d; AudioGen CPU1; I2S CPU0\\n",
+                  (int)xPortGetCoreID());
+#else
     Serial.println("--- Boot Start ---"); // ★これがシリアルモニタに出るか確認！
+#endif
     // 共通の再生エンジン初期化（I2S等の設定）
     Serial.println("Calling vgm_engine_init...");
     vgm_engine_init();
