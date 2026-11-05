@@ -188,7 +188,7 @@ jobs:
       - name: Exact CoreS3 limiter 64bit old versus 32bit new, >18M vectors
         run: |
           set -euo pipefail
-          g++ -std=c++17 -O2 -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all \\
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all \
             cores3/tests/r67_pr48_limiter_div32_host.cpp -o /tmp/pr48_limit
           /tmp/pr48_limit
       - name: Install CoreS3 PlatformIO and pinned M5Unified/M5GFX
