@@ -35,8 +35,8 @@ int main() {
                     ++n_attempts;
                     size_t transfer = remaining;
                     if (n_attempts % 7 == 1) transfer = 0;
+                    else if (n_attempts % 3 == 2 && transfer > 512) transfer = 512;
                     else if (n_attempts % 3 == 0 && transfer > 64) transfer = 64;
-                    else if (n_attempts % 3 == 1 && transfer > 512) transfer = 512;
                     if (transfer == 0) ++zero_writes;
                     if (transfer < remaining) ++partial_writes;
                     emitted.insert(emitted.end(), source.begin() + offset,
@@ -73,6 +73,6 @@ int main() {
         [](size_t, size_t remaining) -> size_t { return remaining + 64; }));
     assert(pending.accepted == source.size());
 
-    std::printf("PASS PR60 exact DMA PCM order, %d blocks, 10000 zero/partial retries; FNV=%016llx, partial=%d, zero=%d\n",
+    std::printf("PASS PR60 exact DMA PCM order, %d blocks, short/zero retries; FNV=%016llx, partial=%d, zero=%d\n",
                 kBlocks,(unsigned long long)got,partial_writes,zero_writes);
 }
