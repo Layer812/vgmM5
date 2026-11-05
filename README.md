@@ -79,8 +79,19 @@ ESP32-P4採用のTab5に対応。VGM/VGZ・MDXのmicroSD再生、タッチ操作
 - **VGZ(GZIP圧縮)対応**: 解凍せずにそのまま再生可能。
 - **軽量・高速**: M5Stackの限られたリソースに最適化。
 
-### インストール方法 (M5 Burner)
-手軽に試す場合は、M5 Burnerから以下のシェアコードでファームウェアを直接書き込めます。
+### インストール方法（Web Burner / M5 Burner）
+
+#### Web Burner（ブラウザから書き込み）
+M5Stack Web Burnerから、それぞれの機種向けファームウェアの書き込みページを開けます。
+
+- **M5Stack CoreS3（R67 初期版）**：[Web Burnerを開く](https://burner.m5stack.com/share/firmware/P8DPPV)
+- **M5Stack Tab5**：[Web Burnerを開く](https://burner.m5stack.com/MWUJ4T)
+- **M5Stack Cardputer**：[Web Burnerを開く](https://burner.m5stack.com/METQC2)
+
+> **CoreS3のWeb Burner掲載版はR67の初期版です。** 開発中のCoreS3 PR試験版とは区別してください。
+
+#### M5 Burner（シェアコード）
+従来のM5 Burnerを使う場合は、以下のシェアコードを利用できます。
 
 - **M5Stack Tab5用 シェアコード:** `rg69duyAcUQoohOl`
 - **M5Stack CoreS3用 シェアコード:** `wEBeKwOKFsqAmlsu`（Module Audioあり・なし共通）
@@ -177,8 +188,19 @@ Supports ESP32-P4 Tab5 with VGM/VGZ and MDX playback from microSD, touch control
 - **VGZ (GZIP) Support**: Plays directly without decompression.
 - **Lightweight & Fast**: Highly optimized for M5Stack's limited hardware resources.
 
-### Installation (via M5 Burner)
-For a quick and easy start, you can flash the firmware directly to your device using M5 Burner with the following share codes:
+### Installation (Web Burner / M5 Burner)
+
+#### Web Burner (browser-based flashing)
+Open the M5Stack Web Burner firmware page for your device:
+
+- **M5Stack CoreS3 (initial R67 release):** [Open Web Burner](https://burner.m5stack.com/share/firmware/P8DPPV)
+- **M5Stack Tab5:** [Open Web Burner](https://burner.m5stack.com/MWUJ4T)
+- **M5Stack Cardputer:** [Open Web Burner](https://burner.m5stack.com/METQC2)
+
+> **The CoreS3 firmware published on Web Burner is the initial R67 edition.** It is separate from the experimental CoreS3 pull-request builds.
+
+#### M5 Burner (share codes)
+Alternatively, use M5 Burner with the following share codes:
 
 - **M5Stack Tab5 Share Code:** `rg69duyAcUQoohOl`
 - **M5Stack CoreS3 Share Code:** `wEBeKwOKFsqAmlsu` (with or without Module Audio)
