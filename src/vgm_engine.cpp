@@ -15,6 +15,7 @@
 #if defined(IS_CORES3)
 #include "../cores3/cores3_r7_audio_helpers.hpp"
 #include "../cores3/r67_vgm_wait_44100.hpp"
+#include "../cores3/r67_pr59_smooth_refill.hpp"
 #endif
 #include <USB.h>
 #include <USBMSC.h>
@@ -132,6 +133,7 @@ static std::atomic<uint32_t> s_cores3_ring_empty{0};
 static std::atomic<uint32_t> s_cores3_i2s_write_fail{0};
 static std::atomic<uint32_t> s_cores3_i2s_short_write{0};
 static TaskHandle_t s_cores3_audio_health_handle = nullptr;
+static TaskHandle_t s_cores3_audio_play_handle = nullptr;
 static constexpr uint32_t k_cores3_report_blocks = 861u; // ~10s at 44100/512
 #endif
 
@@ -1533,8 +1535,18 @@ if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t
     }
     wav_buff_size[wd] = BUFF_SIZE;
     wd = (wd + 1) % WAV_BUFF_COUNT;
+#if defined(IS_CORES3)
+    // PR59: publish the completed block before waking a writer that was
+    // waiting for an empty -> nonempty ring. No per-sample notification.
+    const int previous_count = wav_count.fetch_add(1, std::memory_order_release);
+    if (cores3_r67_pr59_wake_i2s_writer(previous_count) &&
+        s_cores3_audio_play_handle != nullptr) {
+        xTaskNotifyGive(s_cores3_audio_play_handle);
+    }
+#else
     wav_count++;
-    
+#endif
+
 #if defined(IS_CORES3)
     // One atomic increment per complete 512-frame block, no timing APIs.
     s_cores3_gen_blocks.fetch_add(1, std::memory_order_relaxed);
@@ -1683,9 +1695,20 @@ void audio_play_task(void *args) {
             if (queued) {
                 rd = (rd + 1) % WAV_BUFF_COUNT;
                 wav_count--;
+#if defined(IS_CORES3)
+                // PR59: replenish one block after consuming one block,
+                // rather than waiting for a four-block burst at ring<=8.
+                // Producer stays capped at 12; no buffer-count changes.
+                if (cores3_r67_pr59_request_refill(
+                        wav_count.load(std::memory_order_acquire),
+                        WAV_BUFF_COUNT)) {
+                    xSemaphoreGive(xSemaphore);
+                }
+#else
                 if (wav_count <= (WAV_BUFF_COUNT / 2)) {
                     xSemaphoreGive(xSemaphore);
                 }
+#endif
 #if defined(IS_CORES3)
                 if (g_es8388_detected) {
                     // FIX1: i2s_write(...,portMAX_DELAY) already waits for
@@ -1727,7 +1750,10 @@ void audio_play_task(void *args) {
                     s_cores3_ring_empty.fetch_add(1, std::memory_order_relaxed);
                 }
                 xSemaphoreGive(xSemaphore);
-                vTaskDelay(1);
+                // PR59: sleep until the producer publishes its first
+                // fully rendered PCM block, with a one-tick safety timeout.
+                // Avoid the old unconditional 1ms polling delay.
+                ulTaskNotifyTake(pdTRUE, 1);
                 continue;
             }
 #endif
@@ -1912,7 +1938,12 @@ skip_es8388_init:
 #endif
     xSemaphore = xSemaphoreCreateBinary();
     xTaskCreatePinnedToCore(audio_generate_task, "AudioGenTask", 8192, NULL, 5, &playTaskHandle, 1);
+#if defined(IS_CORES3)
+    xTaskCreatePinnedToCore(audio_play_task, "AudioPlayTask", 4096,
+                            NULL, 4, &s_cores3_audio_play_handle, 0);
+#else
     xTaskCreatePinnedToCore(audio_play_task, "AudioPlayTask", 4096, NULL, 4, NULL, 0);
+#endif
 
     isPlaying = false;
 }
