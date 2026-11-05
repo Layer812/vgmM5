@@ -17,6 +17,45 @@ PCMSoundEngine g_pcm_engine;
 static uint32_t namco_mcache_addr[32];
 static uint8_t  namco_mcache_data[32][NAMCO_MCACHE_SIZE];
 
+#if defined(IS_CORES3)
+// PR49: Emergency C140 voice budget. Never change VGM event timing;
+// the selected voices keep their exact PCM, while non-selected voices
+// still advance counter, position, loop and playback/end state.
+// Default allows all 24 channels. C352 and other PCM are not affected.
+static uint32_t s_cores3_c140_audible_mask = 0x00FFFFFFu;
+static uint32_t s_cores3_c140_select_round = 0;
+
+void pcm_engine_cores3_c140_set_voice_budget(PCMSoundEngine *engine, unsigned limit) {
+    if (!engine || !engine->c140_enabled || limit >= 24u) {
+        s_cores3_c140_audible_mask = 0x00FFFFFFu;
+        return;
+    }
+    if (limit == 0u) limit = 1u;
+    uint32_t selected = 0u;
+    // Rotate only equal-volume tie order across blocks to avoid
+    // permanently silencing the same physical channels.
+    const uint32_t rotation = ++s_cores3_c140_select_round % 24u;
+    for (unsigned count = 0; count < limit; ++count) {
+        int best = -1;
+        int best_volume = -1;
+        for (unsigned j = 0; j < 24u; ++j) {
+            const unsigned ch = (j + rotation) % 24u;
+            const uint32_t flag = 1u << ch;
+            const NamcoPCMChannel *v = &engine->namco.ch[ch];
+            if ((selected & flag) != 0u || !v->playing) continue;
+            const int score = (int)v->mix_vol_l + (int)v->mix_vol_r;
+            if (score > best_volume) {
+                best_volume = score;
+                best = (int)ch;
+            }
+        }
+        if (best < 0) break;
+        selected |= 1u << best;
+    }
+    s_cores3_c140_audible_mask = selected;
+}
+#endif
+
 // ─────────────────────────────────────────
 // Forward declarations
 // ─────────────────────────────────────────
@@ -108,6 +147,10 @@ void pcm_engine_free(PCMSoundEngine *engine) {
         }
     }
     engine->namco.block_count = 0;
+#if defined(IS_CORES3)
+    s_cores3_c140_audible_mask = 0x00FFFFFFu;
+    s_cores3_c140_select_round = 0;
+#endif
 }
 
 // ─────────────────────────────────────────
@@ -625,6 +668,10 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
         for (int ch = 0; ch < max_ch; ch++) {
             NamcoPCMChannel *v = &engine->namco.ch[ch];
             if (!v->playing) continue;
+#if defined(IS_CORES3)
+            const bool skip_c140_sample = engine->c140_enabled &&
+                ((s_cores3_c140_audible_mask & (1u << ch)) == 0u);
+#endif
 
             v->counter += v->step_adjusted;
             uint32_t step_amount = v->counter >> 16;
@@ -662,6 +709,18 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
                     }
                 }
 
+#if defined(IS_CORES3)
+                if (skip_c140_sample) {
+                    // Must still execute counter/position/loop/end logic
+                    // above. Suppress ROM fetch and interpolation state
+                    // while this voice is deprioritized; when restored,
+                    // interpolation restarts from zero rather than an
+                    // obsolete sample value from an old ROM position.
+                    v->prev_sample = 0;
+                    v->last_sample = 0;
+                    continue;
+                }
+#endif
                 uint32_t addr;
                 if (engine->c352_enabled) {
                     addr = v->pos;
@@ -788,6 +847,13 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
             }
 
             if (!v->playing) continue;
+#if defined(IS_CORES3)
+            if (skip_c140_sample) {
+                v->prev_sample = 0;
+                v->last_sample = 0;
+                continue;
+            }
+#endif
 
             int32_t dltdt = (v->last_sample - v->prev_sample) / 2;
             int32_t sample = v->prev_sample + ((dltdt * (int32_t)(v->counter & 0xFFFF)) >> 15);
