@@ -14,6 +14,8 @@
 #if defined(IS_CORES3)
 #include "../cores3/cores3_r7_audio_helpers.hpp"
 #include "../cores3/r67_vgm_wait_44100.hpp"
+#include "../cores3/r67_pr55_vgm_command_cache.hpp"
+#include <esp_attr.h>
 #endif
 #include <USB.h>
 #include <USBMSC.h>
@@ -173,6 +175,11 @@ bool vgm_has_loop = false;
 int vgm_loop_count = 0;
 
 uint8_t* vgm_data = nullptr;
+#if defined(IS_CORES3)
+// Explicitly allocate 1KiB inside SRAM, NOT alongside the VGM in PSRAM.
+// Only AudioGenTask reads this after play starts.
+static DRAM_ATTR CoreS3VgmCommandCache<1024> s_cores3_vgm_cmd_cache;
+#endif
 bool vgm_is_streaming = false;
 File vgm_stream_file;
 uint8_t vgm_stream_buf[1024];
@@ -432,6 +439,11 @@ static int vgm_cmd_debug_count = 0;
 bool vgm_engine_play(const char* filepath, bool use_sd) {
     // Always stop and clean up before starting a new song, regardless of current state
     vgm_engine_stop();
+#if defined(IS_CORES3)
+    // PSRAM and Flash-MMAP pointers may be reused between songs.
+    // Never retain prior song command bytes in the internal DRAM cache.
+    s_cores3_vgm_cmd_cache.reset();
+#endif
     
     // Additionally, free vgm_data if it was heap-allocated (not MMAPed)
     if (vgm_mmap_handle == 0 && vgm_data != nullptr) {
@@ -1191,7 +1203,16 @@ static inline uint8_t readByte() {
         }
         return vgm_stream_buf[vgm_ptr++ - vgm_stream_buf_start];
     }
+#if defined(IS_CORES3)
+    // Sequential VGM command fetch from internal SRAM. The 0x67
+    // payload skip and vgmSeek() remain untouched; the next read
+    // refills only when the new position is outside this 1KiB page.
+    const uint8_t value = s_cores3_vgm_cmd_cache.read(vgm_ptr, vgm_data, vgm_file_size);
+    ++vgm_ptr;
+    return value;
+#else
     return vgm_data[vgm_ptr++];
+#endif
 }
 
 
