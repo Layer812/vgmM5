@@ -43,13 +43,30 @@ static inline int32_t cores3_r67_divide_mix_fast2(int64_t sum, int physical_chip
 //   y = knee + excess*(32767-knee)/(excess + 32767-knee)
 // Values at/below the knee remain bit-identical to the prior version.
 // Single-sample, stateless: no block-edge gain jumps or note pumping.
+// PR48: eliminate the per-sample variable 64-bit divide in the
+// soft-peak limiter without changing a single PCM result.
+//
+// Original for magnitude m > knee:
+//   knee + floor((m - knee)*head / ((m - knee) + head))
+// = (knee + head) - ceil(head*head / ((m - knee) + head))
+// = 32766 - floor((head*head - 1) / ((m - knee) + head)).
+//
+// Here knee=26000, head=6767. head*head-1 fits uint32_t.
+// The denominator fits uint32_t even at abs(INT32_MIN).
+// Only a 32-bit unsigned division remains; no int64 multiplication
+// or variable int64 division. Fully exact C++ signed truncation,
+// including INT32_MIN, negatives and limiter knee boundary.
 static inline int32_t cores3_r67_true_peak_limiter(int32_t input) {
-    const int64_t knee = 26000;
-    const int64_t head = 32767 - knee;  // 6767
-    const int64_t signed_input = (int64_t)input;
-    const int64_t magnitude = signed_input < 0 ? -signed_input : signed_input;
+    constexpr uint32_t knee = 26000u;
+    constexpr uint32_t head = 32767u - knee;
+    const bool negative = input < 0;
+    const uint32_t magnitude = negative
+        ? static_cast<uint32_t>(-(static_cast<int64_t>(input)))
+        : static_cast<uint32_t>(input);
     if (magnitude <= knee) return input;
-    const int64_t excess = magnitude - knee;
-    const int64_t compressed = knee + (excess * head) / (excess + head);
-    return (int32_t)(signed_input < 0 ? -compressed : compressed);
+    const uint32_t denominator = magnitude - knee + head;
+    const uint32_t compressed =
+        32766u - ((head * head - 1u) / denominator);
+    return negative ? -static_cast<int32_t>(compressed)
+                    : static_cast<int32_t>(compressed);
 }
