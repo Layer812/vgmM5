@@ -15,6 +15,7 @@
 #if defined(IS_CORES3)
 #include "../cores3/cores3_r7_audio_helpers.hpp"
 #include "../cores3/r67_vgm_wait_44100.hpp"
+#include "../cores3/r67_pr60_i2s_partial_write.hpp"
 #endif
 #include <USB.h>
 #include <USBMSC.h>
@@ -1642,9 +1643,15 @@ static void cores3_audio_health_task(void *) {
 void audio_play_task(void *args) {
 #if defined(IS_CORES3)
     uint32_t remaining_report_blocks = k_cores3_report_blocks;
+    CoreS3I2SPendingBlock pending_i2s;
 #endif
     while (true) {
         bool any_playing = (isPlaying && !isPaused) || mdx_engine_is_playing();
+#if defined(IS_CORES3)
+        // Track restart and prebuffering discard any incomplete old song
+        // transfer; a live PCM block remains owned until fully submitted.
+        if (!any_playing || prebuffering) pending_i2s.reset();
+#endif
         if (prebuffering && wav_count >= (WAV_BUFF_COUNT - 4)) {
             prebuffering = false;
         }
@@ -1659,23 +1666,34 @@ void audio_play_task(void *args) {
 #else
             bool queued = false;
             if (g_es8388_detected) {
+#if defined(IS_CORES3)
+                // PR60: keep rd/wav_count stable if i2s_write accepts only
+                // part of the 512-frame block. A partial block MUST NOT be
+                // discarded: send only the remaining suffix next iteration.
+                const size_t requested = wav_buff_size[rd] * 4u;
+                queued = pending_i2s.advance(requested,
+                    [&](size_t offset, size_t remaining) -> size_t {
+                        size_t bytes_written = 0;
+                        const esp_err_t result = i2s_write(
+                            I2S_NUM_0,
+                            (const void *)((const uint8_t *)wav_buff[rd] + offset),
+                            remaining, &bytes_written, portMAX_DELAY);
+                        if (result != ESP_OK) {
+                            s_cores3_i2s_write_fail.fetch_add(1, std::memory_order_relaxed);
+                        }
+                        if (bytes_written != remaining) {
+                            s_cores3_i2s_short_write.fetch_add(1, std::memory_order_relaxed);
+                        }
+                        return bytes_written;
+                    });
+                if (queued) pending_i2s.reset();
+#else
                 size_t bytes_written = 0;
                 const size_t requested = wav_buff_size[rd] * 4u;
-                const esp_err_t i2s_result = i2s_write(
-                    I2S_NUM_0, (const void *)wav_buff[rd],
-                    requested, &bytes_written, portMAX_DELAY);
-#if defined(IS_CORES3)
-                // A short write is evidence of damaged PCM delivery,
-                // not proof of DAC/sample clipping. Count, don't print
-                // or change the established buffer ownership contract.
-                if (i2s_result != ESP_OK) {
-                    s_cores3_i2s_write_fail.fetch_add(1, std::memory_order_relaxed);
-                }
-                if (bytes_written != requested) {
-                    s_cores3_i2s_short_write.fetch_add(1, std::memory_order_relaxed);
-                }
-#endif
+                i2s_write(I2S_NUM_0, (const void *)wav_buff[rd],
+                          requested, &bytes_written, portMAX_DELAY);
                 queued = (bytes_written > 0);
+#endif
             } else {
                 queued = M5.Speaker.playRaw((const int16_t *)wav_buff[rd], wav_buff_size[rd] * 2, actual_sample_rate, true, 1, 0, false);
             }
