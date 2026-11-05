@@ -69,7 +69,7 @@ jobs:
           assert 's_cores3_play_blocks.fetch_add(1, std::memory_order_relaxed)' in current
           assert 'xTaskNotifyGive(s_cores3_audio_health_handle)' in current
           assert 'xTaskCreatePinnedToCore(cores3_audio_health_task' in current
-          assert '[CoreS3 PR45][AUDIO] genBlocks=' in current
+          assert '[CoreS3 PR49][AUDIO] genBlocks=' in current
           assert 'static constexpr uint32_t k_cores3_report_blocks = 861u' in current
           assert 'Serial.printf("[CoreS3 PR44][AUDIO]' not in current
           assert 's_cores3_ring_empty.fetch_add(1, std::memory_order_relaxed)' in current
