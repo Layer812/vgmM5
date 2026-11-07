@@ -24,6 +24,8 @@ extern void fm_engine_write_ym2151(FMSoundEngine *, uint16_t, uint8_t);
 
 #define NFRAMES 44100
 static uint8_t rom[131072];
+static int32_t fm_frames[NFRAMES][2];
+static int32_t c140_frames[NFRAMES][2];
 
 typedef struct {
     uint64_t hash;
@@ -77,6 +79,7 @@ static AudioStats run_opm(void) {
         if (frame == 33000) fm_engine_write_ym2151(&g_fm_engine, 0x0f, 0x9a);
         int32_t l = 0, r = 0;
         fm_engine_tick(&g_fm_engine, &l, &r);
+        fm_frames[frame][0]=l; fm_frames[frame][1]=r;
         observe(&stats,l,r);
     }
     assert(stats.nonzero > 0);
@@ -117,6 +120,7 @@ static AudioStats run_c140(void) {
         }
         int32_t l = 0,r = 0;
         pcm_engine_tick(&g_pcm_engine,&l,&r);
+        c140_frames[frame][0]=l; c140_frames[frame][1]=r;
         observe(&stats,l,r);
     }
     assert(stats.nonzero > 0);
@@ -124,14 +128,86 @@ static AudioStats run_c140(void) {
     return stats;
 }
 
-int main(void) {
+// Reconstruct the board-side 2-chip FM+C140 master mix. The shared
+// variants use the exact CoreS3 64-bit sum, /16 headroom, DC blocker
+// and continuous 26000-knee limiter. Original R6 uses its old limiter.
+static void write_le(FILE *fp, uint32_t val, int bytes) {
+    for (int b=0;b<bytes;++b) fputc((int)((val>>(8*b))&255u),fp);
+}
+static int32_t soft_peak(int32_t v) {
+    const int64_t knee=26000, head=6767;
+    const int64_t x=v, mag=x<0?-x:x;
+    if (mag<=knee) return v;
+    const int64_t excess=mag-knee;
+    const int64_t compressed=knee+(excess*head)/(excess+head);
+    return (int32_t)(x<0?-compressed:compressed);
+}
+static int32_t hard_limit_i32(int64_t v) {
+    return v>INT32_MAX ? INT32_MAX : v<INT32_MIN ? INT32_MIN : (int32_t)v;
+}
+static int16_t s16(int32_t x) {
+    if(x>32767)x=32767;
+    if(x<-32768)x=-32768;
+    return (int16_t)x;
+}
+static AudioStats render_mix_wav(const char *path) {
+    AudioStats stats={UINT64_C(14695981039346656037),0,0,0};
+    FILE *fp=path?fopen(path,"wb"):NULL;
+    if(path && !fp){perror(path);exit(2);}
+    if(fp) {
+        fwrite("RIFF",1,4,fp);
+        write_le(fp,36+NFRAMES*4u,4);
+        fwrite("WAVEfmt ",1,8,fp);
+        write_le(fp,16,4); write_le(fp,1,2); write_le(fp,2,2);
+        write_le(fp,44100,4); write_le(fp,44100*4u,4);
+        write_le(fp,4,2); write_le(fp,16,2);
+        fwrite("data",1,4,fp);
+        write_le(fp,NFRAMES*4u,4);
+    }
+    int64_t dc[2]={0,0};
+    int32_t prev[2]={0,0};
+    for(int frame=0;frame<NFRAMES;++frame){
+        int16_t out[2];
+        for(int ch=0;ch<2;++ch){
+            const int64_t sum=(int64_t)fm_frames[frame][ch]
+                              +(int64_t)c140_frames[frame][ch];
+#if defined(VGMM5_CARDPUTER_VGMM5LIB) || defined(IS_CORES3)
+            const int32_t in=hard_limit_i32(sum/16);
+            dc[ch]=((int64_t)in-(int64_t)prev[ch])*16384
+                   +(dc[ch]*1019)/1024;
+            int32_t sample=soft_peak(hard_limit_i32(dc[ch]/16384));
+#else
+            // Historical Cardputer R6 mix before the shared-library port.
+            const int32_t in=(int32_t)sum/16;
+            dc[ch]=((int64_t)(in-prev[ch]))*16384
+                   +(dc[ch]*1019)/1024;
+            int32_t sample=(int32_t)(dc[ch]/16384);
+            if(sample>26000)sample=26000+(sample-26000)/2;
+            else if(sample<-26000)sample=-26000+(sample+26000)/2;
+#endif
+            prev[ch]=in;
+            out[ch]=s16(sample);
+            if(fp)write_le(fp,(uint16_t)out[ch],2);
+        }
+        observe(&stats,out[0],out[1]);
+    }
+    if(fp)fclose(fp);
+    assert(stats.nonzero>0);
+    return stats;
+}
+
+int main(int argc, char **argv) {
     const AudioStats fm=run_opm();
     const AudioStats pcm=run_c140();
+    const AudioStats mix=render_mix_wav(argc>1?argv[1]:NULL);
     printf("{\"edition\":\"%s\",\"rate\":44100,\"frames\":%d,\"fm_hash\":\"%016" PRIx64 "\","
            "\"fm_abs\":%" PRIu64 ",\"fm_peak\":%" PRId32 ",\"fm_nonzero\":%u,"
            "\"c140_hash\":\"%016" PRIx64 "\",\"c140_abs\":%" PRIu64 ","
-           "\"c140_peak\":%" PRId32 ",\"c140_nonzero\":%u}\n",
+           "\"c140_peak\":%" PRId32 ",\"c140_nonzero\":%u,"
+           "\"mix_hash\":\"%016" PRIx64 "\",\"mix_abs\":%" PRIu64 ","
+           "\"mix_peak\":%" PRId32 ",\"mix_nonzero\":%u}\n",
            VERSION,NFRAMES,fm.hash,fm.abs_sum,fm.peak,fm.nonzero,
-           pcm.hash,pcm.abs_sum,pcm.peak,pcm.nonzero);
+           pcm.hash,pcm.abs_sum,pcm.peak,pcm.nonzero,
+           mix.hash,mix.abs_sum,mix.peak,mix.nonzero);
     return 0;
 }
