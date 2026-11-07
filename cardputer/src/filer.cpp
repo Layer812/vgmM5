@@ -287,6 +287,11 @@ int selectfile(){
       delay(10); // leave CPU time for the synthesis/DMA tasks
       M5Cardputer.update();
       if (M5Cardputer.Keyboard.isChange()) {
+          if(filenum == 0){
+              if(M5Cardputer.Keyboard.isKeyPressed('b') ||
+                 M5Cardputer.Keyboard.isKeyPressed('`')) return -1;
+              continue; // never index filelist when the folder is empty
+          }
           if (M5Cardputer.Keyboard.isKeyPressed(';')){
             if(sel != 0){
               if(sel == disp)
