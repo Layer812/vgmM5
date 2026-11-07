@@ -49,6 +49,52 @@ jobs:
               for p in paths:p.write_bytes(b'\0')
           print('PASS local playback build: online DB contents not distributed')
           PY
+      - name: Compare actual pre-speaker PCM: original R6 / Cardputer lib / CoreS3
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/cardputer-audio-shim
+          printf '#pragma once\n#define IRAM_ATTR\n#define DRAM_ATTR\n' >/tmp/cardputer-audio-shim/esp_attr.h
+          printf '#pragma once\n' >/tmp/cardputer-audio-shim/esp_partition.h
+          printf '#pragma once\n' >/tmp/cardputer-audio-shim/esp_spi_flash.h
+          printf '#pragma once\n' >/tmp/cardputer-audio-shim/esp_heap_caps.h
+          mkdir -p cardputer/r7_artifacts
+          gcc -std=gnu11 -O2 -ffunction-sections -fdata-sections \
+            -I/tmp/cardputer-audio-shim -Icardputer/src \
+            cardputer/tests/r7_sound_cores_comparison.c \
+            cardputer/src/fm_engine.c cardputer/src/pcm_engine.c \
+            -Wl,--gc-sections -lm -o /tmp/cardputer_original_r6
+          /tmp/cardputer_original_r6 >cardputer/r7_artifacts/original_cardputer_r6_audio.json
+          for edition in cardputer_vgmm5lib cores3_vgmm5lib; do
+            flags='-DVGMM5_CARDPUTER_VGMM5LIB=1'
+            if [ "$edition" = cores3_vgmm5lib ]; then flags='-DIS_CORES3=1'; fi
+            gcc -std=gnu11 -O2 -ffunction-sections -fdata-sections $flags \
+              -I/tmp/cardputer-audio-shim -Ilib/vgmM5lib/src \
+              cardputer/tests/r7_sound_cores_comparison.c \
+              lib/vgmM5lib/src/fm_engine.c lib/vgmM5lib/src/pcm_engine.c \
+              -Wl,--gc-sections -lm -o /tmp/$edition
+            /tmp/$edition >cardputer/r7_artifacts/$edition.audio.json
+          done
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          root=Path('cardputer/r7_artifacts')
+          a=json.loads((root/'original_cardputer_r6_audio.json').read_text())
+          b=json.loads((root/'cardputer_vgmm5lib.audio.json').read_text())
+          c=json.loads((root/'cores3_vgmm5lib.audio.json').read_text())
+          same_fields=['fm_hash','fm_abs','fm_peak','fm_nonzero',
+                       'c140_hash','c140_abs','c140_peak','c140_nonzero']
+          assert all(b[k]==c[k] for k in same_fields),[(k,b[k],c[k]) for k in same_fields if b[k]!=c[k]]
+          assert all(int(row['fm_nonzero'])>0 and int(row['c140_nonzero'])>0 for row in (a,b,c))
+          report={'comparison':'raw 44.1kHz signed stereo PCM BEFORE board-specific speaker',
+                  'original_cardputer_r6':a,'new_cardputer_vgmm5lib':b,'cores3_vgmm5lib':c,
+                  'cardputer_vs_cores3_same_core_pcm':'BIT-EXACT',
+                  'original_vs_new_fm':'IDENTICAL' if a['fm_hash']==b['fm_hash'] else 'DIFFERENT',
+                  'original_vs_new_c140':'IDENTICAL' if a['c140_hash']==b['c140_hash'] else 'DIFFERENT',
+                  'speaker_dac_acoustics':'NOT COMPARED'}
+          (root/'AUDIO_COMPARISON.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
+          print('PASS 3-way actual-source 44100-frame YM2151 and 24-voice C140 PCM comparison')
+          print(json.dumps(report,indent=2))
+          PY
       - name: Install pinned PlatformIO and Cardputer libraries
         run: |
           python -m pip install --disable-pip-version-check platformio 'click==8.1.8'
