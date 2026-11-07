@@ -225,11 +225,13 @@ int makevgmlist(fs::FS &fs) {
 void dispfiles(int disp, int sel, bool start){
   int i;
   menuflag = false;
-  M5Cardputer.Display.fillRect(0,36, 240,135, BLACK);
-  M5Cardputer.Display.setCursor(0, 37);
+  // R67: limit the 240x135 LCD redraw and use a readable font.
+  M5Cardputer.Display.fillRect(0,36, 240,99, BLACK);
+  M5Cardputer.Display.setTextSize(1.5f);
+  M5Cardputer.Display.setCursor(4, 39);
 
 //  M5Cardputer.Display.fillScreen(BLACK);
-  for (i = 0; i < DISPMAX; i++){
+  for (i = 0; i < DISPMAX && i + disp < filenum; i++){
     if(filelist[i + disp].type == TYPE_SDIR || filelist[i + disp].type == TYPE_UDIR)
       M5Cardputer.Display.setTextColor(LIGHTGREY);
     if((i + disp)== sel)
@@ -240,7 +242,7 @@ void dispfiles(int disp, int sel, bool start){
     if (basename) fname = basename + 1;
     if (fname[0] == '\0') fname = (const char*)filelist[i + disp].filename;
 
-    M5Cardputer.Display.printf("%.*s\n", 20, fname);
+    M5Cardputer.Display.printf("%.*s\n", 24, fname);
     M5Cardputer.Display.setTextColor(WHITE);
   }
 }
