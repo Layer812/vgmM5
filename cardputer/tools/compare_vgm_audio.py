@@ -78,6 +78,7 @@ def build(executable: Path, edition: str, shim: Path, classic_q8: int):
         "-I" + str(src_dir), "-I" + str(CARD / "src"),
         str(CARD / "tests" / "r7_real_vgm_compare.c"),
         str(src_dir / "fm_engine.c"), str(src_dir / "pcm_engine.c"),
+        str(src_dir / "ssg_engine.c"),
         "-Wl,--gc-sections", "-lm", "-o", str(executable)
     ])
 
