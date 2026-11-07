@@ -4,6 +4,22 @@
 
 ## 日本語
 
+### Cardputer R7 — C140音量を独立比較する追加開発版
+
+[共通エンジン版PR #61](https://github.com/Layer812/vgmM5/pull/61)を基準に、**Cardputer専用のC140音量**を1倍／2倍／4倍／8倍から比較できるようにした追加開発版です。標準の1倍はCoreS3とPCMが完全一致します。8倍は旧R6のC140の増幅量に近づける試験用設定で、旧R6のFM音色まで再現するものではありません。
+
+- **通常版**（CoreS3同一音量）：`pio run -d cardputer -e m5stack-cardputer`
+- **Classic比較版**（CardputerのC140のみ8倍）：`pio run -d cardputer -e m5stack-cardputer-classic`
+- **任意の手持ちVGM/VGZの聴き比べ**：`python cardputer/tools/compare_vgm_audio.py "C:\\music\\sample.vgz" --seconds 30 --cardputer-gain 8 --zip`
+
+比較器はオリジナルCardputer R6・R7・CoreS3の3系統それぞれについてFM単独／C140単独／ミックスを44.1kHzステレオWAVへ出力します。音量をそろえたミックスWAVと差分レポートも作成します。入力音源は自分のPC上だけで読み込み、GitHubやCIへアップロードしません。
+
+CIには独自作曲ではなく**独自生成したオリジナルのVGMテスト信号**を使用し、市販ゲーム音源データは同梱していません。実際のゲーム曲の比較には手持ちの正規VGM/VGZを指定してください。対象はYM2151＋C140のみです（他の音源チップや実機スピーカーの音響特性は比較対象外）。
+
+**この音量バリエーションは試験用です。正式版および元のCardputer R6を変更しません。**
+
+---
+
 ### Cardputer R7 — 共通 vgmM5lib 開発版
 
 Cardputerの音源エンジンをCoreS3 R67と共通の **vgmM5lib** に移行しました。YM2151などのFM、C140/C352・SegaPCM等のPCM、PSG、SSG、SCC、R31 YM2413を共通化しています。Cardputer固有のキーボード・画面・microSD・オンライン機能・MDX再生コードは維持しています。
@@ -64,6 +80,20 @@ cardputer\RUN_THIS_CARDPUTER_BUILD_ONLY.cmd
 ---
 
 ## English
+
+### Optional Cardputer C140 balance — independent comparison
+
+The shared **Cardputer R7 / CoreS3 R67** PCM remains bit-exact at the default **1×** setting. This separate experimental variant offers a C140-only **8× Classic** build for listening comparison against the original Cardputer R6's much stronger PCM scaling. The original R6 uses different FM synthesis, so Classic does **not** mean bit-exact R6 sound.
+
+- **Default**: `pio run -d cardputer -e m5stack-cardputer`
+- **C140 Classic 8×**: `pio run -d cardputer -e m5stack-cardputer-classic`
+- **Offline real VGM/VGZ 3-way A/B**: `python cardputer/tools/compare_vgm_audio.py "C:\\music\\sample.vgz" --seconds 30 --cardputer-gain 8 --zip`
+
+The comparator processes your supplied file locally through the original Cardputer R6, shared Cardputer R7 and CoreS3 YM2151/C140 engines; it exports separate FM, C140 and mixed WAV tracks plus loudness-matched mixes and JSON results. Other VGM chips, physical DACs and speakers are not analyzed. No music files are uploaded, included or redistributed. CI uses a newly generated, noncommercial synthetic VGM command fixture rather than any game recording.
+
+**Experimental, unmerged; neither Cardputer R6 nor CoreS3 Production is changed.**
+
+---
 
 ### Cardputer R7 — shared vgmM5lib development edition
 

@@ -13,6 +13,7 @@
 #include <atomic> // ★ C++11標準のロックフリー同期
 #include "../../cores3/r67_fix6_mixer_safety.hpp"
 #include "../../cores3/r67_vgm_wait_44100.hpp"
+#include "cardputer_audio_balance.hpp"
 
 // ★ MDXエンジンとのバッファ共有：MDX再生中もaudio_play_taskが動作するようにする
 extern "C" bool mdx_engine_is_playing(void);
@@ -1257,6 +1258,12 @@ void IRAM_ATTR processAudioBlock() {
             
             // Match CoreS3 R67: do not call the system timer per chip/frame.
             active_chips[c]->tick(&ch_l, &ch_r);
+            // Cardputer-specific historical level, applied AFTER the
+            // shared vgmM5lib core; 1x remains bit-exact with CoreS3.
+            if (active_chips[c] == &pcm_wrapper && g_pcm_engine.c140_enabled) {
+                ch_l = cardputer_adjust_c140_level(ch_l);
+                ch_r = cardputer_adjust_c140_level(ch_r);
+            }
             mix_l += ch_l;
             mix_r += ch_r;
         }

@@ -1,0 +1,139 @@
+name: Cardputer R7 optional classic C140 balance A/B (NO FLASH)
+on:
+  push:
+    branches: [dev/cardputer-r7-optional-classic-balance-20261107]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare-and-build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Guard PR61 CoreS3 and source; allow only optional Cardputer balance
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          baseline='0d440f3a392e75edde60954d9ca3dc3c99d31c76'
+          changes=set(subprocess.check_output(
+              ['git','diff','--name-only',baseline,'HEAD'],text=True
+          ).splitlines())
+          allowed={
+              'cardputer/src/cardputer_audio_balance.hpp',
+              'cardputer/src/vgm_engine.cpp',
+              'cardputer/tests/r7_real_vgm_compare.c',
+              'cardputer/tools/compare_vgm_audio.py',
+              'cardputer/platformio.ini',
+              '.github/workflows/cardputer-r7-optional-classic-balance.yml',
+              'cardputer/README.md'
+          }
+          assert changes.issubset(allowed),(changes-allowed)
+          for name in ('src/vgm_engine.cpp','lib/vgmM5lib/src/pcm_engine.c',
+                       'lib/vgmM5lib/src/fm_engine.c','cardputer/src/voice.cpp',
+                       'cardputer/src/mdx_engine.cpp','cardputer/partitions.csv'):
+              before=subprocess.check_output(['git','show',baseline+':'+name])
+              assert Path(name).read_bytes()==before,name
+          s=Path('cardputer/src/vgm_engine.cpp').read_text()
+          assert 'cardputer_adjust_c140_level(' in s
+          assert 'cores3_r67_divide_mix_fast2(' in s
+          ini=Path('cardputer/platformio.ini').read_text()
+          assert '[env:m5stack-cardputer-classic]' in ini
+          assert 'VGMM5_CARDPUTER_C140_GAIN_Q8=2048' in ini
+          print('PASS CoreS3/legacy Cardputer UI/MDX/partition untouched')
+          PY
+      - name: Make fresh VGM fixture with YM2151 + C140 ROM; no copyrighted game music
+        run: python3 cardputer/tests/make_ym2151_c140_fixture.py /tmp/ym2151_c140_legal_fixture.vgm
+      - name: Compare R6 vs shared Cardputer/CoreS3 default level, FM C140 mix separately
+        run: |
+          python3 cardputer/tools/compare_vgm_audio.py /tmp/ym2151_c140_legal_fixture.vgm \
+            --seconds 2 --cardputer-gain 1 \
+            --output cardputer/r7_audio_balance/shared_1x --zip
+      - name: Compare optional R6-style Cardputer C140 8x against unchanged CoreS3/R6
+        run: |
+          python3 cardputer/tools/compare_vgm_audio.py /tmp/ym2151_c140_legal_fixture.vgm \
+            --seconds 2 --cardputer-gain 8 \
+            --output cardputer/r7_audio_balance/classic_8x --zip
+      - name: Verify bit exact default and independent C140 preset
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          root=Path('cardputer/r7_audio_balance')
+          a=json.loads((root/'shared_1x/AUDIO_COMPARE_RESULT.json').read_text())
+          b=json.loads((root/'classic_8x/AUDIO_COMPARE_RESULT.json').read_text())
+          assert a['cardputer_c140_gain']==1
+          assert b['cardputer_c140_gain']==8
+          assert a['results']['R7']['frames']==66150
+          assert b['results']['R7']['frames']==66150
+          assert all(a['r7_vs_cores3_hash_identical'].values()),a
+          assert b['r7_vs_cores3_hash_identical']['fm']
+          assert not b['r7_vs_cores3_hash_identical']['c140']
+          assert not b['r7_vs_cores3_hash_identical']['mix']
+          for label in ('R6','CoreS3'):
+              for stem in ('fm','c140','mix'):
+                  assert a['results'][label]['stems'][stem]['fnv']== \
+                         b['results'][label]['stems'][stem]['fnv']
+          assert a['results']['R7']['rom_blocks']==1
+          assert a['results']['R7']['fm_writes']>100
+          assert a['results']['R7']['c140_writes']>100
+          for audio in ('Cardputer_R6_original','Cardputer_R7_vgmM5lib',
+                        'CoreS3_R67_vgmM5lib'):
+              for stem in ('fm','c140','mix'):
+                  assert (root/'shared_1x'/f'{audio}_{stem}.wav').is_file()
+          print('PASS: shared 1x = CoreS3 FM+C140+mix; x8 only Cardputer C140/mix, no other chip affected')
+          print('C140/combined RMS levels:')
+          for k in ('R6','R7','CoreS3'):
+              print(k, '1x',a['results'][k]['stems']['mix']['rms'],
+                    '8x',b['results'][k]['stems']['mix']['rms'])
+          PY
+      - name: Install pinned PlatformIO and Cardputer libraries
+        run: |
+          python3 -m pip install --disable-pip-version-check platformio 'click==8.1.8'
+          pio pkg install -d cardputer -e m5stack-cardputer
+          python3 - <<'PY'
+          from pathlib import Path
+          names='albums tracks strings companies composers systems'.split()
+          files=[Path('cardputer/src')/(name+'.bin') for name in names]
+          assert not any(p.exists() for p in files) or all(p.exists() for p in files)
+          for p in files:
+              if not p.exists():p.write_bytes(b'\0')
+          PY
+      - name: Cardputer R7 default shared-core native build (NO FLASH)
+        run: pio run -d cardputer -e m5stack-cardputer
+      - name: Capture normal audio firmware SHA256
+        run: |
+          mkdir -p cardputer/r7_audio_balance/firmware
+          cp cardputer/.pio/build/m5stack-cardputer/firmware.bin cardputer/r7_audio_balance/firmware/cardputer_r7_shared_1x.bin
+      - name: Cardputer R7 optional C140 x8 native build (NO FLASH)
+        run: pio run -d cardputer -e m5stack-cardputer-classic
+      - name: Capture classic firmware and assert genuine selectable build variants
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('cardputer/r7_audio_balance/firmware')
+          source=Path('cardputer/.pio/build/m5stack-cardputer-classic/firmware.bin')
+          out=root/'cardputer_r7_classic_c140_8x.bin'
+          out.write_bytes(source.read_bytes())
+          normal=root/'cardputer_r7_shared_1x.bin'
+          assert normal.read_bytes()[:1]==b'\xe9'
+          assert out.read_bytes()[:1]==b'\xe9'
+          manifest={'build':'Cardputer R7 shared engine, independent C140 optional build',
+                    'flash':'NOT PERFORMED','app_offset':'0x10000',
+                    'normal':{'sha256':hashlib.sha256(normal.read_bytes()).hexdigest(),'bytes':normal.stat().st_size},
+                    'classic':{'sha256':hashlib.sha256(out.read_bytes()).hexdigest(),'bytes':out.stat().st_size}}
+          assert manifest['normal']['sha256']!=manifest['classic']['sha256']
+          (root/'RESULT.json').write_text(json.dumps(manifest,indent=2)+'\n')
+          print('PASS two real native ESP32-S3 builds, both app-only; no flash')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CARDPUTER-R7-AUDIO-BALANCE-1X-vs-8X-NOFLASH
+          path: cardputer/r7_audio_balance/
+          retention-days: 14
