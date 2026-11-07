@@ -2,7 +2,7 @@
 
 #if defined(IS_CARDPUTER)
 
-#define VERSION 0.98
+#define VERSION 67
 
 #define STATNUM 4
 #define STATMAX 10
