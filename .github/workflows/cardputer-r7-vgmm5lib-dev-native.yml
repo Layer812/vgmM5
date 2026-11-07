@@ -98,6 +98,35 @@ jobs:
           print('PASS 3-way actual-source 44100-frame YM2151 and 24-voice C140 PCM comparison')
           print(json.dumps(report,indent=2))
           PY
+      - name: Three real-VGM file-stream stem comparisons + independent Cardputer gain
+        run: |
+          set -euo pipefail
+          python3 cardputer/tests/make_ym2151_c140_fixture.py /tmp/cardputer_r7_fixture.vgm
+          python3 cardputer/tools/compare_vgm_audio.py /tmp/cardputer_r7_fixture.vgm \
+            --seconds 2 --output cardputer/r7_artifacts/real_vgm_stems --zip
+          python3 cardputer/tools/compare_vgm_audio.py /tmp/cardputer_r7_fixture.vgm \
+            --seconds 2 --cardputer-gain 8 --output cardputer/r7_artifacts/cardputer_classic_gain --zip
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          a=json.loads(Path('cardputer/r7_artifacts/real_vgm_stems/AUDIO_COMPARE_RESULT.json').read_text())
+          b=json.loads(Path('cardputer/r7_artifacts/cardputer_classic_gain/AUDIO_COMPARE_RESULT.json').read_text())
+          assert all(a['r7_vs_cores3_hash_identical'].values()),a
+          assert a['results']['R6']['frames']==66150
+          assert a['results']['R7']['frames']==66150
+          assert all(a['results']['R7']['stems'][stem]['nonzero']>0
+                     for stem in ('fm','c140','mix'))
+          assert a['results']['R7']['rom_blocks']==1
+          assert a['results']['R7']['fm_writes']>100
+          assert a['results']['R7']['c140_writes']>100
+          assert a['results']['R7']['skipped_chip_commands']==0
+          assert b['results']['R7']['cardputer_c140_gain_q8']==2048
+          assert b['r7_vs_cores3_hash_identical']['fm']
+          assert not b['r7_vs_cores3_hash_identical']['c140']
+          assert b['results']['CoreS3']['stems']['mix']['fnv']==a['results']['CoreS3']['stems']['mix']['fnv']
+          assert b['results']['R6']['stems']['mix']['fnv']==a['results']['R6']['stems']['mix']['fnv']
+          print('PASS actual VGM parser, 3 separate stems x 3 editions; default CoreS3 parity; Cardputer-only 8x C140 preset')
+          PY
       - name: Install pinned PlatformIO and Cardputer libraries
         run: |
           python -m pip install --disable-pip-version-check platformio 'click==8.1.8'
