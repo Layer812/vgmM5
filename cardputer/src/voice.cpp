@@ -465,23 +465,55 @@ static int            saved_cursor_chip     = 0;
 static int            saved_cursor_album    = 0;
 static UIState        parent_state_of_album = STATE_TOP_MENU;
 #ifndef VERSION
-#define VERSION 0.98
+#define VERSION 67
 #endif
 
-void disptitle(int stat, char *title){
-  M5Cardputer.Display.setTextSize(2.0f);
-  M5Cardputer.Display.setCursor(0, 0);
-  M5Cardputer.Display.fillRect(0, 0, 240, 34, BLACK);
-  M5Cardputer.Display.setTextColor(OLIVE);
-  M5Cardputer.Display.printf("vgmM5 %.2f ", VERSION);
-  M5Cardputer.Display.drawLine(0,33,240,33,OLIVE);
-  if(title){
-    M5Cardputer.Display.setCursor(0, 18);
-    M5Cardputer.Display.setTextColor(WHITE);
-    M5Cardputer.Display.setTextSize(1.5f);
-    M5Cardputer.Display.printf("%.*s", 26, title);
-    M5Cardputer.Display.setTextSize(2);
-  }
+// R67 Cardputer 240x135 UI: no size-1 labels, no off-screen strings.
+static String cardputer_display_title;
+static bool cardputer_player_dirty = true;
+static bool cardputer_player_cloud = false;
+static uint32_t cardputer_track_start_ms = 0;
+
+static String cardputer_fit_text(String source, int available_pixels) {
+    auto& lcd = M5Cardputer.Display;
+    if (lcd.textWidth(source) <= available_pixels) return source;
+    while (source.length() > 0 && lcd.textWidth(source + "..") > available_pixels) {
+        int boundary = (int)source.length() - 1;
+        while (boundary > 0 &&
+               (((uint8_t)source[(unsigned)boundary] & 0xC0u) == 0x80u)) {
+            --boundary;  // never leave a truncated UTF-8 continuation
+        }
+        source.remove((unsigned)boundary);
+    }
+    return source + "..";
+}
+
+static void cardputer_draw_hint(const char* hint) {
+    auto& lcd = M5Cardputer.Display;
+    lcd.fillRect(0, 116, 240, 19, BLACK);
+    lcd.setTextSize(1.5f);
+    lcd.setTextColor(CYAN);
+    lcd.drawString(cardputer_fit_text(String(hint), 230), 6, 118);
+}
+
+void disptitle(int stat, char *title) {
+    auto& lcd = M5Cardputer.Display;
+    lcd.fillRect(0, 0, 240, 34, BLACK);
+    lcd.setTextSize(2.0f);
+    lcd.setTextColor(CYAN);
+    lcd.drawString("vgmM5 R67", 6, 0);
+    lcd.setTextColor(stat == STATLOOP ? GREEN : LIGHTGREY);
+    lcd.setTextSize(1.5f);
+    if (title && title[0]) {
+        lcd.drawString(cardputer_fit_text(String(title), 230), 6, 19);
+    }
+    lcd.drawLine(0, 33, 239, 33, OLIVE);
+    if (stat == STATLOOP && title) {
+        cardputer_display_title = title;
+        cardputer_player_cloud = (current_state != STATE_LOCAL_MODE);
+        cardputer_track_start_ms = millis();
+    }
+    cardputer_player_dirty = true;
 }
 
 
@@ -590,7 +622,7 @@ static void cloud_play_track_at(int idx) {
     if (alb_st.length() > 24) alb_st = alb_st.substring(0, 24) + "..";
     cv.drawString(alb_st, 10, 36);
     
-    cv.setTextSize(1.0f);
+    cv.setTextSize(1.5f);
     cv.setTextColor(0x8410);
     String sys_name = cloud_db_get_system_name(alb.sys_id);
     if (sys_name.length() > 0) cv.drawString("Sys: " + sys_name, 10, 56);
@@ -1053,7 +1085,7 @@ void phase_file_selection() {
             int num_items = 3;
 
             canvas.setTextColor(CYAN);
-            canvas.drawString("vgmM5 0.98", 10, 10);
+            canvas.drawString("vgmM5 R67", 10, 9);
             canvas.drawLine(10, 26, 230, 26, DARKGREY);
 
             for (int i = 0; i < num_items; i++) {
@@ -1068,16 +1100,16 @@ void phase_file_selection() {
                 }
             }
 
-            canvas.setTextSize(1.0f);
+            canvas.setTextSize(1.5f);
             if (WiFi.status() == WL_CONNECTED) {
                 canvas.setTextColor(GREEN);
-                canvas.drawString("WiFi: Connected", 10, 100);
+                canvas.drawString("WiFi CONNECTED", 10, 100);
             } else {
                 canvas.setTextColor(RED);
-                canvas.drawString("WiFi: Disconnected", 10, 100);
+                canvas.drawString("WiFi OFFLINE", 10, 100);
             }
             canvas.setTextColor(0x8410);
-            canvas.drawString("1-3: Direct   Enter/Space: OK", 10, 120);
+            cardputer_draw_hint("1-3 Select  Enter OK");
 
             if (keyChanged) {
                 if (key == '.') move_cursor(1, num_items);
@@ -1168,9 +1200,9 @@ void phase_file_selection() {
                 }
             }
 
-            canvas.setTextSize(1.0f);
+            canvas.setTextSize(1.5f);
             canvas.setTextColor(0x8410);
-            canvas.drawString(".,;/: Nav  1/2: Sort  Enter: Sel  B: Back", 5, 120);
+            cardputer_draw_hint(". / ; , Move   B Back");
 
             if (keyChanged) {
                 int next_action = -1;
@@ -1238,9 +1270,9 @@ void phase_file_selection() {
                 }
             }
 
-            canvas.setTextSize(1.0f);
+            canvas.setTextSize(1.5f);
             canvas.setTextColor(0x8410);
-            canvas.drawString(".,;/: Nav  1/2: Sort  Enter: Sel  B: Back", 5, 120);
+            cardputer_draw_hint(". / ; , Move   B Back");
 
             if (keyChanged) {
                 int tot = total > 0 ? total : 1;
@@ -1296,9 +1328,9 @@ void phase_file_selection() {
                 }
             }
 
-            canvas.setTextSize(1.0f);
+            canvas.setTextSize(1.5f);
             canvas.setTextColor(0x8410);
-            canvas.drawString(".,;/: Nav  1/2: Sort  Enter: Sel  B: Back", 5, 120);
+            cardputer_draw_hint(". / ; , Move   B Back");
             
             // Note: The input handling is done at the top now, we shouldn't need duplicate if (keyChanged) 
             // inside the drawing block if it's already at the top. Let's just break;
@@ -1326,9 +1358,9 @@ case STATE_CHIP_LIST: {
                 }
             }
 
-            canvas.setTextSize(1.0f);
+            canvas.setTextSize(1.5f);
             canvas.setTextColor(0x8410);
-            canvas.drawString(".,;/: Nav  1/2: Sort  Enter: Sel  B: Back", 5, 120);
+            cardputer_draw_hint(". / ; , Move   B Back");
 
             if (keyChanged) {
                 int tot = NUM_SUPPORTED_CHIPS;
@@ -1389,9 +1421,9 @@ case STATE_CHIP_LIST: {
                 }
             }
 
-            canvas.setTextSize(1.0f);
+            canvas.setTextSize(1.5f);
             canvas.setTextColor(0x8410);
-            canvas.drawString(".,;/: Nav  1/2: Sort  Enter: Sel  B: Back", 5, 120);
+            cardputer_draw_hint(". / ; , Move   B Back");
 
             if (keyChanged) {
                 int tot = filtered_album_count > 0 ? filtered_album_count : 1;
@@ -1432,20 +1464,19 @@ case STATE_CHIP_LIST: {
             String albTitle = cloud_db_get_string(alb.title_offset);
             canvas.setTextColor(0x7FFD);
             canvas.drawString("Tracks (" + String(filtered_track_count) + ")", 10, 8);
-            canvas.setTextSize(1.0f);
+            canvas.setTextSize(1.5f);
             canvas.setTextColor(0xAAAA);
-            String at = albTitle;
-            if (at.length() > 30) at = at.substring(0, 30) + "..";
-            canvas.drawString(at, 10, 22);
-            canvas.drawLine(10, 28, 230, 28, 0x3975);
+            canvas.drawString(cardputer_fit_text(albTitle, 222), 10, 23);
+            canvas.drawLine(10, 39, 230, 39, 0x3975);
 
-            int page_start = (cursor_pos / 5) * 5;
-            int page_count = (filtered_track_count < 5) ? filtered_track_count : 5;
+            // Four fully readable tracks per 240x135 page plus the key hints.
+            int page_start = (cursor_pos / 4) * 4;
+            int page_count = (filtered_track_count < 4) ? filtered_track_count : 4;
             if (page_start + page_count > filtered_track_count) page_count = filtered_track_count - page_start;
 
             for (int i = 0; i < page_count; i++) {
                 int idx = page_start + i;
-                int y = 32 + i * 18;
+                int y = 43 + i * 18;
                 uint32_t tid = filtered_tracks[idx];
                 TrackRecord trk = cloud_db_get_track(tid);
                 String tname = "";
@@ -1468,7 +1499,7 @@ case STATE_CHIP_LIST: {
                     tname = cloud_db_get_string(trk.title_offset);
                 }
                 
-                if (tname.length() > 26) tname = tname.substring(0, 26) + "..";
+                tname = cardputer_fit_text(tname, 185);
                 
                 if (idx == cursor_pos) {
                     canvas.fillRect(8, y, 224, 18, 0x3030);
@@ -1482,9 +1513,9 @@ case STATE_CHIP_LIST: {
                 }
             }
 
-            canvas.setTextSize(1.0f);
+            canvas.setTextSize(1.5f);
             canvas.setTextColor(0x8410);
-            canvas.drawString("Enter:Play A:All R:Rnd M:Menu", 10, 120);
+            cardputer_draw_hint("Enter Play A All R Rnd");
 
             if (keyChanged) {
                 int tot = filtered_track_count > 0 ? filtered_track_count : 1;
@@ -1529,11 +1560,7 @@ case STATE_CHIP_LIST: {
         }
     }
     
-    if (s_now_playing) {
-        canvas.setTextSize(1.0f);
-        canvas.setTextColor(0x07E0);
-        canvas.drawString("Playing", 190, 8);
-    }
+    // The R67 dedicated player draws its own unambiguous playback state.
 }
 
 #endif // IS_CARDPUTER
