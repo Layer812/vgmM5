@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import zipfile
-from build_only import ROOT, check_db, find_pio
+from build_only import ROOT, find_pio
 
 def build():
     parser=argparse.ArgumentParser()
@@ -28,7 +28,6 @@ def build():
     engine=(ROOT/"src/vgm_engine.cpp").read_text(encoding="utf-8")
     if "#include <vgmM5lib.h>" not in engine:
         raise RuntimeError("Shared vgmM5lib source missing")
-    catalog=check_db(create=True)
     reports=ROOT/"reports"
     reports.mkdir(exist_ok=True)
     logfile=reports/("R67_"+name.upper()+"_BUILD.log")
@@ -47,7 +46,7 @@ def build():
     result={"board":"M5Stack Cardputer","edition":"R67 "+name,
             "native_build":"PASS" if success else "FAIL",
             "flash":"NOT PERFORMED","app_offset":"0x10000",
-            "db_mode":catalog,"return_code":rc}
+            "mode":"microSD only / no embedded DB","return_code":rc}
     if success:
         data=fw.read_bytes()
         result["firmware_sha256"]=hashlib.sha256(data).hexdigest()
