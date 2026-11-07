@@ -682,7 +682,7 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
                     if (b >= 0 && b < engine->namco.block_count && engine->namco.blocks[b].data && page >= engine->namco.blocks[b].start_addr && (page + NAMCO_MCACHE_SIZE) <= (engine->namco.blocks[b].start_addr + engine->namco.blocks[b].size)) {
                         memcpy(namco_mcache_data[ch], &engine->namco.blocks[b].data[page - engine->namco.blocks[b].start_addr], NAMCO_MCACHE_SIZE);
                     } else {
-#if defined(IS_CORES3) && !defined(VGMM5_PR47_C140_REFERENCE)
+#if defined(IS_CORES3) || defined(VGMM5_CARDPUTER_VGMM5LIB) && !defined(VGMM5_PR47_C140_REFERENCE)
                         if (engine->c140_enabled) {
                             // PR47: 32-byte page crossing ROM block boundaries.
                             // Preserve old semantics: the last selected block
@@ -799,7 +799,7 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
         int32_t final_namco_l = namco_mix_l * 4;
         int32_t final_namco_r = namco_mix_r * 4;
 
-#if defined(IS_CORES3)
+#if defined(IS_CORES3) || defined(VGMM5_CARDPUTER_VGMM5LIB)
         // CoreS3 FIX7 regression recovery: vgmM5lib's Tab5-exact import
         // reintroduced int16 pre-clipping of the 22-voice C140 submix.
         // Keep all C140 voice amplitudes until the existing int64 FM+PCM
@@ -813,7 +813,7 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
 
         if (final_namco_r > 32767) final_namco_r = 32767;
         else if (final_namco_r < -32768) final_namco_r = -32768;
-#if defined(IS_CORES3)
+#if defined(IS_CORES3) || defined(VGMM5_CARDPUTER_VGMM5LIB)
         }
 #endif
 

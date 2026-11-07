@@ -11,6 +11,9 @@
 #include <M5Unified.h>
 #include <driver/i2s.h>
 #include <atomic> // ★ C++11標準のロックフリー同期
+#include "../../cores3/r67_fix6_mixer_safety.hpp"
+#include "../../cores3/r67_vgm_wait_44100.hpp"
+#include "cardputer_audio_balance.hpp"
 
 // ★ MDXエンジンとのバッファ共有：MDX再生中もaudio_play_taskが動作するようにする
 extern "C" bool mdx_engine_is_playing(void);
@@ -31,13 +34,9 @@ extern "C" {
 #include "freertos/task.h"
 #include "esp_partition.h"
 #include <esp_spi_flash.h>
-#include "fm_engine.h"
-#include "pcm_engine.h"
-#include "psg_engine.h"
-PSGSoundEngine g_psg_engine;
+// The shared library defines all chip globals except the optional second PSG.
+#include <vgmM5lib.h>
 PSGSoundEngine g_psg_engine2;
-#include "ssg_engine.h"
-#include "scc_engine.h"
 }
 
 #define YM2151_CLOCK 3579545
@@ -178,6 +177,22 @@ class PsgChip final : public ISoundChip { public: PsgChip(TickFunc tf, PSGSoundE
 class SsgChip final : public ISoundChip { public: SsgChip() : ISoundChip(wrap_ssg_tick) {} void write(uint8_t port, uint16_t reg, uint8_t data) override { ssg_engine_write(&g_ssg_engine, reg, data); } };
 class SccChip final : public ISoundChip { public: SccChip() : ISoundChip(wrap_scc_tick) {} void write(uint8_t port, uint16_t reg, uint8_t data) override { scc_engine_write(&g_scc_engine, port, reg, data); } };
 
+// Same independent R31 YM2413 bridge as CoreS3 production.
+static r31_vgm_bridge g_vgmm5lib_opll{};
+static bool g_vgmm5lib_opll_active = false;
+void IRAM_ATTR wrap_vgmm5lib_opll_tick(ISoundChip*, int32_t* l, int32_t* r) {
+    if (g_vgmm5lib_opll_active)
+        r31_vgm_bridge_mix(&g_vgmm5lib_opll, l, r);
+}
+class VgmM5LibOpllChip final : public ISoundChip {
+public:
+    VgmM5LibOpllChip() : ISoundChip(wrap_vgmm5lib_opll_tick) {}
+    void write(uint8_t, uint16_t reg, uint8_t data) override {
+        if (g_vgmm5lib_opll_active)
+            r31_vgm_bridge_write(&g_vgmm5lib_opll, reg, data);
+    }
+};
+
 extern FmChip fm_wrapper;
 
 class OpnxChip final : public ISoundChip {
@@ -225,6 +240,7 @@ PsgChip     psg_wrapper2(wrap_psg_tick2, &g_psg_engine2);
 SsgChip     ssg_wrapper;
 SccChip     scc_wrapper;
 OpnxChip    opnx_wrapper;
+VgmM5LibOpllChip vgmm5lib_opll_wrapper;
 
 int skipGzipHeader(const uint8_t *data, size_t size) {
     if (size < 10) return -1;
@@ -696,14 +712,13 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     }
     // ------------------------------------------
 
-    if (vgm_ym2612_clock != 0 || vgm_ym2151_clock != 0 || vgm_ym2610_clock != 0 || vgm_ym2203_clock != 0 || vgm_ym2608_clock != 0 || vgm_ym3812_clock != 0 || vgm_ym2413_clock != 0) {
+    if (vgm_ym2612_clock != 0 || vgm_ym2151_clock != 0 || vgm_ym2610_clock != 0 || vgm_ym2203_clock != 0 || vgm_ym2608_clock != 0 || vgm_ym3812_clock != 0) {
         uint32_t fm_clock = 0;
         if      (vgm_ym2612_clock != 0) { chip_type = CHIP_YM2612; fm_clock = vgm_ym2612_clock & 0x3FFFFFFF; }
         else if (vgm_ym2608_clock != 0) { chip_type = CHIP_YM2608; fm_clock = vgm_ym2608_clock & 0x3FFFFFFF; }
         else if (vgm_ym2610_clock != 0) { chip_type = CHIP_YM2610; fm_clock = vgm_ym2610_clock & 0x3FFFFFFF; }
         else if (vgm_ym2203_clock != 0) { chip_type = CHIP_YM2203; fm_clock = vgm_ym2203_clock & 0x3FFFFFFF; }
         else if (vgm_ym3812_clock != 0) { chip_type = CHIP_YM3812; fm_clock = vgm_ym3812_clock & 0x3FFFFFFF; }
-        else if (vgm_ym2413_clock != 0) { chip_type = CHIP_YM2413; fm_clock = vgm_ym2413_clock & 0x3FFFFFFF; }
         else                            { chip_type = CHIP_YM2151; fm_clock = vgm_ym2151_clock & 0x3FFFFFFF; }
         fm_engine_init(&g_fm_engine, actual_sample_rate, fm_clock, chip_type);
         pcm_engine_opn_init(&g_pcm_engine, fm_clock, chip_type);
@@ -740,6 +755,19 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
         }
     }
 
+    // Cardputer and CoreS3 use exactly the same YM2413 native bridge.
+    if (vgm_ym2413_clock != 0) {
+        if (active_chip_count >= MAX_CHIPS) {
+            vgm_engine_stop();
+            return false;
+        }
+        r31_vgm_bridge_init(&g_vgmm5lib_opll,
+                            vgm_ym2413_clock & 0x3FFFFFFFu,
+                            actual_sample_rate, YM2413_SMOOTH);
+        g_vgmm5lib_opll_active = true;
+        active_chips[active_chip_count++] = &vgmm5lib_opll_wrapper;
+        active_channel_count += 9;
+    }
 
     is_dual_sn76489 = false;
     Serial.printf("[VGM] SN76489 Clock: %lu, Dual: %d\n", vgm_sn_clock & 0x3FFFFFFF, (vgm_sn_clock & 0x40000000) != 0);
@@ -764,7 +792,9 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     if (vgm_scc_clock != 0) {
         bool is_scc_plus = (vgm_scc_clock & 0x80000000) != 0;
         Serial.printf("[VGM] SCC Clock: %lu, SCC+: %d\n", vgm_scc_clock & 0x3FFFFFFF, is_scc_plus);
-        scc_engine_init(&g_scc_engine, actual_sample_rate, vgm_scc_clock & 0x3FFFFFFF); active_chips[active_chip_count++] = &scc_wrapper;
+        scc_engine_init(&g_scc_engine, actual_sample_rate, vgm_scc_clock & 0x3FFFFFFF);
+        scc_engine_set_variant(&g_scc_engine, is_scc_plus);
+        active_chips[active_chip_count++] = &scc_wrapper;
         active_channel_count += 5;
     }
 
@@ -775,7 +805,10 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     if (vgm_msm6258_clock != 0 || vgm_oki_clock != 0 || vgm_segapcm_clock != 0 || vgm_ym2612_clock != 0 || vgm_ym2608_clock != 0 || vgm_ym2610_clock != 0 || vgm_c140_clock != 0 || vgm_c352_clock != 0) {
         active_chips[active_chip_count++] = &pcm_wrapper;
         active_channel_count += 1;
-        if (vgm_msm6258_clock != 0) pcm_engine_set_msm6258_clock(&g_pcm_engine, vgm_msm6258_clock & 0x3FFFFFFF);
+        if (vgm_msm6258_clock != 0) {
+            const uint8_t div_code = (vgmDataStart > 0x94) ? (header[0x94] & 3u) : 0u;
+            pcm_engine_set_msm6258_clock(&g_pcm_engine, vgm_msm6258_clock & 0x3FFFFFFFu, div_code);
+        }
         if (vgm_oki_clock != 0)     pcm_engine_set_oki_clock(&g_pcm_engine, vgm_oki_clock & 0x3FFFFFFF);
         if (vgm_segapcm_clock != 0) pcm_engine_segapcm_init(&g_pcm_engine, vgm_segapcm_clock & 0x3FFFFFFF, vgm_spcm_intf);
         if (vgm_c140_clock != 0) {
@@ -991,7 +1024,8 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
 }
 
 void vgm_engine_stop() { 
-    isPlaying = false; 
+    isPlaying = false;
+    g_vgmm5lib_opll_active = false; 
     delay(50); 
     pcm_engine_free(&g_pcm_engine); 
     if (vgm_mmap_handle) {
@@ -1040,10 +1074,10 @@ void processVGM() {
                 break; 
             }
             case 0x4F: { uint8_t val = readByte(); /* Game Gear Stereo - not supported yet */ break; }
-            case 0x51: { 
-                uint8_t reg = readByte(); uint8_t val = readByte(); 
-                fm_engine_register_write(&g_fm_engine, reg, val);
-                break; 
+            case 0x51: {
+                uint8_t reg = readByte(); uint8_t val = readByte();
+                vgmm5lib_opll_wrapper.write(0, reg, val);
+                break;
             }
             case 0x5A: { uint8_t reg = readByte(); uint8_t val = readByte(); fm_wrapper.write(0, reg, val); break; }
             case 0x52: case 0x53: {
@@ -1215,38 +1249,41 @@ void IRAM_ATTR processAudioBlock() {
         // =====================================
         // ミキサー処理（各チップの出力を合計し、チップ数で割る）
         // =====================================
-        int32_t mix_l = 0;
-        int32_t mix_r = 0;
+        // Match CoreS3 R67: wide PCM sum BEFORE chip-count/8 master division.
+        int64_t mix_l = 0;
+        int64_t mix_r = 0;
 
         for (int c = 0; c < active_chip_count; c++) {
             int32_t ch_l = 0, ch_r = 0;
             
-            uint32_t t_tick = esp_timer_get_time();
+            // Match CoreS3 R67: do not call the system timer per chip/frame.
             active_chips[c]->tick(&ch_l, &ch_r);
-            uint32_t t_diff = esp_timer_get_time() - t_tick;
-            if (active_chips[c] == &fm_wrapper) prof_fm_time += t_diff;
-            else if (active_chips[c] == &pcm_wrapper) prof_pcm_time += t_diff;
-
+            // Cardputer-specific historical level, applied AFTER the
+            // shared vgmM5lib core; 1x remains bit-exact with CoreS3.
+            if (active_chips[c] == &pcm_wrapper && g_pcm_engine.c140_enabled) {
+                ch_l = cardputer_adjust_c140_level(ch_l);
+                ch_r = cardputer_adjust_c140_level(ch_r);
+            }
             mix_l += ch_l;
             mix_r += ch_r;
         }
 
         // グローバルに計算済みのチップ数で割る
         // （YM2612等は最大出力が20万を超えるため、8で割って音割れとメロディ消失を防ぐ）
-        mix_l /= (global_chip_count * 8);
-        mix_r /= (global_chip_count * 8);
+        mix_l = cores3_r67_divide_mix_fast2(mix_l, global_chip_count);
+        mix_r = cores3_r67_divide_mix_fast2(mix_r, global_chip_count);
 
-        int32_t in_l = mix_l;
-        int32_t in_r = mix_r;
-        
-        dc_state_l = (int64_t)(in_l - dc_prev_l) * 16384 + (dc_state_l * 1019) / 1024;
-        dc_state_r = (int64_t)(in_r - dc_prev_r) * 16384 + (dc_state_r * 1019) / 1024;
+        int32_t in_l = (int32_t)mix_l;
+        int32_t in_r = (int32_t)mix_r;
+
+        dc_state_l = ((int64_t)in_l - (int64_t)dc_prev_l) * 16384 + (dc_state_l * 1019) / 1024;
+        dc_state_r = ((int64_t)in_r - (int64_t)dc_prev_r) * 16384 + (dc_state_r * 1019) / 1024;
         
         dc_prev_l = in_l;
         dc_prev_r = in_r;
         
-        mix_l = (int32_t)(dc_state_l / 16384);
-        mix_r = (int32_t)(dc_state_r / 16384);
+        mix_l = cores3_r67_saturate_i32(dc_state_l / 16384);
+        mix_r = cores3_r67_saturate_i32(dc_state_r / 16384);
 
 if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t::board_M5AtomVoiceS3R || M5.getBoard() == m5::board_t::board_M5AtomS3R) {
         // ☁E小型スピーカー用 EQ補正 (高音マイルド化 ＋ 低音ブースト)
@@ -1266,11 +1303,9 @@ if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t
         mix_r += (eq_bass_r * 2);
 }
 
-        int32_t limit = 26000;
-        if (mix_l > limit) mix_l = limit + (mix_l - limit) / 2;
-        else if (mix_l < -limit) mix_l = -limit + (mix_l + limit) / 2;
-        if (mix_r > limit) mix_r = limit + (mix_r - limit) / 2;
-        else if (mix_r < -limit) mix_r = -limit + (mix_r + limit) / 2;
+        // Same 26k-knee / soft-peak arithmetic as the CoreS3 output.
+        mix_l = cores3_r67_true_peak_limiter(cores3_r67_saturate_i32(mix_l));
+        mix_r = cores3_r67_true_peak_limiter(cores3_r67_saturate_i32(mix_r));
 
         if (mix_l > 32767) mix_l = 32767; else if (mix_l < -32768) mix_l = -32768;
         if (mix_r > 32767) mix_r = 32767; else if (mix_r < -32768) mix_r = -32768;

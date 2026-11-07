@@ -83,14 +83,15 @@ void drawJPChar(byte x, byte y, char *data) {
 } */
 
 void dispmenu(){
-  M5Cardputer.Lcd.fillRect(20,36,200,100,BLUE);
-  M5.Lcd.setTextColor(WHITE);
-  M5.Lcd.setCursor(0, 38);
-  M5.Lcd.println("   m: menu");
-  M5.Lcd.println("   a: play all");
-  M5.Lcd.println("   +/-: maser vol");
-  M5.Lcd.println("   9/0: pcm vol");
-  M5.Lcd.println("   \" \": play/stop");
+  auto& lcd=M5Cardputer.Display;
+  lcd.fillRect(0,36,240,99,BLACK);
+  lcd.setTextSize(1.5f);
+  lcd.setTextColor(CYAN);
+  lcd.drawString("CARDPUTER R67 / SD",7,39);
+  lcd.setTextColor(WHITE);
+  lcd.drawString(";/. Move  ,// Page",7,58);
+  lcd.drawString("SPACE Play  A All",7,77);
+  lcd.drawString("+/- Volume  B Back",7,96);
 }
 
 void hitkey(){
@@ -156,8 +157,9 @@ bool isvgmfile(const char *fileName) {
   const char *ext = strrchr(fileName, '.');
   if(ext == NULL)
     return false;
+  if (strlen(ext) != 4) return false;
   for(i = 0; i < 4; i++)
-    exttmp[i] = tolower(ext[i]);
+    exttmp[i] = tolower((unsigned char)ext[i]);
 
   return (strcmp(".vgm", exttmp) == 0 || strcmp(".vgz", exttmp) == 0);
 }
@@ -168,8 +170,9 @@ bool ismdxfile(const char *fileName) {
   const char *ext = strrchr(fileName, '.');
   if(ext == NULL)
     return false;
+  if (strlen(ext) != 4) return false;
   for(i = 0; i < 4; i++)
-    exttmp[i] = tolower(ext[i]);
+    exttmp[i] = tolower((unsigned char)ext[i]);
   return (strcmp(".mdx", exttmp) == 0);
 }
 
@@ -200,17 +203,17 @@ int makevgmlist(fs::FS &fs) {
 //    sprintf((char *)filelist[i].filename, "/%.*s", PATHMAX - 2, file.name());
 //    printf("ck4 %d %s\n", i, filelist[i]);
     if (isvgmfile((const char *)file.name())){
-      memcpy(filelist[i].filename, file.name(), PATHMAX);
+      snprintf((char*)filelist[i].filename, PATHMAX, "%s", file.name());
       filelist[i].type = TYPE_VGM;
       i++;
     } else if (ismdxfile((const char *)file.name())){
-      memcpy(filelist[i].filename, file.name(), PATHMAX);
+      snprintf((char*)filelist[i].filename, PATHMAX, "%s", file.name());
       filelist[i].type = TYPE_MDX;
       i++;
     } else if(file.isDirectory()){
       const char* fname = file.name();
       if (strcmp(fname, "System Volume Information") != 0 && strcmp(fname, "/System Volume Information") != 0) {
-        memcpy(filelist[i].filename, fname, PATHMAX);
+        snprintf((char*)filelist[i].filename, PATHMAX, "%s", fname);
         filelist[i].type = TYPE_SDIR;
         i++;
       }
@@ -222,32 +225,52 @@ int makevgmlist(fs::FS &fs) {
   return i;
 }
 
-void dispfiles(int disp, int sel, bool start){
-  int i;
-  menuflag = false;
-  M5Cardputer.Display.fillRect(0,36, 240,135, BLACK);
-  M5Cardputer.Display.setCursor(0, 37);
-
-//  M5Cardputer.Display.fillScreen(BLACK);
-  for (i = 0; i < DISPMAX; i++){
-    if(filelist[i + disp].type == TYPE_SDIR || filelist[i + disp].type == TYPE_UDIR)
-      M5Cardputer.Display.setTextColor(LIGHTGREY);
-    if((i + disp)== sel)
-      M5Cardputer.Display.setTextColor(BLACK, start? YELLOW: GREEN);
-
-    const char* fname = (const char*)filelist[i + disp].filename;
-    const char* basename = strrchr(fname, '/');
-    if (basename) fname = basename + 1;
-    if (fname[0] == '\0') fname = (const char*)filelist[i + disp].filename;
-
-    M5Cardputer.Display.printf("%.*s\n", 20, fname);
-    M5Cardputer.Display.setTextColor(WHITE);
+void dispfiles(int disp, int sel, bool start) {
+  auto& lcd = M5Cardputer.Display;
+  lcd.fillRect(0,35,240,81,BLACK);
+  lcd.setTextSize(1.5f);
+  lcd.setTextWrap(false);
+  for (int i=0;i<DISPMAX && i+disp<filenum;i++) {
+    const int idx=i+disp;
+    if(idx<0||!filelist)break;
+    const int y=38+i*19;
+    const bool chosen=(idx==sel);
+    if(chosen)lcd.fillRect(3,y,234,19,start?0x5BC0:0x03A0);
+    const bool is_dir=filelist[idx].type==TYPE_SDIR||filelist[idx].type==TYPE_UDIR;
+    lcd.setTextColor(chosen?BLACK:(is_dir?CYAN:WHITE));
+    const char* label=(const char*)filelist[idx].filename;
+    const char* basename=strrchr(label,'/');
+    if(basename&&basename[1])label=basename+1;
+    String line=is_dir?"[DIR] ":"";
+    line+=label;
+    while(line.length() && lcd.textWidth(line+"..")>225) {
+      int cut=(int)line.length()-1;
+      while(cut>0 && (((uint8_t)line[(unsigned)cut]&0xC0u)==0x80u))--cut;
+      line.remove((unsigned)cut);
+    }
+    lcd.drawString(line,7,y+1);
   }
+  lcd.fillRect(0,116,240,19,BLACK);
+  lcd.setTextColor(LIGHTGREY);
+  lcd.drawString(";/. Move  ,// Page A All",5,118);
 }
 
-
 int selectfile(){
-    dispfiles(disp, sel, false);
+    if(filenum<0)filenum=0;
+    if(filenum>0 && sel>=filenum)sel=filenum-1;
+    if(sel<0)sel=0;
+    if(disp>sel)disp=sel;
+    if(filenum==0){
+      M5Cardputer.Display.fillRect(0,35,240,100,BLACK);
+      M5Cardputer.Display.setTextSize(1.5f);
+      M5Cardputer.Display.setTextColor(YELLOW);
+      M5Cardputer.Display.drawString("NO MUSIC FILES",6,46);
+      M5Cardputer.Display.setTextColor(WHITE);
+      M5Cardputer.Display.drawString("Add VGM/VGZ/MDX",6,72);
+      M5Cardputer.Display.drawString("B: Rescan",6,100);
+    }else{
+      dispfiles(disp, sel, false);
+    }
     if(playall){
       if(sel < (filenum - 1)){
         sel++;
@@ -261,8 +284,14 @@ int selectfile(){
       }
     }
     while(1){
+      delay(10); // leave CPU time for the synthesis/DMA tasks
       M5Cardputer.update();
       if (M5Cardputer.Keyboard.isChange()) {
+          if(filenum == 0){
+              if(M5Cardputer.Keyboard.isKeyPressed('b') ||
+                 M5Cardputer.Keyboard.isKeyPressed('`')) return -1;
+              continue; // never index filelist when the folder is empty
+          }
           if (M5Cardputer.Keyboard.isKeyPressed(';')){
             if(sel != 0){
               if(sel == disp)
@@ -298,11 +327,11 @@ int selectfile(){
             }
             dispfiles(disp, sel, false);
           }
-          if (M5Cardputer.Keyboard.isKeyPressed(' ')){
+          if (M5Cardputer.Keyboard.isKeyPressed(' ') && filenum>0){
             dispfiles(disp, sel, true);
             return sel;
           }
-          if (M5Cardputer.Keyboard.isKeyPressed('') || M5Cardputer.Keyboard.isKeyPressed('`')){
+          if (M5Cardputer.Keyboard.isKeyPressed('') || M5Cardputer.Keyboard.isKeyPressed('`') || M5Cardputer.Keyboard.isKeyPressed('b')){
             // Exit local mode
             return -1;
           }
@@ -370,6 +399,11 @@ bool cnvfile(fs::FS &fs, struct fl *srct, uint8_t *dst){
 }
 
 void filerinit(){
-
+  sel=0;
+  disp=0;
+  dirnum=0;
+  playall=false;
+  snprintf((char*)cdir,PATHMAX,"/");
+  snprintf((char*)dirs[0],PATHMAX,"/");
 }
 #endif // ARDUINO_M5STACK_Cardputer
