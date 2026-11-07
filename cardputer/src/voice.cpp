@@ -615,11 +615,9 @@ static void cardputer_draw_playback_view() {
         lcd.drawString(cardputer_fit_text(chip, 226), 7, 58);
 
         lcd.setTextColor(LIGHTGREY);
-        lcd.drawString(cardputer_player_cloud ? "ONLINE" : "MICRO SD", 7, 78);
+        lcd.drawString("MICRO SD", 7, 78);
         lcd.setTextColor(YELLOW);
-        lcd.drawString(cardputer_fit_text(
-            cardputer_player_cloud ? "SPACE Stop  . Next  ; Prev"
-                                  : "SPACE Stop   +/- Volume", 230), 6, 99);
+        lcd.drawString(cardputer_fit_text("SPACE Stop  +/- Volume", 230), 6, 99);
         cardputer_player_dirty = false;
     }
 
@@ -634,17 +632,9 @@ static void cardputer_draw_playback_view() {
     lcd.setTextColor(GREEN);
     lcd.drawString(status, 7, 115);
     lcd.fillRect(7, 131, 226, 4, DARKGREY);
-    if (cardputer_player_cloud && play_duration_ms > 0) {
-        const uint32_t bounded = elapsed_ms > play_duration_ms ?
-                                 play_duration_ms : elapsed_ms;
-        const int width = (int)(((uint64_t)bounded * 226u) / play_duration_ms);
-        if (width > 0) lcd.fillRect(7, 131, width, 4, GREEN);
-    } else {
-        // Local MDX/VGM length is unknown; movement indicates live playback,
-        // it is not a misleading 100% completion progress bar.
-        const int pos = (int)((seconds % 30u) * 208u / 30u);
-        lcd.fillRect(7 + pos, 131, 18, 4, CYAN);
-    }
+    // Live activity (length may be unknown for local MDX/VGM files).
+    const int position = (int)((seconds % 30u) * 208u / 30u);
+    lcd.fillRect(7 + position, 131, 18, 4, CYAN);
 }
 #endif // IS_CARDPUTER
 
@@ -653,76 +643,27 @@ void phase_playback() {
     
     // ボードに合わせたキー入力（停止・スキップ等）
 #if defined(IS_CARDPUTER)
-        M5Cardputer.update();
-        if (M5Cardputer.Keyboard.isChange()) {
-            if (M5Cardputer.Keyboard.isKeyPressed(' ')) {
-                Serial.println("Cardputer: Stop requested");
-                vgm_engine_stop();
-                mdx_engine_stop();
-                cloud_force_redraw = true;
-                cardputer_player_dirty = true;
-            }
-            if (M5Cardputer.Keyboard.isKeyPressed('=')) {
-                int v = M5.Speaker.getVolume() + 20;
-                if(v > 255) v = 255;
-                M5.Speaker.setVolume(v);
-                Serial.printf("Cardputer: Volume %d\n", v);
-                cardputer_player_dirty = true;
-            }
-            if (M5Cardputer.Keyboard.isKeyPressed('-')) {
-                int v = M5.Speaker.getVolume() - 20;
-                if(v < 0) v = 0;
-                M5.Speaker.setVolume(v);
-                Serial.printf("Cardputer: Volume %d\n", v);
-                cardputer_player_dirty = true;
-            }
-            
-            // Cloud Playback Navigation
-            if (filtered_track_count > 0 && current_state != STATE_LOCAL_MODE) {
-                if (M5Cardputer.Keyboard.isKeyPressed('.')) {
-                    // Next track
-                    Serial.println("Cardputer: Next Track");
-                    vgm_engine_stop();
-                    auto_play_cursor = (auto_play_cursor + 1) % filtered_track_count;
-                    cloud_play_track_at(auto_play_cursor);
-                }
-                else if (M5Cardputer.Keyboard.isKeyPressed(';')) {
-                    // Prev track
-                    Serial.println("Cardputer: Prev Track");
-                    vgm_engine_stop();
-                    auto_play_cursor = (auto_play_cursor - 1 + filtered_track_count) % filtered_track_count;
-                    cloud_play_track_at(auto_play_cursor);
-                }
-                else if (M5Cardputer.Keyboard.isKeyPressed('/')) {
-                    // Next album
-                    Serial.println("Cardputer: Next Album");
-                    vgm_engine_stop();
-                    if (filtered_album_count > 0) {
-                        saved_cursor_album = (saved_cursor_album + 1) % filtered_album_count;
-                        selected_album_id = filtered_albums[saved_cursor_album];
-                        filtered_track_count = cloud_db_get_tracks_by_album(selected_album_id, filtered_tracks, 1000);
-                        auto_play_cursor = 0;
-                        cloud_play_track_at(auto_play_cursor);
-                    }
-                }
-                else if (M5Cardputer.Keyboard.isKeyPressed(',')) {
-                    // Prev album
-                    Serial.println("Cardputer: Prev Album");
-                    vgm_engine_stop();
-                    if (filtered_album_count > 0) {
-                        saved_cursor_album = (saved_cursor_album - 1 + filtered_album_count) % filtered_album_count;
-                        selected_album_id = filtered_albums[saved_cursor_album];
-                        filtered_track_count = cloud_db_get_tracks_by_album(selected_album_id, filtered_tracks, 1000);
-                        auto_play_cursor = 0;
-                        cloud_play_track_at(auto_play_cursor);
-                    }
-                }
-            }
-            
-
+    M5Cardputer.update();
+    if (M5Cardputer.Keyboard.isChange()) {
+        if (M5Cardputer.Keyboard.isKeyPressed(' ')) {
+            vgm_engine_stop();
+            mdx_engine_stop();
+            cardputer_player_dirty = true;
         }
-        cardputer_draw_playback_view();
-
+        if (M5Cardputer.Keyboard.isKeyPressed('=')) {
+            int vol = (int)M5.Speaker.getVolume() + 20;
+            if (vol > 255) vol = 255;
+            M5.Speaker.setVolume(vol);
+            cardputer_player_dirty = true;
+        }
+        if (M5Cardputer.Keyboard.isKeyPressed('-')) {
+            int vol = (int)M5.Speaker.getVolume() - 20;
+            if (vol < 0) vol = 0;
+            M5.Speaker.setVolume(vol);
+            cardputer_player_dirty = true;
+        }
+    }
+    cardputer_draw_playback_view();
 #elif defined(IS_ATOMS3)
         // 再生中も共通のボタン処理を呼び出す
         atoms3_handle_buttons();
@@ -1112,9 +1053,7 @@ void loop() {
         bool just_finished = false;
         if (was_playing_last_frame && !is_playing) {
             just_finished = true;
-#if defined(IS_CARDPUTER)
-            // cloud_force_redraw = true; 
-#endif
+
         }
         was_playing_last_frame = is_playing;
         
