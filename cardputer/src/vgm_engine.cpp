@@ -1248,17 +1248,15 @@ void IRAM_ATTR processAudioBlock() {
         // =====================================
         // ミキサー処理（各チップの出力を合計し、チップ数で割る）
         // =====================================
-        int32_t mix_l = 0;
-        int32_t mix_r = 0;
+        // Match CoreS3 R67: wide PCM sum BEFORE chip-count/8 master division.
+        int64_t mix_l = 0;
+        int64_t mix_r = 0;
 
         for (int c = 0; c < active_chip_count; c++) {
             int32_t ch_l = 0, ch_r = 0;
             
-            uint32_t t_tick = esp_timer_get_time();
+            // Match CoreS3 R67: do not call the system timer per chip/frame.
             active_chips[c]->tick(&ch_l, &ch_r);
-            uint32_t t_diff = esp_timer_get_time() - t_tick;
-            if (active_chips[c] == &fm_wrapper) prof_fm_time += t_diff;
-            else if (active_chips[c] == &pcm_wrapper) prof_pcm_time += t_diff;
 
             mix_l += ch_l;
             mix_r += ch_r;
@@ -1266,20 +1264,20 @@ void IRAM_ATTR processAudioBlock() {
 
         // グローバルに計算済みのチップ数で割る
         // （YM2612等は最大出力が20万を超えるため、8で割って音割れとメロディ消失を防ぐ）
-        mix_l /= (global_chip_count * 8);
-        mix_r /= (global_chip_count * 8);
+        mix_l = cores3_r67_divide_mix_fast2(mix_l, global_chip_count);
+        mix_r = cores3_r67_divide_mix_fast2(mix_r, global_chip_count);
 
-        int32_t in_l = mix_l;
-        int32_t in_r = mix_r;
-        
-        dc_state_l = (int64_t)(in_l - dc_prev_l) * 16384 + (dc_state_l * 1019) / 1024;
-        dc_state_r = (int64_t)(in_r - dc_prev_r) * 16384 + (dc_state_r * 1019) / 1024;
+        int32_t in_l = (int32_t)mix_l;
+        int32_t in_r = (int32_t)mix_r;
+
+        dc_state_l = ((int64_t)in_l - (int64_t)dc_prev_l) * 16384 + (dc_state_l * 1019) / 1024;
+        dc_state_r = ((int64_t)in_r - (int64_t)dc_prev_r) * 16384 + (dc_state_r * 1019) / 1024;
         
         dc_prev_l = in_l;
         dc_prev_r = in_r;
         
-        mix_l = (int32_t)(dc_state_l / 16384);
-        mix_r = (int32_t)(dc_state_r / 16384);
+        mix_l = cores3_r67_saturate_i32(dc_state_l / 16384);
+        mix_r = cores3_r67_saturate_i32(dc_state_r / 16384);
 
 if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t::board_M5AtomVoiceS3R || M5.getBoard() == m5::board_t::board_M5AtomS3R) {
         // ☁E小型スピーカー用 EQ補正 (高音マイルド化 ＋ 低音ブースト)
@@ -1299,11 +1297,9 @@ if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t
         mix_r += (eq_bass_r * 2);
 }
 
-        int32_t limit = 26000;
-        if (mix_l > limit) mix_l = limit + (mix_l - limit) / 2;
-        else if (mix_l < -limit) mix_l = -limit + (mix_l + limit) / 2;
-        if (mix_r > limit) mix_r = limit + (mix_r - limit) / 2;
-        else if (mix_r < -limit) mix_r = -limit + (mix_r + limit) / 2;
+        // Same 26k-knee / soft-peak arithmetic as the CoreS3 output.
+        mix_l = cores3_r67_true_peak_limiter(cores3_r67_saturate_i32(mix_l));
+        mix_r = cores3_r67_true_peak_limiter(cores3_r67_saturate_i32(mix_r));
 
         if (mix_l > 32767) mix_l = 32767; else if (mix_l < -32768) mix_l = -32768;
         if (mix_r > 32767) mix_r = 32767; else if (mix_r < -32768) mix_r = -32768;
