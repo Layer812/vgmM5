@@ -656,6 +656,9 @@ static void cloud_play_track_at(int idx) {
             if (dur == 0) dur = 180;
             play_start_ms    = millis();
             play_duration_ms = (uint32_t)(dur + 2) * 1000;
+            cardputer_player_cloud = true;
+            cardputer_track_start_ms = play_start_ms;
+            cardputer_player_dirty = true;
             auto_play_cursor = idx;
         } else {
             const char* err = vgm_engine_get_error();
@@ -1663,6 +1666,79 @@ static void atoms3_play_current() {
 // ============================================================================
 // 再生中の処理（ボタン監視や画面更新）
 #if !defined(IS_CORES3)
+#if defined(IS_CARDPUTER)
+// R67 240x135 playback screen. The synth/DMA tasks never draw.
+// Static labels are drawn on track/key changes; only the small footer
+// and progress/activity strip are refreshed at a slow 2 Hz cadence.
+static void cardputer_draw_playback_view() {
+    const bool is_vgm = vgm_engine_is_playing();
+    const bool is_mdx = mdx_engine_is_playing();
+    if (!is_vgm && !is_mdx) return;
+
+    static uint32_t last_tick = 0;
+    const uint32_t now = millis();
+    if (!cardputer_player_dirty && (uint32_t)(now - last_tick) < 500) return;
+    last_tick = now;
+
+    auto& lcd = M5Cardputer.Display;
+    if (cardputer_player_dirty) {
+        lcd.fillScreen(BLACK);
+        lcd.setTextSize(2.0f);
+        lcd.setTextColor(CYAN);
+        lcd.drawString("vgmM5 R67", 6, 2);
+        lcd.setTextSize(1.5f);
+        lcd.setTextColor(is_mdx ? YELLOW : GREEN);
+        lcd.drawString(is_mdx ? "MDX" : "VGM", 197, 7);
+        lcd.drawLine(0, 30, 239, 30, DARKGREY);
+
+        String title = cardputer_display_title;
+        if (title.length() == 0) {
+            const char* name = is_mdx ? mdx_engine_get_title() : vgm_engine_get_title();
+            if (name && name[0]) title = String(name);
+        }
+        if (title.length() == 0) title = "Now Playing";
+        lcd.setTextColor(WHITE);
+        lcd.drawString(cardputer_fit_text(title, 226), 7, 37);
+
+        String chip = is_mdx ? "YM2151 + ADPCM" : String(vgm_engine_get_chip());
+        if (chip.length() == 0) chip = "Sound chip";
+        lcd.setTextColor(0x7FFD);
+        lcd.drawString(cardputer_fit_text(chip, 226), 7, 58);
+
+        lcd.setTextColor(LIGHTGREY);
+        lcd.drawString(cardputer_player_cloud ? "ONLINE" : "MICRO SD", 7, 78);
+        lcd.setTextColor(YELLOW);
+        lcd.drawString(cardputer_fit_text(
+            cardputer_player_cloud ? "SPACE Stop  . Next  ; Prev"
+                                  : "SPACE Stop   +/- Volume", 230), 6, 99);
+        cardputer_player_dirty = false;
+    }
+
+    const uint32_t elapsed_ms = now - cardputer_track_start_ms;
+    const uint32_t seconds = elapsed_ms / 1000u;
+    char status[40];
+    snprintf(status, sizeof(status), "VOL %3d  %02lu:%02lu",
+             (int)M5.Speaker.getVolume(),
+             (unsigned long)(seconds / 60u), (unsigned long)(seconds % 60u));
+    lcd.fillRect(0, 115, 240, 20, BLACK);
+    lcd.setTextSize(1.5f);
+    lcd.setTextColor(GREEN);
+    lcd.drawString(status, 7, 115);
+    lcd.fillRect(7, 131, 226, 4, DARKGREY);
+    if (cardputer_player_cloud && play_duration_ms > 0) {
+        const uint32_t bounded = elapsed_ms > play_duration_ms ?
+                                 play_duration_ms : elapsed_ms;
+        const int width = (int)(((uint64_t)bounded * 226u) / play_duration_ms);
+        if (width > 0) lcd.fillRect(7, 131, width, 4, GREEN);
+    } else {
+        // Local MDX/VGM length is unknown; movement indicates live playback,
+        // it is not a misleading 100% completion progress bar.
+        const int pos = (int)((seconds % 30u) * 208u / 30u);
+        lcd.fillRect(7 + pos, 131, 18, 4, CYAN);
+    }
+}
+#endif // IS_CARDPUTER
+
 void phase_playback() {
     // 共通の再生部は audio_play_task (Core 0) 内で自動的に実行され続けている
     
@@ -1674,18 +1750,22 @@ void phase_playback() {
                 Serial.println("Cardputer: Stop requested");
                 vgm_engine_stop();
                 mdx_engine_stop();
+                cloud_force_redraw = true;
+                cardputer_player_dirty = true;
             }
             if (M5Cardputer.Keyboard.isKeyPressed('=')) {
                 int v = M5.Speaker.getVolume() + 20;
                 if(v > 255) v = 255;
                 M5.Speaker.setVolume(v);
                 Serial.printf("Cardputer: Volume %d\n", v);
+                cardputer_player_dirty = true;
             }
             if (M5Cardputer.Keyboard.isKeyPressed('-')) {
                 int v = M5.Speaker.getVolume() - 20;
                 if(v < 0) v = 0;
                 M5.Speaker.setVolume(v);
                 Serial.printf("Cardputer: Volume %d\n", v);
+                cardputer_player_dirty = true;
             }
             
             // Cloud Playback Navigation
@@ -1732,6 +1812,8 @@ void phase_playback() {
             
 
         }
+        cardputer_draw_playback_view();
+
 #elif defined(IS_ATOMS3)
         // 再生中も共通のボタン処理を呼び出す
         atoms3_handle_buttons();
