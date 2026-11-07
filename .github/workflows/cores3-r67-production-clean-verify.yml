@@ -1,0 +1,106 @@
+name: CoreS3 R67 Production clean-source native build (temporary verification)
+on:
+  push:
+    branches: [ci/cores3-r67-production-clean-verify-20261107]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cores3:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify Production code is clean of PR trial/diagnostic files
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          code=Path('src/vgm_engine.cpp').read_text()
+          assert 'pending_i2s.advance(requested,' in code
+          for key in ('s_cores3_audio_health_handle','cores3_audio_health_task',
+                      's_cores3_gen_blocks','s_cores3_play_blocks','s_cores3_ring_empty',
+                      'vgm_cmd_debug_count','s_cores3_i2s_short_write'):
+              assert key not in code,key
+          ini=Path('platformio.ini').read_text()
+          assert 'YM2203_DIAG_SOLO_FNUM' not in ini
+          assert 'VGMM5_CORES3_R7_QUIETPCM=1' in ini
+          assert Path('cores3/r67_pr60_i2s_partial_write.hpp').exists()
+          prod=subprocess.check_output(['git','ls-tree','-r','--name-only','HEAD'],text=True).splitlines()
+          assert not any(x.endswith('r67_pr60_i2s_partial_write_host.cpp') for x in prod)
+          assert not any(x.endswith('cores3-r67-pr60-i2s-partial-write-native.yml') for x in prod)
+          assert not any(x.endswith('r67_pr56_es8388_volume_host.cpp') for x in prod)
+          for link in ('https://burner.m5stack.com/share/firmware/P8DPPV',
+                       'https://burner.m5stack.com/MWUJ4T',
+                       'https://burner.m5stack.com/METQC2'):
+              assert link in Path('README.md').read_text()
+          # CI-only workflows cannot be included in the production ref.
+          prodref=subprocess.check_output(['git','ls-tree','-r','--name-only',
+              'origin/release/cores3-r67-production-clean-20261107'],text=True).splitlines()
+          assert 'cores3/tests/r67_pr60_i2s_partial_write_host.cpp' not in prodref
+          assert '.github/workflows/cores3-r67-production-clean-verify.yml' not in prodref
+          print('PASS production source/layout and three Web Burner links')
+          PY
+      - name: Native host regression on the production-owned I2S suffix logic
+        run: |
+          set -euo pipefail
+          # PR60 host test exists only in the development branch. It is
+          # materialized inside the runner, not committed to Production.
+          git show origin/dev/cores3-r67-pr60-i2s-partial-write-ownership-20261106:cores3/tests/r67_pr60_i2s_partial_write_host.cpp > cores3/tests/r67_pr60_i2s_partial_write_host.cpp
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all \
+            cores3/tests/r67_pr60_i2s_partial_write_host.cpp -o /tmp/pr60_production_host
+          /tmp/pr60_production_host
+          git show origin/dev/cores3-r67-pr60-i2s-partial-write-ownership-20261106:cores3/tests/r67_pr56_es8388_volume_host.cpp > cores3/tests/r67_pr56_es8388_volume_host.cpp
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all \
+            cores3/tests/r67_pr56_es8388_volume_host.cpp -o /tmp/pr56_production_volume
+          /tmp/pr56_production_volume
+          rm cores3/tests/r67_pr60_i2s_partial_write_host.cpp cores3/tests/r67_pr56_es8388_volume_host.cpp
+      - name: Install pinned CoreS3 PlatformIO and verified libraries
+        run: |
+          pip install --disable-pip-version-check platformio 'click==8.1.8'
+          pio pkg install -e m5stack-cores3
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          r=Path('.pio/libdeps/m5stack-cores3')
+          assert 'version=0.2.28' in (r/'M5Unified/library.properties').read_text()
+          target=r/'M5GFX'
+          if not target.exists() or 'version=0.2.35' not in (target/'library.properties').read_text():
+              candidates=[p.parent for p in r.glob('M5GFX@*/library.properties')
+                          if 'version=0.2.35' in p.read_text()]
+              assert len(candidates)==1,candidates
+              if target.exists(): shutil.rmtree(target)
+              shutil.copytree(candidates[0],target)
+          assert 'version=0.2.35' in (target/'library.properties').read_text()
+          PY
+      - name: Build CoreS3 R67 production native firmware (NO FLASH)
+        run: pio run -e m5stack-cores3
+      - name: Pack app-only image and SHA256 manifest
+        run: |
+          python3 - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          p=Path('.pio/build/m5stack-cores3/firmware.bin')
+          data=p.read_bytes()
+          assert len(data)>100000 and data[0]==0xE9
+          dst=Path('production_bin')
+          dst.mkdir(exist_ok=True)
+          (dst/'firmware.bin').write_bytes(data)
+          manifest={
+            'board':'M5Stack CoreS3','edition':'R67 production',
+            'flash_performed':False,'app_offset':'0x10000',
+            'sha256':hashlib.sha256(data).hexdigest(),'size':len(data)
+          }
+          (dst/'RESULT.json').write_text(json.dumps(manifest,indent=2)+'\n')
+          print('PASS native production clean build:',manifest)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CORES3-R67-PRODUCTION-CLEAN-NOFLASH
+          path: production_bin/
+          retention-days: 14
