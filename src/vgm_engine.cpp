@@ -4,6 +4,19 @@
 #include <FFat.h>
 #include <SD.h>
 #include "vgm_engine.h"
+#if defined(IS_CORES3)
+// vgmM5lib provides byte-identical Tab5 R67 synthesis on ESP32-S3.
+#include <vgmM5lib.h>
+#endif
+#if defined(IS_CORES3)
+#include "../cores3/r67_fix6_mixer_safety.hpp"
+#include "../cores3/r67_ui_controls.hpp"
+#endif
+#if defined(IS_CORES3)
+#include "../cores3/cores3_r7_audio_helpers.hpp"
+#include "../cores3/r67_vgm_wait_44100.hpp"
+#include "../cores3/r67_pr60_i2s_partial_write.hpp"
+#endif
 #include <USB.h>
 #include <USBMSC.h>
 #include <esp_partition.h>
@@ -40,6 +53,62 @@ PSGSoundEngine g_psg_engine2;
 #include "scc_engine.h"
 }
 
+
+#if defined(IS_CORES3)
+// ESP-IDF allocates an external I2S/GDMA interrupt on the CPU calling
+// i2s_driver_install(). Previously setup() (Arduino CPU1) installed it
+// while AudioPlayTask ran on CPU0. Install from this one-shot CPU0
+// task instead. The synchronous rendezvous completes before codec setup
+// or either audio task starts; no changes to I2S settings/codec/PCM.
+struct CoreS3I2SCore0Init {
+    const i2s_config_t *config;
+    const i2s_pin_config_t *pins;
+    SemaphoreHandle_t done;
+    esp_err_t install_result;
+    esp_err_t pin_result;
+    int actual_core;
+};
+
+static void cores3_install_i2s_core0_task(void *opaque) {
+    auto *ctx = static_cast<CoreS3I2SCore0Init *>(opaque);
+    ctx->actual_core = xPortGetCoreID();
+    if (ctx->actual_core == 0) {
+        ctx->install_result = i2s_driver_install(I2S_NUM_0, ctx->config, 0, nullptr);
+        if (ctx->install_result == ESP_OK) {
+            ctx->pin_result = i2s_set_pin(I2S_NUM_0, ctx->pins);
+        }
+    }
+    xSemaphoreGive(ctx->done);
+    vTaskDelete(nullptr);
+}
+
+static bool cores3_install_i2s_on_cpu0(
+    const i2s_config_t *config, const i2s_pin_config_t *pins) {
+    const auto done = xSemaphoreCreateBinary();
+    if (done == nullptr) {
+        Serial.println("[CoreS3 R67] FAIL: CPU0 I2S init semaphore allocation");
+        return false;
+    }
+    CoreS3I2SCore0Init ctx{
+        config, pins, done, ESP_FAIL, ESP_FAIL, -1
+    };
+    const BaseType_t created = xTaskCreatePinnedToCore(
+        cores3_install_i2s_core0_task, "I2SInitCore0", 4096,
+        &ctx, 5, nullptr, 0);
+    if (created != pdPASS) {
+        vSemaphoreDelete(done);
+        Serial.println("[CoreS3 R67] FAIL: CPU0 I2S init task allocation");
+        return false;
+    }
+    xSemaphoreTake(done, portMAX_DELAY);
+    vSemaphoreDelete(done);
+    Serial.printf("[CoreS3 R67] I2S driver install CPU%d (AudioPlay CPU0, AudioGen CPU1): install=%d pins=%d\n",
+                  ctx.actual_core, (int)ctx.install_result, (int)ctx.pin_result);
+    return ctx.actual_core == 0 &&
+           ctx.install_result == ESP_OK && ctx.pin_result == ESP_OK;
+}
+#endif
+
 #define YM2151_CLOCK 3579545
 #define VGM_SAMPLE_RATE 44100
 
@@ -53,7 +122,6 @@ volatile int wd = 0;
 
 // ★ クリティカルセクションを全廃し、ロックフリーなアトミック変数に変更
 std::atomic<int> wav_count(0); 
-
 
 // ★ 追加：完全整数（固定小数点）型のDCブロッカー用状態変数
 int64_t dc_state_l = 0;
@@ -178,6 +246,25 @@ class PsgChip final : public ISoundChip { public: PsgChip(TickFunc tf, PSGSoundE
 class SsgChip final : public ISoundChip { public: SsgChip() : ISoundChip(wrap_ssg_tick) {} void write(uint8_t port, uint16_t reg, uint8_t data) override { ssg_engine_write(&g_ssg_engine, reg, data); } };
 class SccChip final : public ISoundChip { public: SccChip() : ISoundChip(wrap_scc_tick) {} void write(uint8_t port, uint16_t reg, uint8_t data) override { scc_engine_write(&g_scc_engine, port, reg, data); } };
 
+#if defined(IS_CORES3)
+// Tab5 R31 YM2413 is a standalone sound chip, not an OPL2/YM2151 mode.
+// Keep its state on standard CoreS3 RAM; NO P4-only SPM/MALLOC_CAP_SPM.
+static r31_vgm_bridge g_vgmm5lib_opll{};
+static bool g_vgmm5lib_opll_active = false;
+void IRAM_ATTR wrap_vgmm5lib_opll_tick(ISoundChip*, int32_t* l, int32_t* r) {
+    if (g_vgmm5lib_opll_active)
+        r31_vgm_bridge_mix(&g_vgmm5lib_opll, l, r);
+}
+class VgmM5LibOpllChip final : public ISoundChip {
+public:
+    VgmM5LibOpllChip() : ISoundChip(wrap_vgmm5lib_opll_tick) {}
+    void write(uint8_t, uint16_t reg, uint8_t data) override {
+        if (g_vgmm5lib_opll_active)
+            r31_vgm_bridge_write(&g_vgmm5lib_opll, reg, data);
+    }
+};
+#endif
+
 extern FmChip fm_wrapper;
 
 class OpnxChip final : public ISoundChip {
@@ -225,6 +312,9 @@ PsgChip     psg_wrapper2(wrap_psg_tick2, &g_psg_engine2);
 SsgChip     ssg_wrapper;
 SccChip     scc_wrapper;
 OpnxChip    opnx_wrapper;
+#if defined(IS_CORES3)
+VgmM5LibOpllChip vgmm5lib_opll_wrapper;
+#endif
 
 int skipGzipHeader(const uint8_t *data, size_t size) {
     if (size < 10) return -1;
@@ -325,7 +415,6 @@ int puff_read_cb(void* ctx, unsigned char* buf, unsigned long len) {
     return bytes_read;
 }
 
-static int vgm_cmd_debug_count = 0;
 	
 bool vgm_engine_play(const char* filepath, bool use_sd) {
     // Always stop and clean up before starting a new song, regardless of current state
@@ -696,14 +785,20 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     }
     // ------------------------------------------
 
-    if (vgm_ym2612_clock != 0 || vgm_ym2151_clock != 0 || vgm_ym2610_clock != 0 || vgm_ym2203_clock != 0 || vgm_ym2608_clock != 0 || vgm_ym3812_clock != 0 || vgm_ym2413_clock != 0) {
+    if (vgm_ym2612_clock != 0 || vgm_ym2151_clock != 0 || vgm_ym2610_clock != 0 || vgm_ym2203_clock != 0 || vgm_ym2608_clock != 0 || vgm_ym3812_clock != 0
+#if !defined(IS_CORES3)
+        || vgm_ym2413_clock != 0
+#endif
+        ) {
         uint32_t fm_clock = 0;
         if      (vgm_ym2612_clock != 0) { chip_type = CHIP_YM2612; fm_clock = vgm_ym2612_clock & 0x3FFFFFFF; }
         else if (vgm_ym2608_clock != 0) { chip_type = CHIP_YM2608; fm_clock = vgm_ym2608_clock & 0x3FFFFFFF; }
         else if (vgm_ym2610_clock != 0) { chip_type = CHIP_YM2610; fm_clock = vgm_ym2610_clock & 0x3FFFFFFF; }
         else if (vgm_ym2203_clock != 0) { chip_type = CHIP_YM2203; fm_clock = vgm_ym2203_clock & 0x3FFFFFFF; }
         else if (vgm_ym3812_clock != 0) { chip_type = CHIP_YM3812; fm_clock = vgm_ym3812_clock & 0x3FFFFFFF; }
+#if !defined(IS_CORES3)
         else if (vgm_ym2413_clock != 0) { chip_type = CHIP_YM2413; fm_clock = vgm_ym2413_clock & 0x3FFFFFFF; }
+#endif
         else                            { chip_type = CHIP_YM2151; fm_clock = vgm_ym2151_clock & 0x3FFFFFFF; }
         fm_engine_init(&g_fm_engine, actual_sample_rate, fm_clock, chip_type);
         pcm_engine_opn_init(&g_pcm_engine, fm_clock, chip_type);
@@ -741,6 +836,25 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     }
 
 
+#if defined(IS_CORES3)
+    // Independent Tab5 R31 OPLL bridge instead of legacy generic OPL.
+    // Supports YM2413 alongside a distinct FM chip in the same VGM.
+    if (vgm_ym2413_clock != 0) {
+        if (active_chip_count >= MAX_CHIPS) {
+            Serial.println("[CoreS3][vgmM5lib] OPLL: chip count exceeded");
+            vgm_engine_stop();
+            return false;
+        }
+        r31_vgm_bridge_init(&g_vgmm5lib_opll,
+                            vgm_ym2413_clock & 0x3FFFFFFFu,
+                            actual_sample_rate, YM2413_SMOOTH);
+        g_vgmm5lib_opll_active = true;
+        active_chips[active_chip_count++] = &vgmm5lib_opll_wrapper;
+        active_channel_count += 9;
+        Serial.printf("[CoreS3][vgmM5lib] Tab5 R31 YM2413 rate=%lu\n",
+                      (unsigned long)actual_sample_rate);
+    }
+#endif
     is_dual_sn76489 = false;
     Serial.printf("[VGM] SN76489 Clock: %lu, Dual: %d\n", vgm_sn_clock & 0x3FFFFFFF, (vgm_sn_clock & 0x40000000) != 0);
     if (vgm_sn_clock != 0) {
@@ -764,7 +878,11 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     if (vgm_scc_clock != 0) {
         bool is_scc_plus = (vgm_scc_clock & 0x80000000) != 0;
         Serial.printf("[VGM] SCC Clock: %lu, SCC+: %d\n", vgm_scc_clock & 0x3FFFFFFF, is_scc_plus);
-        scc_engine_init(&g_scc_engine, actual_sample_rate, vgm_scc_clock & 0x3FFFFFFF); active_chips[active_chip_count++] = &scc_wrapper;
+        scc_engine_init(&g_scc_engine, actual_sample_rate, vgm_scc_clock & 0x3FFFFFFF);
+#if defined(IS_CORES3)
+        scc_engine_set_variant(&g_scc_engine, is_scc_plus);
+#endif
+        active_chips[active_chip_count++] = &scc_wrapper;
         active_channel_count += 5;
     }
 
@@ -775,11 +893,27 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     if (vgm_msm6258_clock != 0 || vgm_oki_clock != 0 || vgm_segapcm_clock != 0 || vgm_ym2612_clock != 0 || vgm_ym2608_clock != 0 || vgm_ym2610_clock != 0 || vgm_c140_clock != 0 || vgm_c352_clock != 0) {
         active_chips[active_chip_count++] = &pcm_wrapper;
         active_channel_count += 1;
-        if (vgm_msm6258_clock != 0) pcm_engine_set_msm6258_clock(&g_pcm_engine, vgm_msm6258_clock & 0x3FFFFFFF);
+        if (vgm_msm6258_clock != 0) {
+#if defined(IS_CORES3)
+            // R64: header byte 0x94 defines /1024, /768, /512, /512.
+            const uint8_t div_code = (vgmDataStart > 0x94) ? (header[0x94] & 3u) : 0u;
+            pcm_engine_set_msm6258_clock(&g_pcm_engine, vgm_msm6258_clock & 0x3FFFFFFFu, div_code);
+#else
+            pcm_engine_set_msm6258_clock(&g_pcm_engine, vgm_msm6258_clock & 0x3FFFFFFF);
+#endif
+        }
         if (vgm_oki_clock != 0)     pcm_engine_set_oki_clock(&g_pcm_engine, vgm_oki_clock & 0x3FFFFFFF);
         if (vgm_segapcm_clock != 0) pcm_engine_segapcm_init(&g_pcm_engine, vgm_segapcm_clock & 0x3FFFFFFF, vgm_spcm_intf);
         if (vgm_c140_clock != 0) {
+#if defined(IS_CORES3)
+            // R62: VGM 1.71 subtype comes from header byte 0x96.
+            const uint8_t raw_type = vgmDataStart > 0x96 ? header[0x96] : 0u;
+            const uint8_t c140_bank_type = raw_type <= 1u ? raw_type : 0u;
+            if (raw_type > 1u)
+                Serial.printf("[CoreS3 R7] C140 type %u unsupported; use System2 fallback\n", unsigned(raw_type));
+#else
             uint8_t c140_bank_type = (vgm_c140_clock >> 31) & 1; // 0 = System 2, 1 = System 21
+#endif
             Serial.printf("[VGM] C140 Clock: %lu, Type: %d\n", vgm_c140_clock & 0x3FFFFFFF, c140_bank_type);
             pcm_engine_namco_init(&g_pcm_engine, vgm_c140_clock & 0x3FFFFFFF, 0xC1, c140_bank_type);
         }
@@ -793,8 +927,25 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     // ========================================================
     // ★ ミキサー用の除数（チップ数）をグローバルに一度だけ事前計算
     // ========================================================
+#if defined(IS_CORES3)
+    // R65: count distinct VGM clock fields instead of FM/DAC/SSG
+    // software wrappers. Keep CoreS3's existing conservative /8
+    // master headroom (Tab5 uses a different /3 mixer).
+    const uint32_t clocks[] = {
+        vgm_ym2413_clock, vgm_ym2612_clock, vgm_ym2151_clock,
+        vgm_ym2203_clock, vgm_ym2608_clock, vgm_ym2610_clock,
+        vgm_ym3812_clock, vgm_ay8910_clock, vgm_msm6258_clock,
+        vgm_oki_clock, vgm_segapcm_clock, vgm_scc_clock,
+        vgm_c140_clock, vgm_c352_clock
+    };
+    global_chip_count = int(cores3_physical_chip_count(vgm_sn_clock,
+                          clocks, sizeof(clocks) / sizeof(clocks[0])));
+    Serial.printf("[CoreS3 R7] Physical chips=%d wrappers=%d; /8 headroom\n",
+                  global_chip_count, active_chip_count);
+#else
     global_chip_count = (active_chip_count > 0) ? active_chip_count : 1;
     Serial.printf("[VGM] Mixer: chip_count=%d\n", global_chip_count);
+#endif
 
     waitSamples = 8820; vgm_time_acc = 0; ym2612_pcm_offset = 0;
     sn76489_writes = 0;
@@ -964,23 +1115,6 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     eq_lpf_l = 0; eq_lpf_r = 0; eq_bass_l = 0; eq_bass_r = 0;
     
 
-    // ==========================================
-    // DEBUG: VGM ポインタの最終位置を確認
-    // ==========================================
-    Serial.printf("[VGM] PLAY INIT: vgm_ptr=%lu, vgmDataStart=%lu, vgm_file_size=%lu\n", vgm_ptr, vgmDataStart, vgm_file_size);
-    if (!vgm_is_streaming && vgm_data != nullptr) {
-        Serial.printf("[VGM] Header Magic: %c%c%c%c\n", vgm_data[0], vgm_data[1], vgm_data[2], vgm_data[3]);
-        // データ開始位置の最初の数バイトをダンプ
-        if (vgmDataStart < vgm_file_size) {
-            Serial.printf("[VGM] DataStart Dump: ");
-            for (int i = 0; i < 16 && (vgmDataStart + i) < vgm_file_size; i++) {
-                Serial.printf("%02X ", vgm_data[vgmDataStart + i]);
-            }
-            Serial.println();
-        }
-    }
-    vgm_cmd_debug_count = 0; // ★この1行を追加！曲の開始時に必ずログカウンタをリセットする
-
     // アンプの起動遅延（ミュート解除）を待つため、300ミリ秒間無音を流してアンプを完全に起こす
     vTaskDelay(pdMS_TO_TICKS(300));
 
@@ -990,8 +1124,12 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     return true;
 }
 
-void vgm_engine_stop() { 
-    isPlaying = false; 
+void vgm_engine_stop() {
+    isPlaying = false;
+#if defined(IS_CORES3)
+    g_vgmm5lib_opll_active = false;
+#endif
+    
     delay(50); 
     pcm_engine_free(&g_pcm_engine); 
     if (vgm_mmap_handle) {
@@ -1027,11 +1165,6 @@ void processVGM() {
     while (isPlaying && vgm_ptr < vgm_file_size && waitSamples == 0) {
         uint8_t cmd = readByte();
         
-        // DEBUG: 最初の20コマンドをダンプ
-        if (vgm_cmd_debug_count < 20) {
-            Serial.printf("[VGM] CMD #%d: ptr=%lu, cmd=0x%02X\n", vgm_cmd_debug_count, vgm_ptr - 1, cmd);
-            vgm_cmd_debug_count++;
-        }
         switch (cmd) {
             case 0x30: { uint8_t val = readByte(); if (is_dual_sn76489) psg_wrapper2.write(0, 0, val); break; }
             case 0x50: { 
@@ -1040,10 +1173,14 @@ void processVGM() {
                 break; 
             }
             case 0x4F: { uint8_t val = readByte(); /* Game Gear Stereo - not supported yet */ break; }
-            case 0x51: { 
-                uint8_t reg = readByte(); uint8_t val = readByte(); 
+            case 0x51: {
+                uint8_t reg = readByte(); uint8_t val = readByte();
+#if defined(IS_CORES3)
+                vgmm5lib_opll_wrapper.write(0, reg, val);
+#else
                 fm_engine_register_write(&g_fm_engine, reg, val);
-                break; 
+#endif
+                break;
             }
             case 0x5A: { uint8_t reg = readByte(); uint8_t val = readByte(); fm_wrapper.write(0, reg, val); break; }
             case 0x52: case 0x53: {
@@ -1130,10 +1267,6 @@ void processVGM() {
             addr |= readByte();
             uint16_t val = (readByte() << 8);
             val |= readByte();
-            if (vgm_cmd_debug_count < 100) {
-                Serial.printf("[VGM] C352 Write: addr=0x%04X, data=0x%04X\n", addr, val);
-                vgm_cmd_debug_count++;
-            }
             pcm_engine_namco_write(&g_pcm_engine, addr, val);
             break;
         }
@@ -1182,50 +1315,83 @@ void processVGM() {
 }
 
 
+#if !defined(IS_CORES3)
+// Retain historical profiling for other boards, which are not PR45 targets.
 static uint32_t prof_fm_time = 0;
 static uint32_t prof_pcm_time = 0;
 static uint32_t prof_vgm_time = 0;
-
 static uint32_t profile_start_time = 0;
 static uint32_t profile_total_time = 0;
 static uint32_t profile_blocks = 0;
+#endif
 
 void IRAM_ATTR processAudioBlock() {
     if (!isPlaying) return;
+#if !defined(IS_CORES3)
     uint32_t t_start = esp_timer_get_time();
+#endif
     
     int16_t *out_buf = wav_buff[wd];
 
 
     for (int i = 0; i < BUFF_SIZE; i++) {
-        vgm_time_acc += 44100;
-        while (vgm_time_acc >= actual_sample_rate && isPlaying) {
-            if (waitSamples > 0) {
-                uint32_t consume = vgm_time_acc / actual_sample_rate;
-                if (consume > waitSamples) consume = waitSamples;
-                waitSamples -= consume;
-                vgm_time_acc -= consume * actual_sample_rate;
-            }
-            if (waitSamples == 0 && isPlaying) {
-                uint32_t t_vgm = esp_timer_get_time(); processVGM(); prof_vgm_time += esp_timer_get_time() - t_vgm; 
-                if (waitSamples == 0) continue;
+#if defined(IS_CORES3)
+        // The ESP32-S3 path always renders at 44.1kHz, matching VGM's
+        // 44.1kHz timebase. Avoid the variable integer division and inner
+        // accumulator loop for every sample in C140+YM2151 workloads.
+        // Preserve the exact parser ordering, including one-sample waits.
+        // Keep the original path below if the rate/state ever differs.
+        if (actual_sample_rate == VGM_SAMPLE_RATE && vgm_time_acc == 0) {
+            cores3_vgm_step_44100(waitSamples, isPlaying, []() { processVGM(); });
+        } else
+#endif
+        {
+            vgm_time_acc += 44100;
+            while (vgm_time_acc >= actual_sample_rate && isPlaying) {
+                if (waitSamples > 0) {
+                    uint32_t consume = vgm_time_acc / actual_sample_rate;
+                    if (consume > waitSamples) consume = waitSamples;
+                    waitSamples -= consume;
+                    vgm_time_acc -= consume * actual_sample_rate;
+                }
+                if (waitSamples == 0 && isPlaying) {
+#if defined(IS_CORES3)
+                    processVGM();
+#else
+                    uint32_t t_vgm = esp_timer_get_time(); processVGM(); prof_vgm_time += esp_timer_get_time() - t_vgm;
+#endif
+                    if (waitSamples == 0) continue;
+                }
             }
         }
 
         // =====================================
         // ミキサー処理（各チップの出力を合計し、チップ数で割る）
         // =====================================
+#if defined(IS_CORES3)
+        // FIX6: chip outputs are int32 but 16+ channels can sum into
+        // larger values. Never narrow until AFTER the master divide.
+        int64_t mix_l = 0;
+        int64_t mix_r = 0;
+#else
         int32_t mix_l = 0;
         int32_t mix_r = 0;
+#endif
 
         for (int c = 0; c < active_chip_count; c++) {
             int32_t ch_l = 0, ch_r = 0;
             
+#if defined(IS_CORES3)
+            // FIX1: no per-sample timer calls in 44.1kHz generator hot path.
+            // One block still has start/end timing; chip timing was diagnostic.
+            active_chips[c]->tick(&ch_l, &ch_r);
+#else
             uint32_t t_tick = esp_timer_get_time();
             active_chips[c]->tick(&ch_l, &ch_r);
             uint32_t t_diff = esp_timer_get_time() - t_tick;
             if (active_chips[c] == &fm_wrapper) prof_fm_time += t_diff;
             else if (active_chips[c] == &pcm_wrapper) prof_pcm_time += t_diff;
+#endif
 
             mix_l += ch_l;
             mix_r += ch_r;
@@ -1233,21 +1399,45 @@ void IRAM_ATTR processAudioBlock() {
 
         // グローバルに計算済みのチップ数で割る
         // （YM2612等は最大出力が20万を超えるため、8で割って音割れとメロディ消失を防ぐ）
+#if defined(IS_CORES3)
+        // Preserve R6's chip-count/8 master level exactly. Divide in
+        // 64-bit, then saturate before the DC blocker.
+        // PR46: 2 physical chips (Dragon Saber YM2151+C140) use
+        // bit-exact signed /16 shift instead of runtime int64 divide.
+        // All other chip counts retain the R67 FIX6 implementation.
+        mix_l = cores3_r67_divide_mix_fast2(mix_l, global_chip_count);
+        mix_r = cores3_r67_divide_mix_fast2(mix_r, global_chip_count);
+#else
         mix_l /= (global_chip_count * 8);
         mix_r /= (global_chip_count * 8);
+#endif
 
-        int32_t in_l = mix_l;
-        int32_t in_r = mix_r;
+        int32_t in_l = (int32_t)mix_l;
+        int32_t in_r = (int32_t)mix_r;
         
+#if defined(IS_CORES3)
+        // Also widen the subtraction BEFORE multiplying by 16384.
+        dc_state_l = ((int64_t)in_l - (int64_t)dc_prev_l) * 16384 + (dc_state_l * 1019) / 1024;
+        dc_state_r = ((int64_t)in_r - (int64_t)dc_prev_r) * 16384 + (dc_state_r * 1019) / 1024;
+#else
         dc_state_l = (int64_t)(in_l - dc_prev_l) * 16384 + (dc_state_l * 1019) / 1024;
         dc_state_r = (int64_t)(in_r - dc_prev_r) * 16384 + (dc_state_r * 1019) / 1024;
+#endif
         
         dc_prev_l = in_l;
         dc_prev_r = in_r;
         
+#if defined(IS_CORES3)
+        mix_l = cores3_r67_saturate_i32(dc_state_l / 16384);
+        mix_r = cores3_r67_saturate_i32(dc_state_r / 16384);
+#else
         mix_l = (int32_t)(dc_state_l / 16384);
         mix_r = (int32_t)(dc_state_r / 16384);
+#endif
 
+// The Atom EQ is never selected on CoreS3: remove three M5.getBoard()
+// queries from each 44.1kHz output frame without changing any audio math.
+#if !defined(IS_CORES3)
 if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t::board_M5AtomVoiceS3R || M5.getBoard() == m5::board_t::board_M5AtomS3R) {
         // ☁E小型スピーカー用 EQ補正 (高音マイルド化 ＋ 低音ブースト)
         
@@ -1265,23 +1455,40 @@ if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t
         mix_l += (eq_bass_l * 2);
         mix_r += (eq_bass_r * 2);
 }
+#endif // !IS_CORES3
 
+#if defined(IS_CORES3)
+        // FIX6: prevent hard-clipped peaks after simultaneous FM/PCM.
+        // Normal PCM below +/-26000 is unchanged, with no global gain
+        // reduction and no envelope/frequency changes to FM or C140.
+        mix_l = cores3_r67_true_peak_limiter(cores3_r67_saturate_i32(mix_l));
+        mix_r = cores3_r67_true_peak_limiter(cores3_r67_saturate_i32(mix_r));
+#else
         int32_t limit = 26000;
         if (mix_l > limit) mix_l = limit + (mix_l - limit) / 2;
         else if (mix_l < -limit) mix_l = -limit + (mix_l + limit) / 2;
         if (mix_r > limit) mix_r = limit + (mix_r - limit) / 2;
         else if (mix_r < -limit) mix_r = -limit + (mix_r + limit) / 2;
+#endif
 
         if (mix_l > 32767) mix_l = 32767; else if (mix_l < -32768) mix_l = -32768;
         if (mix_r > 32767) mix_r = 32767; else if (mix_r < -32768) mix_r = -32768;
 
         out_buf[i * 2]     = (int16_t)mix_l;
         out_buf[i * 2 + 1] = (int16_t)mix_r;
+#if defined(IS_CORES3) && defined(VGMM5_CORES3_R7_QUIETPCM)
+        // Same R66-A treatment that eliminated popping on Tab5.
+        // Shared PCM buffer feeds both the CoreS3 internal Speaker
+        // and the Module Audio ES8388 direct-I2S paths.
+        static uint32_t quiet_seed = 0xA56959A5u;
+        cores3_fill_silent_pcm(&out_buf[i*2], &out_buf[i*2+1], &quiet_seed);
+#endif
     }
     wav_buff_size[wd] = BUFF_SIZE;
     wd = (wd + 1) % WAV_BUFF_COUNT;
     wav_count++;
     
+#if !defined(IS_CORES3)
     uint32_t t_end = esp_timer_get_time();
     if (profile_start_time == 0) profile_start_time = t_end;
     profile_total_time += (t_end - t_start);
@@ -1301,6 +1508,7 @@ if (M5.getBoard() == m5::board_t::board_M5AtomS3 || M5.getBoard() == m5::board_t
         profile_total_time = 0;
         profile_blocks = 0;
     }
+#endif
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -1313,11 +1521,22 @@ void audio_generate_task(void *args) {
     while (true) {
         xSemaphoreTake(xSemaphore, portMAX_DELAY);
 
+#if !defined(IS_CORES3)
         uint32_t consecutive_blocks = 0;
+#endif
 
         while (isPlaying) {
             if (wav_count < (WAV_BUFF_COUNT - 4)) {
                 processAudioBlock();
+#if defined(IS_CORES3)
+                // PR52: NO deliberate 1-tick stall after four PCM blocks.
+                // A mandatory tick sleep repeatedly removes producer
+                // headroom during YM2151+C140 playback. The full synth
+                // loop naturally blocks on xSemaphore when ring>=12;
+                // give equal/higher-priority tasks a scheduling point
+                // without sleeping or changing any PCM samples.
+                taskYIELD();
+#else
                 if (chip_type == CHIP_YM2151 || chip_type == CHIP_YM2608) {
                     consecutive_blocks++;
                     if (consecutive_blocks >= 4) {
@@ -1329,6 +1548,7 @@ void audio_generate_task(void *args) {
                 } else {
                     taskYIELD();
                 }
+#endif
             } else {
                 break;
             }
@@ -1339,13 +1559,29 @@ void audio_generate_task(void *args) {
 
 // 前方宣言
 static bool g_es8388_detected = false;
+#if defined(IS_CORES3)
+// Hardware codec volume defaults to 0x18 / 0x21 (24 of 33 steps); the
+// internal Speaker retains the established R6 default of 48 / 255.
+static uint8_t g_cores3_ui_volume = 48;
+// ES8388 probe can legitimately use 0x11 in a nonstandard setup.
+// Never write the absent codec on every volume tap (I2C timeout).
+static uint8_t g_cores3_es8388_addr = 0x10;
+#endif
 
 // ────────────────────────────────────────────────────────────────────────
 // Core 0：I2S（DMA）転送 ＆ 減衰検知時のセマフォ発行
 // ────────────────────────────────────────────────────────────────────────
 void audio_play_task(void *args) {
+#if defined(IS_CORES3)
+    CoreS3I2SPendingBlock pending_i2s;
+#endif
     while (true) {
         bool any_playing = (isPlaying && !isPaused) || mdx_engine_is_playing();
+#if defined(IS_CORES3)
+        // Track restart and prebuffering discard any incomplete old song
+        // transfer; a live PCM block remains owned until fully submitted.
+        if (!any_playing || prebuffering) pending_i2s.reset();
+#endif
         if (prebuffering && wav_count >= (WAV_BUFF_COUNT - 4)) {
             prebuffering = false;
         }
@@ -1360,9 +1596,27 @@ void audio_play_task(void *args) {
 #else
             bool queued = false;
             if (g_es8388_detected) {
+#if defined(IS_CORES3)
+                // PR60: keep rd/wav_count stable if i2s_write accepts only
+                // part of the 512-frame block. A partial block MUST NOT be
+                // discarded: send only the remaining suffix next iteration.
+                const size_t requested = wav_buff_size[rd] * 4u;
+                queued = pending_i2s.advance(requested,
+                    [&](size_t offset, size_t remaining) -> size_t {
+                        size_t bytes_written = 0;
+                        i2s_write(I2S_NUM_0,
+                            (const void *)((const uint8_t *)wav_buff[rd] + offset),
+                            remaining, &bytes_written, portMAX_DELAY);
+                        return bytes_written;
+                    });
+                if (queued) pending_i2s.reset();
+#else
                 size_t bytes_written = 0;
-                i2s_write(I2S_NUM_0, (const void *)wav_buff[rd], wav_buff_size[rd] * 4, &bytes_written, portMAX_DELAY);
+                const size_t requested = wav_buff_size[rd] * 4u;
+                i2s_write(I2S_NUM_0, (const void *)wav_buff[rd],
+                          requested, &bytes_written, portMAX_DELAY);
                 queued = (bytes_written > 0);
+#endif
             } else {
                 queued = M5.Speaker.playRaw((const int16_t *)wav_buff[rd], wav_buff_size[rd] * 2, actual_sample_rate, true, 1, 0, false);
             }
@@ -1373,11 +1627,39 @@ void audio_play_task(void *args) {
                 if (wav_count <= (WAV_BUFF_COUNT / 2)) {
                     xSemaphoreGive(xSemaphore);
                 }
+#if defined(IS_CORES3)
+                if (g_es8388_detected) {
+                    // FIX1: i2s_write(...,portMAX_DELAY) already waits for
+                    // DMA consumption. Adding 8ms after every 512 frames
+                    // risks starving the ES8388 at 44.1kHz (11.61ms/frame).
+                    taskYIELD();
+                } else {
+                    // M5Unified playRaw has different buffering semantics:
+                    // retain its established R6 rate limiting.
+                    vTaskDelay(pdMS_TO_TICKS(8));
+                }
+#else
                 vTaskDelay(pdMS_TO_TICKS(8));
+#endif
             } else {
                 vTaskDelay(1);
             }
         } else {
+#if defined(IS_CORES3)
+            // R67: a transient producer underrun must NOT insert an entire
+            // extra 512-frame zero block into the DMA queue while a VGM is
+            // active. Previously a 1ms scheduling miss became ~11.6ms of
+            // guaranteed audible silence. Let the I2S hardware consume the
+            // PCM already queued and wake the generator to refill instead.
+            // Startup prebuffering / pause / genuine STOP retain the old
+            // silent-output behavior below.
+            if (isPlaying && !isPaused && !prebuffering &&
+                wav_count.load(std::memory_order_acquire) == 0) {
+                xSemaphoreGive(xSemaphore);
+                vTaskDelay(1);
+                continue;
+            }
+#endif
             static const int16_t idle_silence[512 * 2] = {0};
             if (g_es8388_detected) {
                 size_t bytes_written = 0;
@@ -1412,8 +1694,12 @@ void vgm_engine_init() {
         .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count = 6,
-        .dma_buf_len = 160,
+        // PR44: 6x160 gave only 960 frames (~21.8 ms) of DMA headroom.
+        // 8x512 gives 4096 frames (~92.9 ms), same DMA dimensions
+        // requested by production Tab5's Speaker path. Only external
+        // CoreS3 ES8388 direct-I2S uses this config.
+        .dma_buf_count = 8,
+        .dma_buf_len = 512,
         .use_apll = false,
         .tx_desc_auto_clear = true,
         .fixed_mclk = 0,
@@ -1428,8 +1714,14 @@ void vgm_engine_init() {
         .data_in_num = I2S_PIN_NO_CHANGE
     };
     
-    i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
-    i2s_set_pin(I2S_NUM_0, &pin_config);
+    // PR43: I2S/GDMA IRQ allocation follows the caller's CPU.
+    // Run installation and pin configuration from CPU0, just like
+    // AudioPlayTask. Never silently fall back to installing on CPU1.
+    const bool i2s_core0_ready = cores3_install_i2s_on_cpu0(
+        &i2s_config, &pin_config);
+    if (!i2s_core0_ready) {
+        Serial.println("[CoreS3 R67] ERROR: I2S CPU0 install failed (no CPU1 fallback)");
+    }
     delay(50);
     
     uint8_t addr = 0x10;
@@ -1441,6 +1733,7 @@ void vgm_engine_init() {
             addr = 0x11;
         }
     }
+    g_cores3_es8388_addr = addr;
     
     {
         auto write_reg = [&](uint8_t reg, uint8_t val) { M5.In_I2C.writeRegister8(addr, reg, val, 400000); };
@@ -1521,6 +1814,10 @@ skip_es8388_init:
     M5.Speaker.begin();
 #endif
 
+#if defined(IS_CORES3)
+    g_cores3_ui_volume = g_es8388_detected ? 185u : 48u;
+#endif
+
     // ボード固有のデフォルトボリューム設定
 #if defined(IS_CARDPUTER)
     M5.Speaker.setVolume(168);
@@ -1543,16 +1840,46 @@ bool vgm_engine_is_playing(void) {
     return isPlaying;
 }
 
+#if defined(IS_CORES3)
+uint8_t vgm_engine_get_volume(void) {
+    return g_cores3_ui_volume;
+}
+#endif
+
 void vgm_engine_set_volume(uint8_t vol) {
     if (g_es8388_detected) {
-        // M5Stackのボリューム(0〜255)を ES8388のハードウェアボリューム(0〜0x21)に変換
+#if defined(IS_CORES3)
+        // PR56: Module Audio ES8388 has ONE active I2C address (normally
+        // 0x10). Previous code wrote to both 0x10 and 0x11, including
+        // an absent device, without checking failures. Each touch could
+        // introduce needless I2C timeouts on the Arduino/UI CPU.
+        const uint8_t hw = cores3_r67_es8388_volume_register(vol);
+        const uint8_t addr = g_cores3_es8388_addr;
+        bool ok = true;
+        // DAC analog output level controls. A small +/-10 UI step was
+        // only ~1 codec count; PR56 uses +/-30 for audible feedback.
+        // Set the actual active codec only; leave I2S PCM untouched.
+        ok &= M5.In_I2C.writeRegister8(addr, 0x2E, hw, 400000);
+        ok &= M5.In_I2C.writeRegister8(addr, 0x2F, hw, 400000);
+        ok &= M5.In_I2C.writeRegister8(addr, 0x30, hw, 400000);
+        ok &= M5.In_I2C.writeRegister8(addr, 0x31, hw, 400000);
+        // 0x19 bit2 is ES8388 DAC mute. Analog volume zero alone
+        // need not produce complete silence on every output circuit.
+        ok &= M5.In_I2C.writeRegister8(addr, 0x19, vol == 0u ? 0x04 : 0x00, 400000);
+        if (ok) {
+            g_cores3_ui_volume = vol;
+        } else {
+            Serial.printf("[CoreS3 PR56] ES8388 volume I2C FAILED: addr=0x%02x vol=%u hw=%u\n",
+                          addr, (unsigned)vol, (unsigned)hw);
+        }
+#else
+        // Keep legacy behavior on every non-CoreS3 platform.
         uint8_t reg = 0;
         if (vol > 0) {
-            reg = (vol * 33) / 255; // 0x21(最大) = 33
+            reg = (vol * 33) / 255;
             if (reg > 0x21) reg = 0x21;
-            if (reg == 0 && vol > 0) reg = 1; // 最小でもミュートにはしない
+            if (reg == 0 && vol > 0) reg = 1;
         }
-        
         M5.In_I2C.writeRegister8(0x10, 0x2E, reg, 400000);
         M5.In_I2C.writeRegister8(0x10, 0x2F, reg, 400000);
         M5.In_I2C.writeRegister8(0x10, 0x30, reg, 400000);
@@ -1561,11 +1888,11 @@ void vgm_engine_set_volume(uint8_t vol) {
         M5.In_I2C.writeRegister8(0x11, 0x2F, reg, 400000);
         M5.In_I2C.writeRegister8(0x11, 0x30, reg, 400000);
         M5.In_I2C.writeRegister8(0x11, 0x31, reg, 400000);
-        
-        // ★重要：外部モジュール接続時は M5.Speaker.setVolume(vol) を「絶対に呼ばない」
-        // （呼ぶとM5Unifiedが内蔵スピーカーの電源を勝手に再投入してしまうため）
+#endif
     } else {
-        // モジュールが無い場合のみ内蔵スピーカーの音量を変更する
         M5.Speaker.setVolume(vol);
+#if defined(IS_CORES3)
+        g_cores3_ui_volume = vol;
+#endif
     }
 }

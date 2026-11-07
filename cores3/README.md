@@ -1,57 +1,37 @@
-# vgmM5 — M5Stack CoreS3 R6
+# vgmM5 — M5Stack CoreS3 R67
 
 [日本語](#日本語) / [English](#english)
 
 ## 日本語
 
-M5Stack CoreS3（ESP32-S3）向けのVGM/VGZ・MDXプレイヤーです。microSDの楽曲再生、タッチ操作、曲情報・チャンネル／スペクトラム表示に対応します。
+M5Stack CoreS3（ESP32-S3）向けのVGM/VGZ・MDXプレイヤーです。microSDからの楽曲再生、タッチ操作、チャンネル・スペクトラム表示に対応します。内蔵スピーカーとM5Stack Module Audio（ES8388）に対応しています。
 
-### M5Burner
+### インストール
 
-**CoreS3用シェアコード：`wEBeKwOKFsqAmlsu`**
+- **Web Burner（R67初期版）**：[ブラウザから書き込み](https://burner.m5stack.com/share/firmware/P8DPPV)
+- **M5Burner**：シェアコード `wEBeKwOKFsqAmlsu`
+- **ソースコード**：[CoreS3 Production（main）](https://github.com/Layer812/vgmM5/tree/main)
 
-このコードは**CoreS3内蔵スピーカー**と、外部の**M5Stack Module Audio（ES8388）接続時**の両方で使用する版です。2026年10月26日に、両方の構成で実機動作を確認しました。
+Module Audioを使用する場合は、モジュール内部のDIPスイッチを**B**に設定してください。
 
-Module Audioを使用する場合は、従来どおり**モジュール内部のDIPスイッチをB**に設定してください。外部ES8388のI²S出力経路とコーデック初期化コードは元のまま維持しています。
+### R67
 
-### 更新内容（2026年10月26日）
-
-- **M5Unified 0.2.28／M5GFX 0.2.35に対応**
-- **YM2151の音程・変調・KEY ON・位相などの音源処理を修正**
-- **C140/C352のPCM計算を改善**
-
-### ソースと検証
-
-- [CoreS3 R6安定版ソース](https://github.com/Layer812/vgmM5/tree/stable/cores3-r6-unified028-20261026)
-- [ファームウェアソース](../src/)
-- [ESP32-S3ネイティブビルド・回帰検証 PASS](https://github.com/Layer812/vgmM5/actions/runs/40206819224)
-- [R6のGitHub統合履歴（PR #15）](https://github.com/Layer812/vgmM5/pull/15)
-- [旧CoreS3 v0.98の保管ブランチ](https://github.com/Layer812/vgmM5/tree/stable/cores3-v098-pre-r6-20261026)
-
-M5Burner経由で配信されるイメージとGitHubネイティブビルドのBINは、ハッシュ一致を独立に確認したものではありません。フルフラッシュ書込では以前の設定やデータが上書きされる可能性があります。
-
-Tab5／Cardputer／AtomS3RのファームウェアはこのCoreS3更新の対象外です。
+M5Unified 0.2.28・M5GFX 0.2.35を採用。YM2151、C140/C352、PCMミキサー、44.1kHz I2S出力、ES8388音量操作などを更新しました。
 
 ---
 
 ## English
 
-The CoreS3 R6 edition of vgmM5 supports VGM/VGZ and MDX local playback from microSD, touch controls and channel/spectrum display.
+The CoreS3 R67 edition of vgmM5 plays VGM/VGZ and MDX files from microSD, with touch controls, channel/spectrum display, and output through either the built-in speaker or M5Stack Module Audio (ES8388).
 
-### M5Burner
+### Installation
 
-**CoreS3 share code: `wEBeKwOKFsqAmlsu`**
+- **Web Burner (initial R67 edition):** [Flash in a browser](https://burner.m5stack.com/share/firmware/P8DPPV)
+- **M5Burner share code:** `wEBeKwOKFsqAmlsu`
+- **Source code:** [CoreS3 Production (main)](https://github.com/Layer812/vgmM5/tree/main)
 
-The **same R6 firmware** supports the CoreS3 **built-in speaker** and the external **M5Stack Module Audio (ES8388)**. Both configurations were confirmed on physical hardware by the project author on October 26, 2026. When using Module Audio, select **DIP switch position B**. The existing module I²S/ES8388 audio path is preserved.
+For Module Audio, set its internal DIP switch to **B**.
 
-### Release changes — October 26, 2026
+### R67
 
-- Updated to **M5Unified 0.2.28 / M5GFX 0.2.35**
-- YM2151 pitch, modulation, KEY ON and note phase corrections
-- Improved C140/C352 signed PCM arithmetic
-
-### Source and verification
-
-See the [CoreS3 R6 stable branch](https://github.com/Layer812/vgmM5/tree/stable/cores3-r6-unified028-20261026), [native ESP32-S3 CI (PASS)](https://github.com/Layer812/vgmM5/actions/runs/40206819224), and [integrated PR #15](https://github.com/Layer812/vgmM5/pull/15). The [previous CoreS3 v0.98 branch](https://github.com/Layer812/vgmM5/tree/stable/cores3-v098-pre-r6-20261026) is retained for reference.
-
-The M5Burner-distributed image has not been independently compared by SHA-256 with the GitHub CI firmware. Full-device flashing may overwrite existing data.
+Uses M5Unified 0.2.28 and M5GFX 0.2.35, with updated YM2151, C140/C352, PCM mixing, 44.1kHz I2S output and ES8388 volume control.
