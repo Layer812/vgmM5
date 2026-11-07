@@ -33,7 +33,8 @@ jobs:
               'cardputer/tools/build_r67.py',
               'cardputer/RUN_THIS_CARDPUTER_R67_BUILD_ONLY.cmd',
               'cardputer/RUN_THIS_CARDPUTER_R67_CLASSIC_BUILD_ONLY.cmd',
-              '.github/workflows/cardputer-r67-ui-native.yml'
+              '.github/workflows/cardputer-r67-ui-native.yml',
+              '.github/workflows/cardputer-build.yml'
           }
           assert changes.issubset(allowed),(changes-allowed)
           for name in ('src/vgm_engine.cpp','lib/vgmM5lib/src/pcm_engine.c',
@@ -49,18 +50,23 @@ jobs:
           assert 'VGMM5_CARDPUTER_C140_GAIN_Q8=2048' in ini
           voice=Path('cardputer/src/voice.cpp').read_text()
           filer=Path('cardputer/src/filer.cpp').read_text()
+          ini=Path('cardputer/platformio.ini').read_text()
           head=Path('cardputer/src/filer.hpp').read_text()
           assert '#define VERSION 67' in head
           assert 'cardputer_draw_playback_view' in voice
           assert '"vgmM5 R67"' in voice
-          assert 'cardputer_draw_hint(' in voice
-          card=voice.split('// Cardputer Cloud UI State Machine',1)[1].split('#endif // IS_CARDPUTER',1)[0]
-          assert 'setTextSize(1.0f)' not in card
-          assert 'vgmM5 0.98' not in card
-          assert 'for (i = 0; i < DISPMAX && i + disp < filenum; i++)' in filer
-          assert 'int page_start = (cursor_pos / 4) * 4;' in card
-          assert (Path('cardputer')/'RUN_THIS_CARDPUTER_R67_BUILD_ONLY.cmd').is_file()
-          print('PASS Cardputer R67 screen, 1.5x labels, safe local browser and unchanged CoreS3 engine')
+          assert 'void phase_file_selection()' in voice
+          assert 'Boot directly to the SD file browser' in voice
+          assert 'cloud_db_' not in voice and 'wifi_manager_' not in voice
+          assert 'STATE_BOOT_MENU' not in voice and 'STATE_LOCAL_MODE' not in voice
+          assert 'ONLINE' not in voice
+          assert 'cardputer_sd_ready' in voice
+          assert 'board_build.embed_txtfiles' not in ini
+          assert '#define DISPMAX 4' in head
+          assert 'filenum==0' in filer and 'delay(10);' in filer
+          assert 'symlink://../lib/vgmM5lib' in ini
+          assert Path('cardputer/tools/build_r67.py').is_file()
+          print('PASS Cardputer R67: direct local SD boot, no catalog or DB, readable filer and protected shared audio core')
           PY
       - name: Make fresh VGM fixture with YM2151 + C140 ROM; no copyrighted game music
         run: python3 cardputer/tests/make_ym2151_c140_fixture.py /tmp/ym2151_c140_legal_fixture.vgm
@@ -68,18 +74,18 @@ jobs:
         run: |
           python3 cardputer/tools/compare_vgm_audio.py /tmp/ym2151_c140_legal_fixture.vgm \
             --seconds 2 --cardputer-gain 1 \
-            --output cardputer/r7_audio_balance/shared_1x --zip
+            --output cardputer/r67_artifacts/shared_1x --zip
       - name: Compare optional R6-style Cardputer C140 8x against unchanged CoreS3/R6
         run: |
           python3 cardputer/tools/compare_vgm_audio.py /tmp/ym2151_c140_legal_fixture.vgm \
             --seconds 2 --cardputer-gain 8 \
-            --output cardputer/r7_audio_balance/classic_8x --zip
+            --output cardputer/r67_artifacts/classic_8x --zip
       - name: Verify bit exact default and independent C140 preset
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import json
-          root=Path('cardputer/r7_audio_balance')
+          root=Path('cardputer/r67_artifacts')
           a=json.loads((root/'shared_1x/AUDIO_COMPARE_RESULT.json').read_text())
           b=json.loads((root/'classic_8x/AUDIO_COMPARE_RESULT.json').read_text())
           assert a['cardputer_c140_gain']==1
@@ -107,24 +113,24 @@ jobs:
               print(k, '1x',a['results'][k]['stems']['mix']['rms'],
                     '8x',b['results'][k]['stems']['mix']['rms'])
           PY
-      - name: Install pinned PlatformIO and Cardputer libraries
+      - name: Install pinned PlatformIO and Cardputer libraries (no online DB)
         run: |
           python3 -m pip install --disable-pip-version-check platformio 'click==8.1.8'
           pio pkg install -d cardputer -e m5stack-cardputer
           python3 - <<'PY'
           from pathlib import Path
-          names='albums tracks strings companies composers systems'.split()
-          files=[Path('cardputer/src')/(name+'.bin') for name in names]
-          assert not any(p.exists() for p in files) or all(p.exists() for p in files)
-          for p in files:
-              if not p.exists():p.write_bytes(b'\0')
+          config=Path('cardputer/platformio.ini').read_text()
+          assert 'board_build.embed_txtfiles' not in config
+          voice=Path('cardputer/src/voice.cpp').read_text()
+          assert '#include "cloud_db.hpp"' not in voice
+          print('PASS no online DB placeholders or network setup')
           PY
       - name: Cardputer R67 standard native ESP32-S3 build (NO FLASH)
         run: pio run -d cardputer -e m5stack-cardputer
       - name: Capture normal audio firmware SHA256
         run: |
-          mkdir -p cardputer/r7_audio_balance/firmware
-          cp cardputer/.pio/build/m5stack-cardputer/firmware.bin cardputer/r7_audio_balance/firmware/cardputer_r7_shared_1x.bin
+          mkdir -p cardputer/r67_artifacts/firmware
+          cp cardputer/.pio/build/m5stack-cardputer/firmware.bin cardputer/r67_artifacts/firmware/cardputer_r67_standard_1x.bin
       - name: Cardputer R67 Classic native ESP32-S3 build (NO FLASH)
         run: pio run -d cardputer -e m5stack-cardputer-classic
       - name: Capture classic firmware and assert genuine selectable build variants
@@ -132,14 +138,14 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import hashlib,json
-          root=Path('cardputer/r7_audio_balance/firmware')
+          root=Path('cardputer/r67_artifacts/firmware')
           source=Path('cardputer/.pio/build/m5stack-cardputer-classic/firmware.bin')
-          out=root/'cardputer_r7_classic_c140_8x.bin'
+          out=root/'cardputer_r67_classic_c140_8x.bin'
           out.write_bytes(source.read_bytes())
-          normal=root/'cardputer_r7_shared_1x.bin'
+          normal=root/'cardputer_r67_standard_1x.bin'
           assert normal.read_bytes()[:1]==b'\xe9'
           assert out.read_bytes()[:1]==b'\xe9'
-          manifest={'build':'Cardputer R7 shared engine, independent C140 optional build',
+          manifest={'build':'Cardputer R67 microSD only, shared standard/Classic vgmM5lib',
                     'flash':'NOT PERFORMED','app_offset':'0x10000',
                     'normal':{'sha256':hashlib.sha256(normal.read_bytes()).hexdigest(),'bytes':normal.stat().st_size},
                     'classic':{'sha256':hashlib.sha256(out.read_bytes()).hexdigest(),'bytes':out.stat().st_size}}
@@ -150,5 +156,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: CARDPUTER-R67-SHARED-CLASSIC-UI-NOFLASH
-          path: cardputer/r7_audio_balance/
+          path: cardputer/r67_artifacts/
           retention-days: 14
