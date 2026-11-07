@@ -139,6 +139,7 @@ void enter_usb_mode() {
 // ============================================================
 #if defined(IS_CORES3)
 #include <SD.h>
+#include "../cores3/r67_ui_controls.hpp"
 
 // Embedded binary file symbols (from platformio.ini board_build.embed_files)
 extern const uint8_t _binary_logo_png_start[] asm("_binary_logo_png_start");
@@ -279,7 +280,7 @@ static void cores3_show_splash() {
     // 下部にバージョン表示
     M5.Display.setTextSize(2);
     M5.Display.setTextColor(TFT_CYAN);
-    M5.Display.drawString("vgmM5 0.98", 100, 195);
+    M5.Display.drawString("vgmM5 R67", 100, 195);
     M5.Display.setTextSize(1);
     M5.Display.setTextColor(TFT_WHITE);
     M5.Display.drawString("by Layer812", 110, 220);
@@ -1846,9 +1847,9 @@ static void cores3_draw_playback() {
     // アプリ名の描画 (ボールド風に見せるため x=0 と x=1 に重ね描き)
     textSp.setTextColor(TFT_CYAN);
     textSp.setCursor(0, text_y);
-    textSp.print("vgmM5 v0.98");
+    textSp.print("vgmM5 R67");
     textSp.setCursor(1, text_y);
-    textSp.println("vgmM5 v0.98");
+    textSp.println("vgmM5 R67");
     text_y += 36; // 1行分文字を書き、さらに1行分(12ドット)空ける
 
     textSp.setTextSize(1);
@@ -2019,20 +2020,16 @@ void phase_playback() {
         int x = t.x;
         int y = t.y;
         
-        // サムネイル領域 (x=8~168, y=26~186) タップでボリューム調整
-        if (x >= 8 && x <= 168 && y >= 26 && y <= 186) {
-            int v = M5.Speaker.getVolume();
-            if (y < 106) {
-                // 上半分: ボリュームアップ
-                v += 10;
-                if (v > 255) v = 255;
-            } else {
-                // 下半分: ボリュームダウン
-                v -= 10;
-                if (v < 0) v = 0;
-            }
-            M5.Speaker.setVolume(v);
-            Serial.printf("Cardputer: Volume %d\n", v);
+        // R67: two equal thumbnail halves, never cover transport controls.
+        const uint8_t current_volume = vgm_engine_get_volume();
+        const auto volume_tap = cores3_r67_thumbnail_volume_tap(x, y, current_volume);
+        if (volume_tap.handled) {
+            // Route to ES8388 codec registers OR internal M5 Speaker.
+            // Never wake the inactive internal amp when Module Audio is in use.
+            if (volume_tap.volume != current_volume)
+                vgm_engine_set_volume(volume_tap.volume);
+            Serial.printf("[CoreS3 R67] Thumbnail %s -> volume=%u\n",
+                          volume_tap.increase ? "UP" : "DOWN", (unsigned)volume_tap.volume);
             return;
         }
         

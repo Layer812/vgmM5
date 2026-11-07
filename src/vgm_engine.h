@@ -7,6 +7,11 @@ void vgm_engine_stop(void);
 void vgm_engine_toggle_pause(void);
 bool vgm_engine_is_playing(void);
 void vgm_engine_set_volume(uint8_t vol);
+#if defined(IS_CORES3)
+// Read the current volume without touching the inactive M5Unified Speaker
+// when the external ES8388 codec is selected.
+uint8_t vgm_engine_get_volume(void);
+#endif
 const char* vgm_engine_get_title(void);
 const char* vgm_engine_get_system(void);
 const char* vgm_engine_get_game(void);

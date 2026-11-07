@@ -1,3 +1,7 @@
+#if defined(IS_CORES3)
+// CoreS3 shares the exact Tab5 R67 sound-core ABI via vgmM5lib.
+#include "../lib/vgmM5lib/src/pcm_engine.h"
+#else
 #pragma once
 #include <stdint.h>
 #include <stdbool.h>
@@ -277,7 +281,11 @@ void pcm_engine_write_oki(PCMSoundEngine *engine, uint8_t data);
 void pcm_engine_set_oki_clock(PCMSoundEngine *engine, uint32_t clock);
 
 // OKI MSM6258 (X68000)
+#if defined(IS_CORES3)
+void pcm_engine_set_msm6258_clock(PCMSoundEngine *engine, uint32_t clock, uint8_t divider_code);
+#else
 void pcm_engine_set_msm6258_clock(PCMSoundEngine *engine, uint32_t clock);
+#endif
 void pcm_engine_write_msm6258(PCMSoundEngine *engine, uint8_t reg, uint8_t data);
 void pcm_engine_msm6258_start_stream(PCMSoundEngine *engine, uint32_t offset, uint32_t length);
 
@@ -302,3 +310,5 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
 #ifdef __cplusplus
 }
 #endif
+
+#endif // IS_CORES3

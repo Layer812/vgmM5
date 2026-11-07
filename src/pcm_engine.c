@@ -1,6 +1,7 @@
 #include "pcm_engine.h"
 #if defined(IS_CORES3)
 #include "sound_safe_math.h" // CoreS3 signed PCM safety only
+#include "../cores3/r67_c140_gain.h" // C140-only amplitude parity
 #endif
 #include "fm_engine.h"
 #include <stdlib.h>
@@ -189,11 +190,21 @@ uint8_t pcm_engine_get_ym2612_byte(PCMSoundEngine *engine, uint32_t offset) {
 // ─────────────────────────────────────────
 // MSM6258 クロック設定
 // ─────────────────────────────────────────
+#if defined(IS_CORES3)
+void pcm_engine_set_msm6258_clock(PCMSoundEngine *engine, uint32_t clock, uint8_t divider_code) {
+    // VGM header 0x94 bits 0-1: /1024, /768, /512, /512.
+    static const uint16_t dividers[4] = {1024, 768, 512, 512};
+    engine->msm6258.clock = clock;
+    const uint32_t sr = clock ? (clock / dividers[divider_code & 3u]) : 15625u;
+    engine->msm6258.step_size = ((uint64_t)sr * 65536) / engine->sample_rate;
+}
+#else
 void pcm_engine_set_msm6258_clock(PCMSoundEngine *engine, uint32_t clock) {
     engine->msm6258.clock = clock;
     uint32_t sr = (clock > 0) ? (clock / 512) : 15625;
     engine->msm6258.step_size = ((uint64_t)sr * 65536) / engine->sample_rate;
 }
+#endif
 
 // ─────────────────────────────────────────
 // MSM6258 レジスタ書き込み (0xB7コマンド)
@@ -348,7 +359,14 @@ void pcm_engine_namco_init(PCMSoundEngine *engine, uint32_t clock, uint8_t type,
     if (type == 0xC1) {
         native_rate = (clock > 0) ? (clock / 192) : (21390000 / 192);
     } else {
+#if defined(IS_CORES3)
+        // VGM 1.71 header byte 0xD6 = C352 clock divider / 4.
+        // Zero means unspecified, retain established /288 divisor.
+        const uint32_t divider = c140_type ? (uint32_t)c140_type * 4u : 288u;
+        native_rate = clock ? (clock / divider) : (24000000u / divider);
+#else
         native_rate = (clock > 0) ? (clock / 288) : 83333; // C352
+#endif
     }
     engine->namco.step_scale = (uint32_t)(((uint64_t)native_rate << 16) / engine->sample_rate);
 }
@@ -444,6 +462,19 @@ void pcm_engine_namco_write(PCMSoundEngine *engine, uint16_t addr, uint16_t data
                     ch->latched_end = ch->end;
                     ch->latched_loop = ch->loop;
                     
+#if defined(IS_CORES3)
+                    // FIX3: Tab5 field-proven C140 key-on lifecycle.  The
+                    // very first output begins with zero interpolation
+                    // history; do not inject a prefetched full-scale ROM
+                    // sample at the VGM register write boundary.
+                    ch->pos = ((uint32_t)ch->latched_bank << 16) | ch->start;
+                    ch->pos_frac = 0;
+                    ch->counter = 0;
+                    ch->prev_sample = 0;
+                    ch->last_sample = 0;
+                    ch->current_block = -1;
+                    namco_mcache_addr[ch_idx] = 0xFFFFFFFFu;
+#else
                     uint32_t start_addr = ((uint32_t)ch->latched_bank << 16) | (ch->latched_start & 0xFFFF);
                     ch->pos = start_addr;
                     ch->counter = 0; 
@@ -478,13 +509,14 @@ void pcm_engine_namco_write(PCMSoundEngine *engine, uint16_t addr, uint16_t data
 #endif
                     } else {
                         #if defined(IS_CORES3)
-                        new_sample = vgm_safe_signed_pcm_byte(dt); // C140 8-bit signed PCM
+                        new_sample = cores3_r67_c140_linear_pcm(dt); // Tab5-equivalent signed 12-bit C140
 #else
                         new_sample = (int16_t)((int8_t)dt) << 8; // ★ C140 uncompressed PCM: correct shift from 4 to 8
 #endif
                     }
                     ch->last_sample = new_sample;
                     ch->prev_sample = new_sample;
+#endif
                 } else {
                     ch->playing = false;
                 }
@@ -671,9 +703,16 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
         
         for (int ch = 0; ch < max_ch; ch++) {
             NamcoPCMChannel *v = &engine->namco.ch[ch];
-            // Pop noise prevention: fade out stopped voices smoothly instead of cutting to 0
+            // FIX3: Tab5 does not continue to mix C140 voices after
+            // key-off or sample end. CoreS3's old 255/256 tail kept
+            // adding previously stopped C140 voices in dense passages
+            // (up to 22 simultaneously in the supplied Dragon Saber VGM).
+            // Preserve the existing C352 tail, which is a separate chip.
             if (!v->playing) {
-                v->prev_sample = (v->prev_sample * 255) / 256; // ★ Smoother fade out (~25ms instead of ~1.6ms)
+#if defined(IS_CORES3)
+                if (engine->c140_enabled) continue;
+#endif
+                v->prev_sample = (v->prev_sample * 255) / 256;
                 v->last_sample = v->prev_sample;
                 if (v->prev_sample == 0) continue;
             }
@@ -796,7 +835,7 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
 #endif
                     } else {
                         #if defined(IS_CORES3)
-                        new_sample = vgm_safe_signed_pcm_byte(dt); // C140 8-bit signed PCM
+                        new_sample = cores3_r67_c140_linear_pcm(dt); // Tab5-equivalent signed 12-bit C140
 #else
                         new_sample = (int16_t)((int8_t)dt) << 8; // ★ C140 uncompressed PCM: correct shift from 4 to 8
 #endif
@@ -828,10 +867,21 @@ void IRAM_ATTR pcm_engine_tick(PCMSoundEngine *engine, int32_t *out_l, int32_t *
             final_namco_l = namco_mix_l >> 2;
             final_namco_r = namco_mix_r >> 2;
         } else {
-            // C140は元々音量が小さめなので2倍にブースト
-            // クリッピングはマスター側のvgm_engine.cppのソフトリミッターに任せる
+#if defined(IS_CORES3)
+            // FIX7: do NOT clamp the C140 polyphonic sum to int16
+            // before the FM+C140 final mixer. That early saturation
+            // destroys peaks from many simultaneous C140 voices, even
+            // when the final 16-bit speaker signal would be well within
+            // range. Preserve FIX2's Tab5 level ratio below the knee,
+            // and rely on FIX6's int64 sum and true soft ceiling.
+            // No change to C352, FM, C140 ROM, or note lifecycle.
+            final_namco_l = cores3_r67_c140_to_core_mixer_unclipped(namco_mix_l);
+            final_namco_r = cores3_r67_c140_to_core_mixer_unclipped(namco_mix_r);
+#else
+            // Existing legacy boost for all non-CoreS3 builds.
             final_namco_l = namco_mix_l * 2;
             final_namco_r = namco_mix_r * 2;
+#endif
         }
 
         mix_l += final_namco_l;

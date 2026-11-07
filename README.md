@@ -18,7 +18,7 @@ vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(MXDRV)ファイ�
 #### 対応デバイスと機能 (Supported Devices & Features)
 | 機能 (Features) \ デバイス (Device) | M5Stack AtomS3R (Echo) | M5Stack Cardputer | M5Stack CoreS3 | + [Module Audio](https://docs.m5stack.com/ja/module/Module-Audio) | [M5 TAB5](https://docs.m5stack.com/ja/core/Tab5) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **ステータス (Status)** | ✔️ 対応済 | [✔️ R6公開版](cardputer/README.md) | [✔️ R6安定版](cores3/README.md) | [✔️ R6安定版](cores3/README.md) | [✔️ R67 正式版](tab5/README.md) |
+| **ステータス (Status)** | ✔️ 対応済 | [✔️ R6公開版](cardputer/README.md) | [✔️ R67 正式版](cores3/README.md) | [✔️ R67 正式版](cores3/README.md) | [✔️ R67 正式版](tab5/README.md) |
 | **VGM/VGZ 再生** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **MDX 再生** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **内蔵フラッシュ (USB Drive)** | ✔️ | - | - | - | - |
@@ -46,7 +46,7 @@ vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(MXDRV)ファイ�
 | **Namco C140** | ✔️ 対応済 (Supported |
 | **Namco C352** | ✔️ 対応済 (Supported) |
 
-※ 従来のv0.98系に加え、Cardputer R6・CoreS3 R6・Tab5の更新版ソースを公開しています。
+※ 従来のv0.98系に加え、Cardputer R6・CoreS3 R67・Tab5の更新版ソースを公開しています。
 ※ ステータスが「対応済」となっていても、もし再生時に音がおかしい・違和感があると感じた場合は、曲名とおかしい点を優しく申告していただければ対応いたします！
 
 #### M5Stack Cardputer版（2026年10月26日 更新）
@@ -54,12 +54,11 @@ vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(MXDRV)ファイ�
 
 M5Burnerシェアコード：`rqz95QwaAsM6bN3O`（作者提供）。[Cardputer版の説明](cardputer/README.md)をご覧ください。
 
-#### M5Stack CoreS3版（2026年10月26日 更新）
-Module Audio（ES8388）を接続した場合と、接続せず内蔵スピーカーを使用した場合の**両方で実機動作を確認**しました。
+#### M5Stack CoreS3版 R67 正式版（2026年11月7日）
 
-**更新内容:** M5Unified 0.2.28／M5GFX 0.2.35への対応、YM2151を中心とした音源処理とPCM演算の修正・改善。
+YM2151・C140/C352を含む音源エンジン、PCM再生、I2S転送、ES8388音量操作を更新しました。M5Unified 0.2.28／M5GFX 0.2.35に対応しています。
 
-詳細は [CoreS3版の説明](cores3/README.md) をご覧ください。
+[CoreS3版の説明](cores3/README.md) / [Web Burner（R67 初期版）](https://burner.m5stack.com/share/firmware/P8DPPV)
 
 #### M5Stack Tab5版 R67 正式版（2026年11月4日）
 
@@ -146,7 +145,7 @@ vgmM5 is a VGM/VGZ and MDX (X68000) file player designed specifically for the M5
 
 | Features \ Device | M5Stack AtomS3R (Echo) | M5Stack Cardputer | M5Stack CoreS3 | + [Module Audio](https://docs.m5stack.com/ja/module/Module-Audio) | [M5 TAB5](https://docs.m5stack.com/ja/core/Tab5) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Status** | ✔️ Supported | [✔️ R6 Published](cardputer/README.md) | [✔️ R6 Stable](cores3/README.md) | [✔️ R6 Stable](cores3/README.md) | [✔️ R67 Official](tab5/README.md) |
+| **Status** | ✔️ Supported | [✔️ R6 Published](cardputer/README.md) | [✔️ R67 Production](cores3/README.md) | [✔️ R67 Production](cores3/README.md) | [✔️ R67 Official](tab5/README.md) |
 | **VGM/VGZ Playback** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **MDX Playback** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **Internal Flash (USB Drive)** | ✔️ | - | - | - | - |
@@ -157,7 +156,7 @@ vgmM5 is a VGM/VGZ and MDX (X68000) file player designed specifically for the M5
 #### Supported Sound Chips
 *(Please refer to the Supported Sound Chips table in the Japanese section above)*
 
-*Note: Updated Cardputer R6, CoreS3 R6 and Tab5 sources are available alongside the original v0.98 implementation.*
+*Note: Updated Cardputer R6, CoreS3 R67 and Tab5 sources are available alongside the original v0.98 implementation.*
 *Even if a chip is listed as "Supported," if you notice any strange sounds or something feels off during playback, please kindly report it (gently) with the song title and the issue, and I will address it!*
 
 #### M5Stack Cardputer edition (updated October 26, 2026)
@@ -165,12 +164,11 @@ Updated to M5Unified 0.2.28 and M5GFX 0.2.35, with YM2151 note-on and phase corr
 
 M5Burner share code: `rqz95QwaAsM6bN3O` (author-supplied). See the [Cardputer documentation](cardputer/README.md).
 
-#### M5Stack CoreS3 edition (updated October 26, 2026)
-Verified on real CoreS3 hardware **with and without the external Module Audio (ES8388)**, using the internal speaker when no module is attached.
+#### M5Stack CoreS3 R67 production edition (November 7, 2026)
 
-**What's new:** Support for M5Unified 0.2.28 / M5GFX 0.2.35, plus YM2151 sound engine and PCM arithmetic corrections.
+Updated YM2151 and C140/C352 sound engines, PCM playback, I2S delivery and ES8388 volume controls, using M5Unified 0.2.28 / M5GFX 0.2.35.
 
-See the [CoreS3 documentation](cores3/README.md).
+[CoreS3 documentation](cores3/README.md) / [Web Burner (initial R67 edition)](https://burner.m5stack.com/share/firmware/P8DPPV).
 
 #### M5Stack Tab5 R67 official edition (November 4, 2026)
 
@@ -211,7 +209,7 @@ Alternatively, use M5 Burner with the following share codes:
 ### Controls
 
 #### 📺 M5Stack CoreS3
-The CoreS3 R6 version supports touch input and the built-in speaker, with optional output via [Module Audio](https://docs.m5stack.com/ja/module/Module-Audio) (ES8388). Both configurations have been hardware-tested.
+The CoreS3 version supports touch input and the built-in speaker, with optional output via [Module Audio](https://docs.m5stack.com/ja/module/Module-Audio) (ES8388). Both configurations have been hardware-tested.
 
 > [!IMPORTANT]
 > **When using the Module-Audio, you must switch its internal DIP switch to "B" before connecting it for proper operation.**

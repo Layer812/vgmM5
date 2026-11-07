@@ -10,6 +10,12 @@ void scc_engine_init(SCCSoundEngine *engine, uint32_t sample_rate, uint32_t cloc
     engine->clock = clock; 
 }
 
+#if defined(IS_CORES3)
+void scc_engine_set_variant(SCCSoundEngine *engine, bool is_scc_plus) {
+    engine->is_scc_plus = is_scc_plus;
+}
+#endif
+
 // チャンネルのフェーズステップ（再生速度）を更新する
 static void update_scc_step(SCCSoundEngine *engine, int ch) {
     // SCCの実機仕様：周波数は clock / (32 * (freq + 1))
@@ -56,17 +62,33 @@ void scc_engine_write(SCCSoundEngine *engine, uint8_t port, uint8_t reg, uint8_t
 
     // 古いVGMやMSXダイレクトマッピングVGMへの救済措置
     // port=0 に全レジスタが書き込まれるケース
+#if defined(IS_CORES3)
+    if (port == 0 || (port == 4 && engine->is_scc_plus)) {
+        if (port == 0 && !engine->is_scc_plus && reg >= 0x80 && reg <= 0x9F) {
+            // Original SCC CH4 and CH5 share wave RAM.
+            return;
+        }
+#else
     if (port == 0) {
+#endif
         if (reg < 0x80) {
             // 波形RAM CH1〜CH4 (0x00 - 0x7F)
             int ch = reg / 0x20;
             int offset = reg % 0x20;
             engine->wave[ch][offset] = (int8_t)data;
+#if defined(IS_CORES3)
+            if (ch == 3 && !engine->is_scc_plus) {
+#else
             if (ch == 3) {
+#endif
                 engine->wave[4][offset] = (int8_t)data; 
             }
         }
+#if defined(IS_CORES3)
+        else if (reg >= 0x80 && reg <= 0x9F && engine->is_scc_plus) {
+#else
         else if (reg >= 0x80 && reg <= 0x9F) {
+#endif
             // SCC+ 波形RAM CH5 (0x80 - 0x9F)
             int ch = reg / 0x20;
             int offset = reg % 0x20;
