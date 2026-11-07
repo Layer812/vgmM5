@@ -1,0 +1,161 @@
+name: Cardputer R7 shared vgmM5lib build + audio parity (NO FLASH)
+on:
+  push:
+    branches: [dev/cardputer-r7-vgmm5lib-cores3-compare-20261107]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cardputer:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify original Cardputer UI/MDX/WiFi files are byte identical
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          base='690c6229fc617e716152f5c0841f091f43ed382b'
+          for p in ('cardputer/src/voice.cpp','cardputer/src/mdx_engine.cpp',
+                    'cardputer/src/filer.cpp','cardputer/src/wifi_manager.hpp',
+                    'cardputer/src/cache_manager.hpp','cardputer/src/cloud_db.hpp',
+                    'cardputer/partitions.csv','cardputer/src/fm_engine.c',
+                    'cardputer/src/pcm_engine.c'):
+              assert Path(p).read_bytes()==subprocess.check_output(['git','show',base+':'+p]),p
+          conf=Path('cardputer/platformio.ini').read_text()
+          assert 'symlink://../lib/vgmM5lib' in conf
+          assert '-<pcm_engine.c>' in conf and '-<fm_engine.c>' in conf
+          assert 'VGMM5_CARDPUTER_VGMM5LIB=1' in conf
+          code=Path('cardputer/src/vgm_engine.cpp').read_text()
+          assert '#include <vgmM5lib.h>' in code
+          assert 'r31_vgm_bridge_mix' in code
+          assert 'pcm_engine_set_msm6258_clock' in code
+          print('PASS original Cardputer UI/online/MDX and source snapshots preserved')
+          PY
+      - name: Create local-only empty DB placeholders if all 6 missing
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          names='albums tracks strings companies composers systems'.split()
+          paths=[Path('cardputer/src')/(s+'.bin') for s in names]
+          flags=[p.exists() for p in paths]
+          assert not any(flags) or all(flags),'Mixed online DB presence'
+          if not any(flags):
+              for p in paths:p.write_bytes(b'\0')
+          print('PASS local playback build: online DB contents not distributed')
+          PY
+      - name: 'Compare actual pre-speaker PCM: original R6 / Cardputer lib / CoreS3'
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/cardputer-audio-shim
+          printf '#pragma once\n#define IRAM_ATTR\n#define DRAM_ATTR\n' >/tmp/cardputer-audio-shim/esp_attr.h
+          printf '#pragma once\n' >/tmp/cardputer-audio-shim/esp_partition.h
+          printf '#pragma once\n' >/tmp/cardputer-audio-shim/esp_spi_flash.h
+          printf '#pragma once\n' >/tmp/cardputer-audio-shim/esp_heap_caps.h
+          mkdir -p cardputer/r7_artifacts
+          gcc -std=gnu11 -O2 -ffunction-sections -fdata-sections \
+            -I/tmp/cardputer-audio-shim -Icardputer/src \
+            cardputer/tests/r7_sound_cores_comparison.c \
+            cardputer/src/fm_engine.c cardputer/src/pcm_engine.c \
+            -Wl,--gc-sections -lm -o /tmp/cardputer_original_r6
+          /tmp/cardputer_original_r6 cardputer/r7_artifacts/original_cardputer_r6_preview.wav >cardputer/r7_artifacts/original_cardputer_r6_audio.json
+          for edition in cardputer_vgmm5lib cores3_vgmm5lib; do
+            flags='-DVGMM5_CARDPUTER_VGMM5LIB=1'
+            if [ "$edition" = cores3_vgmm5lib ]; then flags='-DIS_CORES3=1'; fi
+            gcc -std=gnu11 -O2 -ffunction-sections -fdata-sections $flags \
+              -I/tmp/cardputer-audio-shim -Ilib/vgmM5lib/src \
+              cardputer/tests/r7_sound_cores_comparison.c \
+              lib/vgmM5lib/src/fm_engine.c lib/vgmM5lib/src/pcm_engine.c \
+              -Wl,--gc-sections -lm -o /tmp/$edition
+            /tmp/$edition cardputer/r7_artifacts/$edition.preview.wav >cardputer/r7_artifacts/$edition.audio.json
+          done
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          root=Path('cardputer/r7_artifacts')
+          a=json.loads((root/'original_cardputer_r6_audio.json').read_text())
+          b=json.loads((root/'cardputer_vgmm5lib.audio.json').read_text())
+          c=json.loads((root/'cores3_vgmm5lib.audio.json').read_text())
+          same_fields=['fm_hash','fm_abs','fm_peak','fm_nonzero',
+                       'c140_hash','c140_abs','c140_peak','c140_nonzero',
+                       'mix_hash','mix_abs','mix_peak','mix_nonzero']
+          assert all(b[k]==c[k] for k in same_fields),[(k,b[k],c[k]) for k in same_fields if b[k]!=c[k]]
+          assert all(int(row['fm_nonzero'])>0 and int(row['c140_nonzero'])>0 for row in (a,b,c))
+          report={'comparison':'raw 44.1kHz signed stereo PCM BEFORE board-specific speaker',
+                  'original_cardputer_r6':a,'new_cardputer_vgmm5lib':b,'cores3_vgmm5lib':c,
+                  'cardputer_vs_cores3_same_core_pcm':'BIT-EXACT',
+                  'original_vs_new_fm':'IDENTICAL' if a['fm_hash']==b['fm_hash'] else 'DIFFERENT',
+                  'original_vs_new_c140':'IDENTICAL' if a['c140_hash']==b['c140_hash'] else 'DIFFERENT',
+                  'original_vs_new_mix':'IDENTICAL' if a['mix_hash']==b['mix_hash'] else 'DIFFERENT',
+                  'wave_files':'1-second synthetic YM2151 + 24-channel C140 combined stereo WAV, 44.1kHz/16-bit',
+                  'speaker_dac_acoustics':'NOT COMPARED'}
+          (root/'AUDIO_COMPARISON.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
+          print('PASS 3-way actual-source 44100-frame YM2151 and 24-voice C140 PCM comparison')
+          print(json.dumps(report,indent=2))
+          PY
+      - name: Three real-VGM file-stream stem comparisons, strict CoreS3 audio parity
+        run: |
+          set -euo pipefail
+          python3 cardputer/tests/make_ym2151_c140_fixture.py /tmp/cardputer_r7_fixture.vgm
+          python3 cardputer/tools/compare_vgm_audio.py /tmp/cardputer_r7_fixture.vgm \
+            --seconds 2 --output cardputer/r7_artifacts/real_vgm_stems --zip
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          a=json.loads(Path('cardputer/r7_artifacts/real_vgm_stems/AUDIO_COMPARE_RESULT.json').read_text())
+          assert all(a['r7_vs_cores3_hash_identical'].values()),a
+          assert a['results']['R6']['frames']==66150
+          assert a['results']['R7']['frames']==66150
+          assert all(a['results']['R7']['stems'][stem]['nonzero']>0
+                     for stem in ('fm','c140','mix'))
+          assert a['results']['R7']['rom_blocks']==1
+          assert a['results']['R7']['fm_writes']>100
+          assert a['results']['R7']['c140_writes']>100
+          assert a['results']['R7']['skipped_chip_commands']==0
+          code=Path('cardputer/src/vgm_engine.cpp').read_text()
+          assert 'cardputer_c140_adjust' not in code
+          assert 'cardputer_audio_balance.hpp' not in code
+          assert not Path('cardputer/src/cardputer_audio_balance.hpp').exists()
+          assert 'VGMM5_CARDPUTER_C140_GAIN_Q8' not in Path('cardputer/platformio.ini').read_text()
+          print('PASS real VGM: Cardputer R7 = CoreS3 FM+C140+mix, no Cardputer-only gain')
+          PY
+      - name: Install pinned PlatformIO and Cardputer libraries
+        run: |
+          python -m pip install --disable-pip-version-check platformio 'click==8.1.8'
+          pio pkg install -d cardputer -e m5stack-cardputer
+      - name: Cardputer R7 native ESP32-S3 firmware build (NO FLASH)
+        run: pio run -d cardputer -e m5stack-cardputer
+      - name: Confirm shared vgmM5lib objects and export APP-ONLY image
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('cardputer/.pio/build/m5stack-cardputer')
+          units=list(root.rglob('fm_engine.c.o'))
+          pcm=list(root.rglob('pcm_engine.c.o'))
+          assert len(units)==1 and 'vgmM5lib' in str(units[0]),units
+          assert len(pcm)==1 and 'vgmM5lib' in str(pcm[0]),pcm
+          data=(root/'firmware.bin').read_bytes()
+          assert data[0]==0xe9 and len(data)>100000
+          out=Path('cardputer/r7_artifacts')
+          out.mkdir(exist_ok=True)
+          (out/'firmware.bin').write_bytes(data)
+          (out/'RESULT.json').write_text(json.dumps({
+              'board':'Cardputer ESP32-S3','edition':'R7 vgmM5lib candidate',
+              'core':'shared CoreS3 R67 vgmM5lib','native_build':'PASS',
+              'flashed':False,'offset':'0x10000',
+              'sha256':hashlib.sha256(data).hexdigest(),
+              'bytes':len(data)
+          },indent=2)+'\n')
+          print('PASS Cardputer vgmM5lib native firmware, SHA256=',hashlib.sha256(data).hexdigest())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CARDPUTER-R7-VGMM5LIB-APP-ONLY-NOFLASH
+          path: cardputer/r7_artifacts/
+          retention-days: 14

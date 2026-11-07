@@ -12,6 +12,9 @@ permissions:
 
 jobs:
   native-build:
+    # Historical R6 source-lock build runs unchanged on the stable source.
+    # The explicit R7 shared-library branch has its own CI job.
+    if: github.ref != 'refs/heads/dev/cardputer-r7-vgmm5lib-cores3-compare-20261107'
     runs-on: ubuntu-22.04
     timeout-minutes: 40
     steps:
