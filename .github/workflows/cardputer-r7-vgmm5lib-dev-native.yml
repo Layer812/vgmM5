@@ -1,0 +1,86 @@
+name: Cardputer R7 shared vgmM5lib build + audio parity (NO FLASH)
+on:
+  push:
+    branches: [dev/cardputer-r7-vgmm5lib-cores3-compare-20261107]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cardputer:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify original Cardputer UI/MDX/WiFi files are byte identical
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          base='690c6229fc617e716152f5c0841f091f43ed382b'
+          for p in ('cardputer/src/voice.cpp','cardputer/src/mdx_engine.cpp',
+                    'cardputer/src/filer.cpp','cardputer/src/wifi_manager.hpp',
+                    'cardputer/src/cache_manager.hpp','cardputer/src/cloud_db.hpp',
+                    'cardputer/partitions.csv','cardputer/src/fm_engine.c',
+                    'cardputer/src/pcm_engine.c'):
+              assert Path(p).read_bytes()==subprocess.check_output(['git','show',base+':'+p]),p
+          conf=Path('cardputer/platformio.ini').read_text()
+          assert 'symlink://../lib/vgmM5lib' in conf
+          assert '-<pcm_engine.c>' in conf and '-<fm_engine.c>' in conf
+          assert 'VGMM5_CARDPUTER_VGMM5LIB=1' in conf
+          code=Path('cardputer/src/vgm_engine.cpp').read_text()
+          assert '#include <vgmM5lib.h>' in code
+          assert 'r31_vgm_bridge_mix' in code
+          assert 'pcm_engine_set_msm6258_clock' in code
+          print('PASS original Cardputer UI/online/MDX and source snapshots preserved')
+          PY
+      - name: Create local-only empty DB placeholders if all 6 missing
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          names='albums tracks strings companies composers systems'.split()
+          paths=[Path('cardputer/src')/(s+'.bin') for s in names]
+          flags=[p.exists() for p in paths]
+          assert not any(flags) or all(flags),'Mixed online DB presence'
+          if not any(flags):
+              for p in paths:p.write_bytes(b'\0')
+          print('PASS local playback build: online DB contents not distributed')
+          PY
+      - name: Install pinned PlatformIO and Cardputer libraries
+        run: |
+          python -m pip install --disable-pip-version-check platformio 'click==8.1.8'
+          pio pkg install -d cardputer -e m5stack-cardputer
+      - name: Cardputer R7 native ESP32-S3 firmware build (NO FLASH)
+        run: pio run -d cardputer -e m5stack-cardputer
+      - name: Confirm shared vgmM5lib objects and export APP-ONLY image
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('cardputer/.pio/build/m5stack-cardputer')
+          units=list(root.rglob('fm_engine.c.o'))
+          pcm=list(root.rglob('pcm_engine.c.o'))
+          assert len(units)==1 and 'vgmM5lib' in str(units[0]),units
+          assert len(pcm)==1 and 'vgmM5lib' in str(pcm[0]),pcm
+          data=(root/'firmware.bin').read_bytes()
+          assert data[0]==0xe9 and len(data)>100000
+          out=Path('cardputer/r7_artifacts')
+          out.mkdir(exist_ok=True)
+          (out/'firmware.bin').write_bytes(data)
+          (out/'RESULT.json').write_text(json.dumps({
+              'board':'Cardputer ESP32-S3','edition':'R7 vgmM5lib candidate',
+              'core':'shared CoreS3 R67 vgmM5lib','native_build':'PASS',
+              'flashed':False,'offset':'0x10000',
+              'sha256':hashlib.sha256(data).hexdigest(),
+              'bytes':len(data)
+          },indent=2)+'\n')
+          print('PASS Cardputer vgmM5lib native firmware, SHA256=',hashlib.sha256(data).hexdigest())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CARDPUTER-R7-VGMM5LIB-APP-ONLY-NOFLASH
+          path: cardputer/r7_artifacts/
+          retention-days: 14
