@@ -1,8 +1,25 @@
-# vgmM5 — M5Stack Cardputer R6
+# vgmM5 — M5Stack Cardputer R7 / R6
 
 [日本語](#日本語) / [English](#english)
 
 ## 日本語
+
+### Cardputer R7 — 共通 vgmM5lib 開発版
+
+Cardputerの音源エンジンをCoreS3 R67と共通の **vgmM5lib** に移行しました。YM2151などのFM、C140/C352・SegaPCM等のPCM、PSG、SSG、SCC、R31 YM2413を共通化しています。Cardputer固有のキーボード・画面・microSD・オンライン機能・MDX再生コードは維持しています。
+
+**Windowsでのネイティブビルド（書き込みなし）**：`cardputer\\RUN_THIS_CARDPUTER_R7_VGMM5LIB_BUILD_ONLY.cmd`
+
+**音声比較**：オリジナルCardputer R6・R7（vgmM5lib）・CoreS3（vgmM5lib）の3系統について、同じYM2151レジスタ列と24ch C140 ROMから生成した44.1kHzのPCMを比較します。R7とCoreS3の音源コア出力はビット単位で一致します。元R6とはFM・C140とも異なります。音声比較のテストは合成レジスタ入力であり、実機スピーカーの音響特性を比較するものではありません。
+
+- [R7開発ブランチ](https://github.com/Layer812/vgmM5/tree/dev/cardputer-r7-vgmm5lib-cores3-compare-20261107)
+- [元のCardputer R6固定ブランチ](https://github.com/Layer812/vgmM5/tree/stable/cardputer-r6-unified028-20261026)
+- [R7ネイティブビルドと3系統PCM比較](https://github.com/Layer812/vgmM5/actions/runs/42328480024)
+- [Web Burner・Cardputer公開版（元のR6）](https://burner.m5stack.com/METQC2)
+
+---
+
+### Cardputer R6 — 従来版
 
 M5Stack Cardputer（ESP32-S3）向けVGM/VGZ・MDXプレイヤーです。従来のv0.98ソースを保護し、音源処理と依存ライブラリを更新したR6ソースを公開しています。
 
@@ -47,6 +64,23 @@ cardputer\RUN_THIS_CARDPUTER_BUILD_ONLY.cmd
 ---
 
 ## English
+
+### Cardputer R7 — shared vgmM5lib development edition
+
+Cardputer now uses the **same vgmM5lib sound engines as CoreS3 R67**, including FM, C140/C352 PCM, PSG, SSG, SCC and the R31 YM2413 bridge. Cardputer-specific keyboard/UI, microSD, online mode and MDX integration are retained.
+
+**Build on Windows (no flashing):** `cardputer\\RUN_THIS_CARDPUTER_R7_VGMM5LIB_BUILD_ONLY.cmd`
+
+The 3-way 44.1kHz PCM comparison includes the **original Cardputer R6**, the migrated Cardputer R7 and CoreS3. The R7 and CoreS3 shared core output is bit-exact for the identical synthetic YM2151 and 24-voice C140 inputs tested; the original R6 output differs. Speaker/DAC acoustics are not compared.
+
+- [R7 development branch](https://github.com/Layer812/vgmM5/tree/dev/cardputer-r7-vgmm5lib-cores3-compare-20261107)
+- [Original R6 preserved branch](https://github.com/Layer812/vgmM5/tree/stable/cardputer-r6-unified028-20261026)
+- [Native build and 3-way PCM comparison](https://github.com/Layer812/vgmM5/actions/runs/42328480024)
+- [Web Burner (original R6 published edition)](https://burner.m5stack.com/METQC2)
+
+---
+
+### Cardputer R6 — previous edition
 
 The **M5Stack Cardputer R6** VGM/VGZ and MDX edition uses the protected v0.98 Cardputer baseline with updated sound calculations and library dependencies.
 
