@@ -49,7 +49,7 @@ jobs:
               for p in paths:p.write_bytes(b'\0')
           print('PASS local playback build: online DB contents not distributed')
           PY
-      - name: Compare actual pre-speaker PCM: original R6 / Cardputer lib / CoreS3
+      - name: 'Compare actual pre-speaker PCM: original R6 / Cardputer lib / CoreS3'
         run: |
           set -euo pipefail
           mkdir -p /tmp/cardputer-audio-shim
