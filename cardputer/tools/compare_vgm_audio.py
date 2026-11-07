@@ -60,7 +60,7 @@ def unpack_vgm(source: Path, destination: Path):
             raise ValueError("Decoded file has no VGM magic")
 
 
-def build(executable: Path, edition: str, shim: Path, classic_q8: int):
+def build(executable: Path, edition: str, shim: Path):
     if edition == "R6":
         src_dir = CARD / "src"
         definitions = []
@@ -69,8 +69,7 @@ def build(executable: Path, edition: str, shim: Path, classic_q8: int):
         definitions = (
             ["-DIS_CORES3=1"]
             if edition == "CoreS3" else
-            ["-DVGMM5_CARDPUTER_VGMM5LIB=1",
-             "-DVGMM5_CARDPUTER_C140_GAIN_Q8=" + str(classic_q8)]
+            ["-DVGMM5_CARDPUTER_VGMM5LIB=1"]
         )
     return run_checked([
         "gcc", "-std=gnu11", "-O2", "-ffunction-sections",
@@ -127,8 +126,6 @@ def main():
     )
     parser.add_argument("file", type=Path, help="VGM/VGZ file you may lawfully use")
     parser.add_argument("--seconds", type=int, default=30, help="1..180 seconds")
-    parser.add_argument("--cardputer-gain", type=int, choices=(1, 2, 4, 8),
-                        default=1, help="Cardputer-only post-core C140 boost")
     parser.add_argument("--output", type=Path, help="output directory")
     parser.add_argument("--zip", action="store_true",
                         help="write WAV + JSON comparison ZIP, excludes source VGM")
@@ -145,7 +142,6 @@ def main():
         "source": args.file.name, "source_sha256": hashlib.sha256(args.file.read_bytes()).hexdigest(),
         "note": "Same real VGM command stream; only YM2151 and C140. "
                 "Board speaker/DAC not measured; input content not distributed.",
-        "cardputer_gain_q8": args.cardputer_gain * 256,
         "results": {}
     }
     with tempfile.TemporaryDirectory(prefix="vgmm5_real_vgm_") as folder:
@@ -155,7 +151,7 @@ def main():
         shim = create_shims(tmp)
         for edition in ("R6", "R7", "CoreS3"):
             executable = tmp / edition
-            build(executable, edition, shim, args.cardputer_gain * 256)
+            build(executable, edition, shim)
             output_prefix = outdir / {
                 "R6": "Cardputer_R6_original",
                 "R7": "Cardputer_R7_vgmM5lib",
@@ -178,8 +174,8 @@ def main():
         stem: a["stems"][stem]["fnv"] == b["stems"][stem]["fnv"]
         for stem in common
     }
-    if args.cardputer_gain == 1 and not all(exact.values()):
-        raise AssertionError("Shared default Cardputer R7 PCM differs from CoreS3")
+    if not all(exact.values()):
+        raise AssertionError("Cardputer R7 must be bit-exact with CoreS3 before speaker output")
     # Additional loudness-matched copies make timbre differences audible
     # without confusing the comparison with the original R6 amplitude.
     normalized = {}
