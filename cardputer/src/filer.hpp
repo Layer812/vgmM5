@@ -2,7 +2,7 @@
 
 #if defined(IS_CARDPUTER)
 
-#define VERSION 0.98
+#define VERSION 67
 
 #define STATNUM 4
 #define STATMAX 10
@@ -11,7 +11,7 @@
 #define STATLOOP 2
 #define STATALL 3
 
-#define DISPMAX 6
+#define DISPMAX 4
 #define LISTMAX 256   // max files in a directory
 #define PATHMAX 256   // filename max include pathname
 

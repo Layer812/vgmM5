@@ -18,12 +18,12 @@ vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(MXDRV)ファイ�
 #### 対応デバイスと機能 (Supported Devices & Features)
 | 機能 (Features) \ デバイス (Device) | M5Stack AtomS3R (Echo) | M5Stack Cardputer | M5Stack CoreS3 | + [Module Audio](https://docs.m5stack.com/ja/module/Module-Audio) | [M5 TAB5](https://docs.m5stack.com/ja/core/Tab5) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **ステータス (Status)** | ✔️ 対応済 | [✔️ R6公開版](cardputer/README.md) | [✔️ R67 正式版](cores3/README.md) | [✔️ R67 正式版](cores3/README.md) | [✔️ R67 正式版](tab5/README.md) |
+| **ステータス (Status)** | ✔️ 対応済 | [✔️ R67 正式版](cardputer/README.md) | [✔️ R67 正式版](cores3/README.md) | [✔️ R67 正式版](cores3/README.md) | [✔️ R67 正式版](tab5/README.md) |
 | **VGM/VGZ 再生** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **MDX 再生** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **内蔵フラッシュ (USB Drive)** | ✔️ | - | - | - | - |
 | **MicroSD** | - | ✔️ | ✔️ | ✔️ | ✔️ |
-| **オンラインモード** | - | ✔️ | - | - | - |
+| **オンラインモード** | - | - | - | - | - |
 | **キーボード操作** | - | ✔️ | - | - | - |
 
 
@@ -46,13 +46,14 @@ vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(MXDRV)ファイ�
 | **Namco C140** | ✔️ 対応済 (Supported |
 | **Namco C352** | ✔️ 対応済 (Supported) |
 
-※ 従来のv0.98系に加え、Cardputer R6・CoreS3 R67・Tab5の更新版ソースを公開しています。
+※ 従来のv0.98系に加え、Cardputer R67・CoreS3 R67・Tab5の更新版ソースを公開しています。
 ※ ステータスが「対応済」となっていても、もし再生時に音がおかしい・違和感があると感じた場合は、曲名とおかしい点を優しく申告していただければ対応いたします！
 
-#### M5Stack Cardputer版（2026年10月26日 更新）
-新しいM5Unified 0.2.28／M5GFX 0.2.35に対応し、YM2151の発音・位相など音源処理を修正しました。R6のESP32-S3ネイティブビルドと回帰テストはPASSしています。
+#### M5Stack Cardputer版 R67 正式版（2026年11月7日）
 
-M5Burnerシェアコード：`rqz95QwaAsM6bN3O`（作者提供）。[Cardputer版の説明](cardputer/README.md)をご覧ください。
+CoreS3 R67と同じ `vgmM5lib` 音源コアを採用。起動すると**直接microSDのファイル一覧**が表示され、VGM/VGZ・MDX/PDXを選択できます。240×135画面の文字を大きくし、曲名・音源・音量・再生状態が分かる画面にしました。**オンライン／ローカル選択メニューやWi-Fi設定はなく、DBファイルも不要です。**
+
+[Cardputer R67の説明・ビルド方法](cardputer/README.md) ／ [Web Burner（従来のCardputer掲載版）](https://burner.m5stack.com/METQC2)
 
 #### M5Stack CoreS3版 R67 正式版（2026年11月7日）
 
@@ -85,7 +86,7 @@ M5Stack Web Burnerから、それぞれの機種向けファームウェアの�
 
 - **M5Stack CoreS3（R67 初期版）**：[Web Burnerを開く](https://burner.m5stack.com/share/firmware/P8DPPV)
 - **M5Stack Tab5**：[Web Burnerを開く](https://burner.m5stack.com/MWUJ4T)
-- **M5Stack Cardputer**：[Web Burnerを開く](https://burner.m5stack.com/METQC2)
+- **M5Stack Cardputer（従来の掲載版）**：[Web Burnerを開く](https://burner.m5stack.com/METQC2)
 
 > **CoreS3のWeb Burner掲載版はR67の初期版です。** 開発中のCoreS3 PR試験版とは区別してください。
 
@@ -94,7 +95,7 @@ M5Stack Web Burnerから、それぞれの機種向けファームウェアの�
 
 - **M5Stack Tab5用 シェアコード:** `rg69duyAcUQoohOl`
 - **M5Stack CoreS3用 シェアコード:** `wEBeKwOKFsqAmlsu`（Module Audioあり・なし共通）
-- **M5Stack Cardputer用 シェアコード:** `rqz95QwaAsM6bN3O`
+- **M5Stack Cardputer従来版 シェアコード:** `rqz95QwaAsM6bN3O`
 - **M5Stack Atom Echo S3R用 シェアコード:** `zoSd8neRRq7ZQFjB`
 
 ---
@@ -114,18 +115,14 @@ CoreS3版はタッチパネル操作と内蔵スピーカー再生に対応し�
 
 #### 💻 M5Stack Cardputer
 
-**[Cardputer R6 ソース・ビルド手順](cardputer/README.md)**（ESP32-S3ネイティブビルドPASS。オンラインDBを同梱しない場合はローカル再生用ビルド）
-Cardputer版はMicroSDカード内のファイル再生に加え、オンラインモードでの再生に対応しています。
+**[Cardputer R67 microSD専用プレイヤー](cardputer/README.md)**。起動後すぐにSDファイル一覧を表示します。
 
-**基本操作:**
-- **上下 / 方向キー**: ファイルや項目の選択
-- **Spaceキー**: 選択した曲の再生 / 停止
-- **= キー**: 音量アップ
-- **- キー**: 音量ダウン
-
-**オンラインモードの操作:**
-- Online/Local: オンラインモードとローカルモード（SDカード）を切り替えます。
-- オンラインモードでは、アルバムや曲のリストを読み込み、選択するだけでジュークボックスのように自動で再生が始まります。
+- **`;` ／ `.`**: 上／下に移動
+- **`,` ／ `/`**: ページ移動
+- **Space**: ファイル選択・再生／停止
+- **A**: フォルダ内の連続再生
+- **`+` ／ `-`**: 音量調整
+- **B／Backspace**: ファイル一覧を再読み込み
 
 #### 🎧 M5Stack Atom Echo S3R
 AtomS3Rは画面表示を持たず、メインボタンで操作します。起動時は無音状態で待機します。
@@ -145,24 +142,25 @@ vgmM5 is a VGM/VGZ and MDX (X68000) file player designed specifically for the M5
 
 | Features \ Device | M5Stack AtomS3R (Echo) | M5Stack Cardputer | M5Stack CoreS3 | + [Module Audio](https://docs.m5stack.com/ja/module/Module-Audio) | [M5 TAB5](https://docs.m5stack.com/ja/core/Tab5) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Status** | ✔️ Supported | [✔️ R6 Published](cardputer/README.md) | [✔️ R67 Production](cores3/README.md) | [✔️ R67 Production](cores3/README.md) | [✔️ R67 Official](tab5/README.md) |
+| **Status** | ✔️ Supported | [✔️ R67 Production](cardputer/README.md) | [✔️ R67 Production](cores3/README.md) | [✔️ R67 Production](cores3/README.md) | [✔️ R67 Official](tab5/README.md) |
 | **VGM/VGZ Playback** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **MDX Playback** | ✔️ | ✔️ | ✔️ | ✔️ | ✔️ |
 | **Internal Flash (USB Drive)** | ✔️ | - | - | - | - |
 | **MicroSD** | - | ✔️ | ✔️ | ✔️ | ✔️ |
-| **Online Mode** | - | ✔️ | - | - | - |
+| **Online Mode** | - | - | - | - | - |
 | **Keyboard Control** | - | ✔️ | - | - | - |
 
 #### Supported Sound Chips
 *(Please refer to the Supported Sound Chips table in the Japanese section above)*
 
-*Note: Updated Cardputer R6, CoreS3 R67 and Tab5 sources are available alongside the original v0.98 implementation.*
+*Note: Updated Cardputer R67, CoreS3 R67 and Tab5 sources are available alongside the original v0.98 implementation.*
 *Even if a chip is listed as "Supported," if you notice any strange sounds or something feels off during playback, please kindly report it (gently) with the song title and the issue, and I will address it!*
 
-#### M5Stack Cardputer edition (updated October 26, 2026)
-Updated to M5Unified 0.2.28 and M5GFX 0.2.35, with YM2151 note-on and phase corrections. The R6 native ESP32-S3 build and host regression tests passed.
+#### M5Stack Cardputer R67 production edition (November 7, 2026)
 
-M5Burner share code: `rqz95QwaAsM6bN3O` (author-supplied). See the [Cardputer documentation](cardputer/README.md).
+Uses the same `vgmM5lib` sound cores as CoreS3 R67, with readable 240×135 menus and a dedicated title/chip/volume/playback display. Boots **directly into the microSD browser**, supporting local VGM/VGZ and MDX/PDX. **No Online/Local chooser, Wi-Fi setup or embedded cloud DB is required.**
+
+[Cardputer R67 source and build guide](cardputer/README.md) / [Web Burner (previously published Cardputer edition)](https://burner.m5stack.com/METQC2)
 
 #### M5Stack CoreS3 R67 production edition (November 7, 2026)
 
@@ -193,7 +191,7 @@ Open the M5Stack Web Burner firmware page for your device:
 
 - **M5Stack CoreS3 (initial R67 release):** [Open Web Burner](https://burner.m5stack.com/share/firmware/P8DPPV)
 - **M5Stack Tab5:** [Open Web Burner](https://burner.m5stack.com/MWUJ4T)
-- **M5Stack Cardputer:** [Open Web Burner](https://burner.m5stack.com/METQC2)
+- **M5Stack Cardputer (previous edition):** [Open Web Burner](https://burner.m5stack.com/METQC2)
 
 > **The CoreS3 firmware published on Web Burner is the initial R67 edition.** It is separate from the experimental CoreS3 pull-request builds.
 
@@ -202,7 +200,7 @@ Alternatively, use M5 Burner with the following share codes:
 
 - **M5Stack Tab5 Share Code:** `rg69duyAcUQoohOl`
 - **M5Stack CoreS3 Share Code:** `wEBeKwOKFsqAmlsu` (with or without Module Audio)
-- **M5Stack Cardputer Share Code:** `rqz95QwaAsM6bN3O`
+- **M5Stack Cardputer previous-edition Share Code:** `rqz95QwaAsM6bN3O`
 - **M5Stack Atom Echo S3R Share Code:** `zoSd8neRRq7ZQFjB`
 ---
 
@@ -221,18 +219,14 @@ The CoreS3 version supports touch input and the built-in speaker, with optional 
 
 #### 💻 M5Stack Cardputer
 
-**[Cardputer R6 source/build guide](cardputer/README.md)** (offline/native build PASS; online catalog requires separately supplied DB files).
-The Cardputer version plays files directly from a MicroSD card and supports streaming via Online Mode.
+**[Cardputer R67 microSD-only player](cardputer/README.md)** starts directly in its local file browser.
 
-**Basic Controls:**
-- **Up/Down / Arrow Keys**: Select file or item
-- **Space Key**: Play/Stop selected track
-- **= Key**: Volume Up
-- **- Key**: Volume Down
-
-**Online Mode Controls:**
-- Online/Local: Toggle between Online Mode and Local Mode (MicroSD).
-- In Online Mode, simply browse through albums or tracks and select one to start streaming automatically like a jukebox.
+- **`;` / `.`**: Move up/down
+- **`,` / `/`**: Page up/down
+- **Space**: Select/play or stop
+- **A**: Play all files in a folder
+- **`+` / `-`**: Volume
+- **B / Backspace**: Rescan files
 
 #### 🎧 M5Stack Atom Echo S3R
 The AtomS3R version runs headlessly and is controlled via the main screen button. It boots into a silent idle state.

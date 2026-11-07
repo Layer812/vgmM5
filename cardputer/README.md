@@ -1,71 +1,125 @@
-# vgmM5 — M5Stack Cardputer R6
+# vgmM5 — M5Stack Cardputer R67
 
-[日本語](#日本語) / [English](#english)
+[日本語](#日本語) | [English](#english)
 
 ## 日本語
 
-M5Stack Cardputer（ESP32-S3）向けVGM/VGZ・MDXプレイヤーです。従来のv0.98ソースを保護し、音源処理と依存ライブラリを更新したR6ソースを公開しています。
+**Cardputer R67はmicroSD専用のVGM/VGZ・MDXプレイヤーです。** 起動すると直接ファイル一覧を表示します。オンライン／ローカルの選択画面、Wi-Fi設定、クラウドカタログはありません。オンラインDBの6ファイルも不要です。
 
-### M5Burner
+### R67の機能
 
-**Cardputer R6用シェアコード：`rqz95QwaAsM6bN3O`**
+- CoreS3 R67と共通の `vgmM5lib`：YM2151などのFM、C140/C352などのPCM、PSG・SSG・SCC、YM2413（R31）
+- 240×135 LCDに合わせた大きな文字のファイル一覧、曲名・音源・音量・経過時間を示す再生画面
+- microSDのフォルダを移動してVGM/VGZまたはMDX/PDXを再生
+- 標準版（CoreS3と同じ音源出力）、Classic版（CardputerのC140出力のみ8倍）を選択可能
+- 元のCardputer R6は[固定ブランチ](https://github.com/Layer812/vgmM5/tree/stable/cardputer-r6-unified028-20261026)に保持
 
-プロジェクト作者から提供されたR6の公開用コードです。M5Burner側の配信BINとGitHubビルドBINのSHA-256一致は、こちらでは確認していません。
+### キーボード操作
 
-### 更新内容（2026年10月26日）
+| ファイル一覧 | 操作 |
+|---|---|
+| 上／下 | `;` ／ `.` |
+| ページ移動 | `,` ／ `/` |
+| ファイル・フォルダを選択 | `Space` |
+| フォルダを戻る | `..` を選択 |
+| 全曲連続再生 | `A` |
+| 操作ヘルプ | `M` |
+| ルートで再読み込み | `B`／Backspace |
+| 音量 | `+`／`-` |
+| 再生中の停止 | `Space` |
 
-- **M5Unified 0.2.28 / M5GFX 0.2.35に対応**
-- **YM2151の音程・変調・KEY ONと発音時の位相処理を修正**
-- **C140 / C352のPCM演算を改善**
+microSDのルートにVGM/VGZ・MDXファイルを直接置いて使えます。フォルダに分類しても利用できます。MDXに対応するPDXは、従来のMDX読み込み仕様に合わせて配置してください。
 
-### ソースと検証
+### Windowsでビルド（書き込みなし）
 
-- [Cardputer R6ソースの固定ブランチ](https://github.com/Layer812/vgmM5/tree/stable/cardputer-r6-unified028-20261026)
-- [Cardputerファームウェアソース](src/)
-- [YM2151 R6修正 PR #11](https://github.com/Layer812/vgmM5/pull/11) と [M5Unified更新 PR #12](https://github.com/Layer812/vgmM5/pull/12)
-- [R6 ESP32-S3ネイティブビルド PASS](https://github.com/Layer812/vgmM5/actions/runs/40204050559)
-- [旧R5ソースの保管ブランチ](https://github.com/Layer812/vgmM5/tree/stable/cardputer-r5-pre-r6-20261026)
-
-**R6はネイティブビルドとホスト側の回帰テストを確認済みです。** R6実機での音質・連続再生については、現時点で独立した検証結果を記載していません。
-
-### Windowsでのビルド（書込なし）
-
-PlatformIO CoreがあるWindowsで、このリポジトリを取得して次を実行します。
+リポジトリのルートから：
 
 ```bat
-cardputer\RUN_THIS_CARDPUTER_BUILD_ONLY.cmd
+cd cardputer
+RUN_THIS_CARDPUTER_R67_BUILD_ONLY.cmd
 ```
 
-`cardputer/platformio.ini` の `m5stack-cardputer` 環境（Espressif32 6.13.0、M5Unified 0.2.28、M5GFX 0.2.35）を使います。**デバイスには書き込みません。** レポートZIPは `F:\build\tmp` があればそこに出力します。
+Classic（C140 8倍）の場合：
 
-### オンラインモード用DB
+```bat
+cd cardputer
+RUN_THIS_CARDPUTER_R67_CLASSIC_BUILD_ONLY.cmd
+```
 
-元のGitHubリポジトリには、オンライン楽曲カタログを構成する6つの `.bin` ファイルが含まれていません。全6ファイルを所持していない場合、ビルドスクリプトは1バイトの空DBを生成します。この場合、**microSDからのローカル再生用ビルドとなり、オンラインカタログは利用できません**。
+PlatformIO CLIからは次のようにビルドできます。
 
-適切な権利を持つ完全な6ファイルを別途配置した場合のみ、実DBを埋め込みます。欠落・混在は安全停止し、第三者の楽曲・データベースはこのリポジトリに同梱しません。
+```bat
+pio run -d cardputer -e m5stack-cardputer
+pio run -d cardputer -e m5stack-cardputer-classic
+```
+
+どちらもESP32-S3ネイティブファームウェアを生成するだけです。データベース、バックアップ、デバイス書き込みを要求しません。
+
+### 公開・音源比較
+
+- [Cardputer R67ソース（main）](https://github.com/Layer812/vgmM5/tree/main/cardputer)
+- [GitHub Actions／ネイティブビルド](https://github.com/Layer812/vgmM5/actions)
+- [M5Stack Web Burner — 従来のCardputer掲載版](https://burner.m5stack.com/METQC2)
+
+**Web BurnerのCardputerリンクは従来版です。** GitHub R67の新しいバイナリとは別です。
+
+標準R67とCoreS3 R67のYM2151・C140・ミックスのPCMは、同一のテスト入力でビット単位で一致しています。元のR6とはC140の増幅率やFM内部演算に違いがあります。比較ツールと検証ソースは開発履歴の[PR #61](https://github.com/Layer812/vgmM5/pull/61)・[PR #62](https://github.com/Layer812/vgmM5/pull/62)にあります。
 
 ---
 
 ## English
 
-The **M5Stack Cardputer R6** VGM/VGZ and MDX edition uses the protected v0.98 Cardputer baseline with updated sound calculations and library dependencies.
+**Cardputer R67 is a microSD-only VGM/VGZ and MDX player.** It starts directly in the file browser, with **no Online/Local chooser, Wi-Fi setup, cloud catalog or required DB assets**.
 
-### M5Burner
+### Features
 
-**Cardputer R6 share code: `rqz95QwaAsM6bN3O`**
+- The same portable `vgmM5lib` FM/PCM/PSG/SSG/SCC and YM2413 core used by CoreS3 R67
+- Clear, larger-text 240×135 file browser and playback screen showing title, sound chip, volume and elapsed time
+- microSD directory navigation and playback of VGM/VGZ or MDX with PDX support
+- Standard mode with CoreS3-equivalent output, or optional C140-only Classic 8× build
+- [Preserved original Cardputer R6 source](https://github.com/Layer812/vgmM5/tree/stable/cardputer-r6-unified028-20261026)
 
-This code was supplied by the project author. The M5Burner-hosted image has not been independently compared by SHA-256 with the native GitHub CI binary.
+### Keys
 
-### What's new — October 26, 2026
+| File browser | Key |
+|---|---|
+| Up/down | `;` / `.` |
+| Page up/down | `,` / `/` |
+| Select/play | `Space` |
+| Go to parent directory | Select `..` |
+| Play all | `A` |
+| Help | `M` |
+| Rescan from root | `B` / Backspace |
+| Volume | `+` / `-` |
+| Stop playback | `Space` |
 
-- **M5Unified 0.2.28 / M5GFX 0.2.35**
-- Improved **YM2151** pitch, modulation, KEY ON and new-note phase behavior
-- Safer **C140 / C352** PCM calculations
+### Build on Windows (no flash)
 
-### Source and validation
+```bat
+cd cardputer
+RUN_THIS_CARDPUTER_R67_BUILD_ONLY.cmd
+```
 
-See the [R6 source branch](https://github.com/Layer812/vgmM5/tree/stable/cardputer-r6-unified028-20261026), [native ESP32-S3 CI PASS](https://github.com/Layer812/vgmM5/actions/runs/40204050559), [YM2151 PR #11](https://github.com/Layer812/vgmM5/pull/11), and [M5Unified PR #12](https://github.com/Layer812/vgmM5/pull/12). The [previous R5 snapshot](https://github.com/Layer812/vgmM5/tree/stable/cardputer-r5-pre-r6-20261026) remains available. Native compilation and host tests passed; no independent R6 physical speaker/long-duration playback result is claimed here.
+For optional C140 Classic 8×:
 
-Run `cardputer\RUN_THIS_CARDPUTER_BUILD_ONLY.cmd` from the repository root to compile without flashing. The build stays on Espressif32 6.13.0 / Arduino 2.0.17 and pins the new M5 libraries.
+```bat
+cd cardputer
+RUN_THIS_CARDPUTER_R67_CLASSIC_BUILD_ONLY.cmd
+```
 
-The original six online-catalogue `.bin` files are absent from GitHub. Without all six valid files, the build script creates empty placeholders: microSD local playback code is retained, but the online catalogue will be empty. Never redistribute third-party databases without permission.
+Or run:
+
+```bat
+pio run -d cardputer -e m5stack-cardputer
+pio run -d cardputer -e m5stack-cardputer-classic
+```
+
+No online DB, backup or flashing is required. Place your own VGM/VGZ/MDX files on the microSD card.
+
+### Links
+
+- [Cardputer R67 source](https://github.com/Layer812/vgmM5/tree/main/cardputer)
+- [Native builds](https://github.com/Layer812/vgmM5/actions)
+- [Cardputer Web Burner — previously published edition](https://burner.m5stack.com/METQC2)
+
+The Web Burner link still targets the previously published Cardputer image, **not** the new R67 firmware. Identical YM2151/C140 register sequences produce bit-exact pre-speaker PCM for standard Cardputer R67 and CoreS3 R67. Audio A/B tools remain in [PR #61](https://github.com/Layer812/vgmM5/pull/61) and [PR #62](https://github.com/Layer812/vgmM5/pull/62).

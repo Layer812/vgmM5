@@ -12,6 +12,9 @@ permissions:
 
 jobs:
   native-build:
+    # Preserve the original Cardputer R6 source-lock workflow for its
+    # historical stable branch. R67 is built by its own shared-lib CI.
+    if: startsWith(github.ref, 'refs/heads/stable/cardputer-r6-')
     runs-on: ubuntu-22.04
     timeout-minutes: 40
     steps:

@@ -1,0 +1,88 @@
+name: Cardputer R67 production native build (NO FLASH)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cardputer/**'
+      - 'lib/vgmM5lib/src/pcm_engine.c'
+      - '.github/workflows/cardputer-r67-production-native.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cardputer-r67:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Guard real R67 microSD source and no DB dependency
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('cardputer')
+          s=(root/'src/voice.cpp').read_text()
+          p=(root/'platformio.ini').read_text()
+          assert 'cardputer_draw_playback_view' in s
+          assert 'Boot directly to the SD file browser' in s
+          assert 'cloud_db_' not in s and 'wifi_manager_' not in s
+          assert 'STATE_BOOT_MENU' not in s and 'STATE_LOCAL_MODE' not in s
+          assert '#include "cloud_db.hpp"' not in s
+          assert 'board_build.embed_txtfiles' not in p
+          assert 'symlink://../lib/vgmM5lib' in p
+          assert '[env:m5stack-cardputer-classic]' in p
+          assert '#define DISPMAX 4' in (root/'src/filer.hpp').read_text()
+          assert 'Cardputer R67' in (root/'README.md').read_text()
+          print('PASS Cardputer R67 microSD-only release guard, no online DB assets')
+          PY
+      - name: Install pinned PlatformIO and CoreS3-equivalent Cardputer libraries
+        run: |
+          python3 -m pip install --disable-pip-version-check platformio 'click==8.1.8'
+          pio pkg install -d cardputer -e m5stack-cardputer
+      - name: Build standard Cardputer R67 ESP32-S3 native (NO FLASH)
+        run: pio run -d cardputer -e m5stack-cardputer
+      - name: Save standard firmware
+        run: |
+          mkdir -p cardputer/release
+          cp cardputer/.pio/build/m5stack-cardputer/firmware.bin cardputer/release/cardputer_r67_standard.bin
+      - name: Build optional Classic Cardputer R67 native (NO FLASH)
+        run: pio run -d cardputer -e m5stack-cardputer-classic
+      - name: Package verified APP-ONLY firmwares
+        run: |
+          python3 - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          d=Path('cardputer/release')
+          classic=Path('cardputer/.pio/build/m5stack-cardputer-classic/firmware.bin')
+          (d/'cardputer_r67_classic.bin').write_bytes(classic.read_bytes())
+          names=['cardputer_r67_standard.bin','cardputer_r67_classic.bin']
+          manifest={'edition':'M5Stack Cardputer R67 microSD-only',
+                    'app_only_offset':'0x10000','flash_performed':False,
+                    'variants':{}}
+          for name in names:
+              data=(d/name).read_bytes()
+              assert len(data)>100000 and data[0]==0xe9
+              manifest['variants'][name]={'size':len(data),'sha256':hashlib.sha256(data).hexdigest()}
+          assert manifest['variants'][names[0]]['sha256']!=manifest['variants'][names[1]]['sha256']
+          (d/'RESULT.json').write_text(json.dumps(manifest,indent=2)+'\n')
+          for edition,filename in [('STANDARD',names[0]),('CLASSIC',names[1])]:
+              cmd='''@echo off
+          setlocal
+          if "%~1"=="" (
+            echo Usage: %~nx0 COM9
+            exit /b 1
+          )
+          python -m esptool --chip esp32s3 --port %1 --baud 460800 --before default_reset --after hard_reset write_flash 0x10000 "%~dp0FILE"
+          if errorlevel 1 exit /b 1
+          echo PASS: app-only Cardputer R67.
+          '''.replace('FILE',filename)
+              (d/f'RUN_THIS_CARDPUTER_R67_{edition}_APP_ONLY.cmd').write_text(cmd)
+          print('PASS native Cardputer R67 standard+Classic images; no flash or partition modification')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CARDPUTER-R67-PRODUCTION-APP-ONLY-NOFLASH
+          path: cardputer/release/
+          retention-days: 30
