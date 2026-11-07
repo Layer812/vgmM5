@@ -18,6 +18,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#if defined(VGMM5_CARDPUTER_VGMM5LIB)
+#include "cardputer_audio_balance.hpp"
+#endif
 
 #define RATE 44100u
 #define MAX_FILE (64u*1024u*1024u)
@@ -270,6 +273,12 @@ int main(int argc,char **argv){
         int32_t fm[2]={0,0},pcm[2]={0,0};
         if(v.fm_clock)fm_engine_tick(&g_fm_engine,&fm[0],&fm[1]);
         if(v.pcm_clock)pcm_engine_tick(&g_pcm_engine,&pcm[0],&pcm[1]);
+#if defined(VGMM5_CARDPUTER_VGMM5LIB)
+        if(v.pcm_clock){
+            pcm[0]=cardputer_adjust_c140_level(pcm[0]);
+            pcm[1]=cardputer_adjust_c140_level(pcm[1]);
+        }
+#endif
         stem_frame(&stems[0],fm[0],fm[1],1);
         stem_frame(&stems[1],pcm[0],pcm[1],1);
         stem_frame(&stems[2],saturate32((int64_t)fm[0]+pcm[0]),
