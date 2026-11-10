@@ -34,8 +34,12 @@ static inline bool ext_is(const char* name,const char* expected) {
 static inline bool exists_regular(const char* path) {
   if(!path||!SD.exists(path))return false;
   File file=SD.open(path,FILE_READ);
+  // Real album-art PNG files (often 512-1024px RGBA) commonly exceed
+  // the previous 2MiB guard. PNG is streamed; file size itself is not
+  // a valid reason to silently hide otherwise supported artwork.
+  const uint32_t limit=ext_is(path,".png")?8u*1024u*1024u:4u*1024u*1024u;
   const bool ok=file&&!file.isDirectory()&&file.size()>0
-                &&file.size()<=2u*1024u*1024u;
+                &&file.size()<=limit;
   if(file)file.close();
   return ok;
 }
