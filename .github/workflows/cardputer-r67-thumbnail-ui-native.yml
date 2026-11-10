@@ -1,0 +1,64 @@
+name: Cardputer R67 thumbnail+metadata UI native build (no flash)
+on:
+  push:
+    branches:
+      - dev/cardputer-r67-filelist-thumbnail-info-20261110
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cardputer:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify five-row art preview and clean local-only UI
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          h=Path('cardputer/src/filer.hpp').read_text()
+          f=Path('cardputer/src/filer.cpp').read_text()
+          v=Path('cardputer/src/voice.cpp').read_text()
+          ini=Path('cardputer/platformio.ini').read_text()
+          assert '#define DISPMAX 5' in h
+          assert 'drawJpgFile(SD, filename, 160, 30, 64, 64)' in f
+          assert 'cover.jpg' in f and 'strcpy(dot,".jpg")' in f
+          assert 'text += "/"' in f and '[DIR]' not in f[f.index('void dispfiles('):]
+          assert 'browser_help_visible=false' in f and 'M:CLOSE' in f
+          assert 'M:HELP' in v and '"vgmM5 R67"' in v
+          assert 'cloud_db_' not in v and 'wifi_manager_' not in v
+          assert 'board_build.embed_txtfiles' not in ini
+          print('PASS five-row file list; / slash folders, optional 64x64 covers, local file metadata, M Help, no DB')
+          PY
+      - name: Install pinned PlatformIO / M5 libraries
+        run: |
+          python3 -m pip install --disable-pip-version-check platformio 'click==8.1.8'
+          pio pkg install -d cardputer -e m5stack-cardputer
+      - name: Build ESP32-S3 Cardputer shared-vgmM5lib firmware (NO FLASH)
+        run: pio run -d cardputer -e m5stack-cardputer
+      - name: Verify app and export
+        run: |
+          python3 - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          src=Path('cardputer/.pio/build/m5stack-cardputer/firmware.bin')
+          data=src.read_bytes()
+          assert len(data)>100000 and data[0]==0xe9
+          d=Path('cardputer/r67_thumbnail_build')
+          d.mkdir(exist_ok=True)
+          (d/'firmware.bin').write_bytes(data)
+          result={'name':'Cardputer R67 local file thumbnails',
+                  'native':'PASS','flash_performed':False,
+                  'app_offset':'0x10000','bytes':len(data),
+                  'sha256':hashlib.sha256(data).hexdigest()}
+          (d/'RESULT.json').write_text(json.dumps(result,indent=2)+'\n')
+          print('PASS:',result)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CARDPUTER-R67-THUMBNAIL-UI-APP-ONLY-NOFLASH
+          path: cardputer/r67_thumbnail_build/
+          retention-days: 14

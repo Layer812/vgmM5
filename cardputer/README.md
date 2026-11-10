@@ -9,7 +9,9 @@
 ### R67の機能
 
 - CoreS3 R67と共通の `vgmM5lib`：YM2151などのFM、C140/C352などのPCM、PSG・SSG・SCC、YM2413（R31）
-- 240×135 LCDに合わせた大きな文字のファイル一覧、曲名・音源・音量・経過時間を示す再生画面
+- **2カラムのファイラ**：左に5行の曲・フォルダ一覧、右に64×64サムネイル＋形式・容量・音源情報。フォルダは水色の名前＋末尾 `/` 表示
+- タイトル横の **`M:HELP`** で操作説明を表示／非表示。常時表示される下部の操作説明は廃止
+- 再生中は曲名・音源・音量・経過時間を表示
 - microSDのフォルダを移動してVGM/VGZまたはMDX/PDXを再生
 - 標準版（CoreS3と同じ音源出力）、Classic版（CardputerのC140出力のみ8倍）を選択可能
 - 元のCardputer R6は[固定ブランチ](https://github.com/Layer812/vgmM5/tree/stable/cardputer-r6-unified028-20261026)に保持
@@ -29,6 +31,18 @@
 | 再生中の停止 | `Space` |
 
 microSDのルートにVGM/VGZ・MDXファイルを直接置いて使えます。フォルダに分類しても利用できます。MDXに対応するPDXは、従来のMDX読み込み仕様に合わせて配置してください。
+
+### サムネイル（省略可能）
+
+microSDに以下のJPEG画像を置くと、右側のプレビューに表示します。
+
+- 曲と同じ名前の画像：`DRAGON_SABER.vgm` に対して `DRAGON_SABER.jpg`（曲ごとの絵）
+- フォルダ全体の画像：同じフォルダに `cover.jpg`（アルバム共通）
+- フォルダの画像：フォルダ内に `cover.jpg`
+
+画像は **64×64ピクセルの通常JPEG** を推奨します。大きな画像はプレビュー範囲に切り取られます。画像がない場合はVGM／MDX／フォルダを表すグラフィックを表示するため、追加ファイルは必須ではありません。
+
+情報欄には形式・ファイルサイズを表示します。非圧縮VGMにYM2151/C140のヘッダ情報がある場合には音源名も表示します。VGZの内部音源名は選択時には展開しません（`COMPRESSED` と表示）。
 
 ### Windowsでビルド（書き込みなし）
 
@@ -74,7 +88,9 @@ pio run -d cardputer -e m5stack-cardputer-classic
 ### Features
 
 - The same portable `vgmM5lib` FM/PCM/PSG/SSG/SCC and YM2413 core used by CoreS3 R67
-- Clear, larger-text 240×135 file browser and playback screen showing title, sound chip, volume and elapsed time
+- **Two-column 240×135 browser**: five readable filename/folder rows on the left, a 64×64 optional cover and format/size/chip information on the right
+- Folders are cyan and end in `/`; **`M:HELP`** in the header opens/closes the key guide, so no permanent bottom instruction strip is needed
+- Readable playback screen with title, chip, volume and elapsed time
 - microSD directory navigation and playback of VGM/VGZ or MDX with PDX support
 - Standard mode with CoreS3-equivalent output, or optional C140-only Classic 8× build
 - [Preserved original Cardputer R6 source](https://github.com/Layer812/vgmM5/tree/stable/cardputer-r6-unified028-20261026)
@@ -92,6 +108,12 @@ pio run -d cardputer -e m5stack-cardputer-classic
 | Rescan from root | `B` / Backspace |
 | Volume | `+` / `-` |
 | Stop playback | `Space` |
+
+### Optional microSD thumbnails
+
+Put `song.jpg` next to `song.vgm`, or a shared `cover.jpg` in the same folder (also works inside a selected subfolder). **64×64 baseline JPEG** is recommended; large images are cropped. When no cover is present, the player draws a built-in VGM/MDX/folder tile. No external database or internet connection is required.
+
+The right pane shows file type and size. For uncompressed VGM it also detects YM2151/C140 header clocks when present. VGZ is marked compressed without decompression during browsing.
 
 ### Build on Windows (no flash)
 
