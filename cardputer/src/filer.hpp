@@ -25,6 +25,7 @@
 struct fl{
   uint8_t filename[PATHMAX];
   uint8_t type;
+  uint32_t size_bytes; // Captured during the single folder listing, not on cursor movement.
 };
 
 void disptitle(int stat, char *title);
