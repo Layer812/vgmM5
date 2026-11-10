@@ -223,7 +223,9 @@ int makevgmlist(fs::FS &fs) {
       i++;
     } else if(file.isDirectory()){
       const char* fname = file.name();
-      if (strcmp(fname, "System Volume Information") != 0 && strcmp(fname, "/System Volume Information") != 0) {
+      if (strcmp(fname, "System Volume Information") != 0 && strcmp(fname, "/System Volume Information") != 0 &&
+          strcmp(fname, ".VGMM5") != 0 && strcmp(fname, "/.VGMM5") != 0 &&
+          strcmp(fname, ".vgmm5") != 0 && strcmp(fname, "/.vgmm5") != 0) {
         snprintf((char*)filelist[i].filename, PATHMAX, "%s", fname);
         filelist[i].type = TYPE_SDIR;
         i++;
