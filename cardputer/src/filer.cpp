@@ -380,7 +380,7 @@ void dispfiles(int offset, int chosen, bool start) {
     const char* name=(const char*)filelist[idx].filename;
     const char* slash=strrchr(name,'/');
     if(slash&&slash[1])name=slash+1;
-    // Directories are cyan and end in "/" instead of a wide "[DIR]" label.
+    // Cyan folder names end with a slash to keep the list compact.
     String text=String(name);
     if(dir && (text.length()==0 || !text.endsWith("/")))text += "/";
     const int width=130;
