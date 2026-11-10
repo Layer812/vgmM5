@@ -34,8 +34,9 @@ jobs:
           assert 'cardputer_artwork::draw(path,kind,160,31,64)' in f
           assert 'cardputer_artwork::draw(cardputer_playing_path,kind,160,32,64)' in v
           info=f.split('static void browser_draw_info(',1)[1].split('void dispfiles(',1)[0]
-          assert 'SD.open(' not in info and 'openNextFile(' not in info
-          assert 'file.read(' not in info and 'file.size(' not in info
+          source='\n'.join(line.split('//',1)[0] for line in info.splitlines())
+          assert 'SD.open(' not in source and 'openNextFile(' not in source
+          assert 'file.read(' not in source and 'file.size(' not in source
           assert 'uint32_t length=entry.size_bytes' in info
           assert 'if(new_album)' in info and 'browser_preview_valid=true' in info
           assert 'file_index_valid' in f and 'indexed_directory' in f
