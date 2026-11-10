@@ -101,6 +101,46 @@ static inline bool resolve(const char* fullpath,Kind kind,char* out,size_t cap,
                              size && directory[size-1]=='/'?"":"/",name);
     if(count>0&&(size_t)count<sizeof(path)&&try_candidate(path,out,cap,requested,matched))return true;
   }
+  // On FAT SD cards users often name album artwork with the album title,
+  // use mixed-case names, or add an arbitrary PNG rather than "cover.png".
+  // The exact-name checks above will not find those images. Enumerate the
+  // current album folder and use a real PNG if available, then a JPEG.
+  // This uses the actual case returned by File::name() (ESP32 v2 uses
+  // basename) and does not depend on guessing the filename.
+  for (int pass=0;pass<2;++pass) {
+    File folder=SD.open(directory,FILE_READ);
+    if(!folder || !folder.isDirectory()) {
+      if(folder)folder.close();
+      break;
+    }
+    File image=folder.openNextFile();
+    unsigned checked=0;
+    while(image && checked++<256u) {
+      if(!image.isDirectory()) {
+        const char* filename=image.name();
+        if(filename) {
+          const char* leaf=strrchr(filename,'/');
+          if(leaf&&leaf[1])filename=leaf+1;
+          const bool png=ext_is(filename,".png");
+          const bool jpg=ext_is(filename,".jpg")||ext_is(filename,".jpeg");
+          if((pass==0&&png)||(pass==1&&jpg)) {
+            const int count=snprintf(path,sizeof(path),"%s%s%s",directory,
+                       size&&directory[size-1]=='/'?"":"/",filename);
+            if(count>0&&(size_t)count<sizeof(path)&&
+               try_candidate(path,out,cap,requested,matched)) {
+              image.close();
+              folder.close();
+              return true;
+            }
+          }
+        }
+      }
+      image.close();
+      image=folder.openNextFile();
+    }
+    if(image)image.close();
+    folder.close();
+  }
   return false;
 }
 
@@ -173,9 +213,24 @@ static inline bool draw_real(const char* path,int x,int y,int side) {
   // In R67 the PNG path always used scale=1.0, which cropped ordinary
   // album-art PNGs larger than 64/72 pixels to a tiny top-left corner.
   // Read IHDR first, scale the *entire* image, then center on the cover tile.
-  return is_png
-        ? lcd.drawPngFile(SD,path,cx,cy,side,side,0,0,scale)
-        : lcd.drawJpgFile(SD,path,cx,cy,side,side,0,0,scale);
+  if(!is_png) return lcd.drawJpgFile(SD,path,cx,cy,side,side,0,0,scale);
+
+  // On Cardputer, the physical LCD cannot always read back pixels for PNG
+  // transparency. Blend PNG to a small RGB565 memory sprite and push the
+  // final opaque tile. No PSRAM or full-image allocation is needed.
+  // PNG decoding remains streamed directly from the SD card.
+  LGFX_Sprite tile(&lcd);
+  tile.setColorDepth(16);
+  if(tile.createSprite(side,side)) {
+    tile.fillSprite(0x0842);
+    const int dx=(side-w)/2,dy=(side-h)/2;
+    const bool decoded=tile.drawPngFile(SD,path,dx,dy,side,side,0,0,scale);
+    if(decoded)tile.pushSprite(x,y);
+    tile.deleteSprite();
+    if(decoded)return true;
+  }
+  // Low-memory fallback when the 72x72 sprite cannot be allocated.
+  return lcd.drawPngFile(SD,path,cx,cy,side,side,0,0,scale);
 }
 
 // Always draws a proper colorful thumbnail even with no matching cover.jpg.
