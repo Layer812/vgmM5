@@ -97,3 +97,35 @@ jobs:
             cardputer/MAKE_CARDPUTER_THUMBS.cmd
             cardputer/tools/MAKE_CARDPUTER_THUMBS.ps1
           retention-days: 14
+
+  windows-sd-cache:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate sample SD album PNG and real 8-hex RGB565 cache on Windows
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $root=Join-Path $env:RUNNER_TEMP 'CardputerSD'
+          $album=Join-Path $root 'MUSIC\ALBUM'
+          [void][System.IO.Directory]::CreateDirectory($album)
+          $img=[System.Drawing.Bitmap]::new(256,256)
+          try {
+            $g=[System.Drawing.Graphics]::FromImage($img)
+            try {
+              $g.Clear([System.Drawing.Color]::FromArgb(25,100,200))
+              $g.DrawEllipse([System.Drawing.Pens]::White,20,20,190,190)
+            } finally { $g.Dispose() }
+            $img.Save((Join-Path $album 'ALBUM.png'),[System.Drawing.Imaging.ImageFormat]::Png)
+          } finally { $img.Dispose() }
+          & ./cardputer/tools/MAKE_CARDPUTER_THUMBS.ps1 $root
+          if($LASTEXITCODE -ne 0) {throw 'PowerShell converter failed'}
+          $hashFile=Join-Path $root '.VGMM5\064B157D.RGB'
+          if(-not (Test-Path -LiteralPath $hashFile)) {throw "FNV-1a /MUSIC/ALBUM cache not created: $hashFile"}
+          if((Get-Item -LiteralPath $hashFile).Length -ne 8192) {throw 'RGB565 byte length wrong'}
+          $original=[System.IO.File]::ReadAllBytes((Join-Path $album 'ALBUM.png'))
+          if($original.Length -lt 100){throw 'Source image missing'}
+          & ./cardputer/tools/MAKE_CARDPUTER_THUMBS.ps1 $root
+          if($LASTEXITCODE -ne 0) {throw 'Reuse existing cache failed'}
+          Write-Host 'PASS real Windows System.Drawing preprocessing; 064B157D.RGB is 8192 bytes; source retained'
