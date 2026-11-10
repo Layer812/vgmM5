@@ -80,10 +80,20 @@ jobs:
                   'sha256':hashlib.sha256(data).hexdigest()}
           assert report['variants']['standard']['sha256']!=report['variants']['classic']['sha256']
           (dst/'RESULT.json').write_text(json.dumps(report,indent=2)+'\n')
+          (dst/'HOW_TO_TEST.txt').write_text(
+              '1. On Windows, with microSD inserted, run MAKE_CARDPUTER_THUMBS.cmd E:\\\\ (replace E:).\n'
+              '2. All album caches are stored in /.VGMM5/XXXXXXXX.RGB, 8192 bytes each.\n'
+              '3. Flash only the verified Cardputer app for the current device partition layout.\n'
+              '4. Confirm folder cursor moves rapidly and artwork matches in browser and player.\n'
+              '5. No music or original PNG files are modified.\n',
+              encoding='utf-8')
           print('PASS native standard+Classic no-flash firmware SHA256')
           PY
       - uses: actions/upload-artifact@v4
         with:
           name: CARDPUTER-R67-8HEX-SD-THUMBNAIL-CACHE-NOFLASH
-          path: cardputer/r67_hashed_thumbnails/
+          path: |
+            cardputer/r67_hashed_thumbnails/
+            cardputer/MAKE_CARDPUTER_THUMBS.cmd
+            cardputer/tools/MAKE_CARDPUTER_THUMBS.ps1
           retention-days: 14
