@@ -83,8 +83,12 @@ static inline void default_cover(const char* album,Kind kind,int x,int y) {
 // Only recognized, small 64x64 RGB PNGs may be decoded once on-device.
 // Everything larger must be converted beforehand using the Windows helper.
 static inline bool small_png(const char* album,char* filename,size_t cap) {
+  const char* leaf=strrchr(album,'/');
+  leaf=leaf?leaf+1:album;
+  char folder_png[128]={};
+  snprintf(folder_png,sizeof(folder_png),"%s.png",leaf);
   const char* const names[]={"cover64.png","cover_64.png","thumb.png",
-                              "cover.png","Cover.png","COVER.PNG"};
+                              folder_png,"cover.png","Cover.png","COVER.PNG"};
   char candidate[320];
   for(const char* name:names) {
     const int n=snprintf(candidate,sizeof(candidate),"%s%s%s",album,
