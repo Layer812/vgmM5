@@ -10,7 +10,7 @@ $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Drawing
 $rootItem=Get-Item -LiteralPath $SdRoot -ErrorAction Stop
 if(-not $rootItem.PSIsContainer){throw "SD path is not a folder: $SdRoot"}
-$root=$rootItem.FullName.TrimEnd([char]'\',[char]'/')
+$root=$rootItem.FullName.TrimEnd([char[]]@('\','/'))
 $cache=Join-Path $rootItem.FullName '.VGMM5'
 [void][System.IO.Directory]::CreateDirectory($cache)
 
@@ -25,11 +25,11 @@ function Get-AlbumHash([string]$album) {
   return $h.ToString('X8')
 }
 function Album-Path([string]$absolute) {
-  $path=[System.IO.Path]::GetFullPath($absolute).TrimEnd([char]'\',[char]'/')
+  $path=[System.IO.Path]::GetFullPath($absolute).TrimEnd([char[]]@('\','/'))
   if(-not $path.StartsWith($root,[System.StringComparison]::OrdinalIgnoreCase)) {
     throw "Outside SD root: $path"
   }
-  $rel=$path.Substring($root.Length).TrimStart([char]'\',[char]'/')
+  $rel=$path.Substring($root.Length).TrimStart([char[]]@('\','/'))
   if([string]::IsNullOrEmpty($rel)){return '/'}
   return '/'+$rel.Replace('\','/')
 }
@@ -71,7 +71,7 @@ function Save-Rgb565([string]$imagePath,[string]$outputPath) {
     } finally {$gfx.Dispose()}
     $temp=[System.IO.Path]::ChangeExtension($outputPath,'.TMP')
     $fs=[System.IO.File]::Open($temp,[System.IO.FileMode]::Create,[System.IO.FileAccess]::Write)
-    $writer=New-Object System.IO.BinaryWriter($fs)
+    $writer=[System.IO.BinaryWriter]::new($fs)
     try {
       for($y=0;$y -lt 64;$y++) {
         for($x=0;$x -lt 64;$x++) {
