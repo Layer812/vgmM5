@@ -1,0 +1,65 @@
+name: Cardputer R67 PNG cover scaling native (NO FLASH)
+on:
+  push:
+    branches: [dev/cardputer-r67-png-cover-scaling-20261110]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify PNG artwork path and supported scale
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          a=Path('cardputer/src/cardputer_artwork.hpp').read_text()
+          f=Path('cardputer/src/filer.cpp').read_text()
+          v=Path('cardputer/src/voice.cpp').read_text()
+          for pattern in ('png_dimensions(', 'scale_to_fit(', 'drawPngFile(SD,path,cx,cy,side,side,0,0,scale)',
+                          'drawJpgFile(SD,path,cx,cy,side,side,0,0,scale)',
+                          '8u*1024u*1024u', '"cover.png"', '"COVER.PNG"',
+                          'resolve(fullpath,kind,candidate,sizeof(candidate),which)'):
+              assert pattern in a,pattern
+          assert "cardputer_artwork::draw(" in f and "cardputer_artwork::draw(" in v
+          assert 'cloud_db_' not in v and 'wifi_manager_' not in v
+          assert '#define DISPMAX 5' in Path('cardputer/src/filer.hpp').read_text()
+          assert 'board_build.embed_txtfiles' not in Path('cardputer/platformio.ini').read_text()
+          print('PASS PNG IHDR scale-to-fit, >2MiB files, 2 screen paths, fallback, microSD-only')
+          PY
+      - name: Install pinned PlatformIO
+        run: |
+          python3 -m pip install --disable-pip-version-check platformio 'click==8.1.8'
+          pio pkg install -d cardputer -e m5stack-cardputer
+      - name: Build Cardputer R67 Standard ESP32-S3 native (NO FLASH)
+        run: pio run -d cardputer -e m5stack-cardputer
+      - name: Build Cardputer R67 Classic ESP32-S3 native (NO FLASH)
+        run: pio run -d cardputer -e m5stack-cardputer-classic
+      - name: SHA256 and APP-ONLY result package
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          dest=Path('cardputer/png_fix')
+          dest.mkdir(exist_ok=True)
+          outcome={'build':'PASS','flashed':False,'app_offset':'0x10000','variants':{}}
+          for env,name in (('m5stack-cardputer','standard'),('m5stack-cardputer-classic','classic')):
+              binary=Path('cardputer/.pio/build')/env/'firmware.bin'
+              data=binary.read_bytes()
+              assert len(data)>100000 and data[0]==0xe9
+              (dest/('cardputer_r67_png_'+name+'.bin')).write_bytes(data)
+              outcome['variants'][name]={'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()}
+          assert outcome['variants']['standard']['sha256']!=outcome['variants']['classic']['sha256']
+          (dest/'RESULT.json').write_text(json.dumps(outcome,indent=2)+'\n')
+          print(outcome)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CARDPUTER-R67-PNG-ART-APPONLY-NOFLASH
+          path: cardputer/png_fix/
+          retention-days: 14
