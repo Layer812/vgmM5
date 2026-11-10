@@ -265,7 +265,7 @@ static void browser_draw_info(int selection) {
       entry.type==TYPE_SDIR ? cardputer_artwork::FOLDER :
       entry.type==TYPE_MDX ? cardputer_artwork::MDX : cardputer_artwork::VGM;
   // The *same* art resolver draws the browser and now-playing views.
-  cardputer_artwork::draw(path,kind,161,31,62);
+  cardputer_artwork::draw(path,kind,160,31,64);
 
   const char* format=dir?"DIR":entry.type==TYPE_MDX?"MDX":"VGM";
   String ext=String(strrchr(name,'.')?strrchr(name,'.'):"");
