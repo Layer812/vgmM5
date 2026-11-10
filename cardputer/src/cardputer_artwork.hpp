@@ -15,7 +15,7 @@ namespace cardputer_artwork {
 enum Kind : uint8_t { FOLDER=0, VGM=1, MDX=2, PARENT=3 };
 static constexpr int kPixels=64;
 static constexpr size_t kCacheBytes=64u*64u*2u;
-static constexpr const char* kCacheDir="/.VGMM5";
+static constexpr const char* kCacheDir="/VGMM5";
 
 static inline bool folder_for(const char* filepath,Kind kind,char* out,size_t cap) {
   if(!filepath||filepath[0]!='/'||!out||cap<3)return false;
@@ -42,7 +42,7 @@ static inline uint32_t hash_album(const char* album) {
 static inline bool path_for_hash(const char* album,char* target,size_t len,
                                  const char* ext="RGB") {
   if(!album||!target||len<25)return false;
-  const int n=snprintf(target,len,"/.VGMM5/%08lX.%s",
+  const int n=snprintf(target,len,"/VGMM5/%08lX.%s",
                        (unsigned long)hash_album(album),ext);
   return n>0&&(size_t)n<len;
 }
