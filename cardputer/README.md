@@ -44,7 +44,7 @@ microSDの各アルバムフォルダにある大きな `フォルダ名.png`／
 MAKE_CARDPUTER_THUMBS.cmd E:\
 ```
 
-画像を64×64のRGB565（各8,192バイト）に変換し、フォルダの**フルパスのFNV-1aハッシュ8桁**を使って `/.VGMM5/XXXXXXXX.RGB` に保存します。元画像・音楽ファイルは変更しません。ハッシュ済みの画像は再利用します。
+画像を64×64のRGB565（各8,192バイト）に変換し、フォルダの**フルパスのFNV-1aハッシュ8桁**を使って `/VGMM5/XXXXXXXX.RGB` に保存します。元画像・音楽ファイルは変更しません。ハッシュ済みの画像は再利用します。 **旧版の `/.VGMM5` にあるキャッシュも、変換ツールで新しい `/VGMM5` に引き継ぎます。**
 
 - **カーソル移動時**：ハッシュ名でキャッシュを直接読むだけ。JPEG/PNGの探索・デコード、選択ファイルの再オープン、フォルダの再一覧取得を行いません。
 - **同じフォルダの別の曲**：右側の画像を再描画せず、形式・ファイル容量だけ更新します。
@@ -129,7 +129,7 @@ Large `foldername.png`, `cover.png` or JPEG album images are **not opened or enu
 MAKE_CARDPUTER_THUMBS.cmd E:\
 ```
 
-This converts existing folder artwork to **64×64 RGB565, exactly 8,192 bytes**, stored at `/.VGMM5/XXXXXXXX.RGB` using an **eight-digit FNV-1a hash of the normalized full album folder path**. Originals and music are unchanged; pre-existing caches are reused.
+This converts existing folder artwork to **64×64 RGB565, exactly 8,192 bytes**, stored at `/VGMM5/XXXXXXXX.RGB` using an **eight-digit FNV-1a hash of the normalized full album folder path**. Originals and music are unchanged; pre-existing caches are reused. Older `/.VGMM5` cached RGB files are migrated to the FAT 8.3-friendly `/VGMM5` folder.
 
 - Cursor movement opens only the deterministic hashed thumbnail path, without listing artwork folders, decoding PNG/JPEG or opening a selected music file to read its size.
 - Moving between tracks in the same folder keeps the existing cover on screen and changes only the file type/size text.
