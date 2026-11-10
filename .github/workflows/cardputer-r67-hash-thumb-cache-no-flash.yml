@@ -1,0 +1,87 @@
+name: Cardputer R67 hashed SD thumbnail cache native (NO FLASH)
+on:
+  push:
+    branches: [dev/cardputer-r67-hash-thumb-cache-20261110]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  standard-classic:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Source contract - eight-hex hashes and minimal playback RAM
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          h=Path('cardputer/src/cardputer_artwork.hpp').read_text()
+          f=Path('cardputer/src/filer.cpp').read_text()
+          v=Path('cardputer/src/voice.cpp').read_text()
+          ps=Path('cardputer/tools/MAKE_CARDPUTER_THUMBS.ps1').read_text()
+          cfg=Path('cardputer/platformio.ini').read_text()
+          assert 'kCacheBytes=64u*64u*2u' in h
+          assert '"/.VGMM5/%08lX.%s"' in h
+          assert 'hash=(hash^c)*16777619u' in h
+          assert 'uint16_t strip[64*4]' in h
+          assert 'pushImage(x,y+py,64,4,strip)' in h
+          assert 'createSprite(64,64)' in h
+          assert 'temp.deleteSprite(); // release 8KiB before any music playback' in h
+          assert 'if(!shown&&allow_build&&generate_from_small_png' in h
+          assert 'cardputer_artwork::draw(path,kind,160,31,64,true)' in f
+          assert 'cardputer_artwork::draw(cardputer_playing_path,kind,160,32,64,false)' in v
+          assert 'strcmp(fname, ".VGMM5") != 0' in f
+          assert 'BinaryWriter' in ps and "Get-AlbumHash" in ps
+          assert 'LGFX_Sprite' in h and 'LGFX_Sprite' not in v
+          assert 'board_build.embed_txtfiles' not in cfg
+          assert 'cloud_db_' not in v and 'wifi_manager_' not in v
+          # Cross-platform specification: FNV-1a of UTF8 album path, ASCII lower-case.
+          def h32(path):
+              h=2166136261
+              for b in path.encode('utf-8'):
+                  if 65<=b<=90:b+=32
+                  h=((h^b)*16777619)&0xffffffff
+              return '%08X'%h
+          assert h32('/')=='2A0C975E'
+          assert h32('/MUSIC/ALBUM')=='064B157D'
+          print('PASS 8-char hash layout, 8192B SD cache, 512B streaming, no playback image decode')
+          PY
+      - name: Install pinned PlatformIO and Cardputer libraries
+        run: |
+          python3 -m pip install --disable-pip-version-check platformio 'click==8.1.8'
+          pio pkg install -d cardputer -e m5stack-cardputer
+      - name: Build native ESP32-S3 Standard (NO FLASH)
+        run: pio run -d cardputer -e m5stack-cardputer
+      - name: Build native ESP32-S3 Classic (NO FLASH)
+        run: pio run -d cardputer -e m5stack-cardputer-classic
+      - name: Verified binary artifacts
+        run: |
+          python3 - <<'PY'
+          import json,hashlib
+          from pathlib import Path
+          dst=Path('cardputer/r67_hashed_thumbnails')
+          dst.mkdir(exist_ok=True)
+          report={'edition':'Cardputer R67 hashed album cache',
+                  'cache':'/.VGMM5/XXXXXXXX.RGB / 8192 bytes',
+                  'playback_image_buffer_bytes':512,
+                  'flash':'NOT PERFORMED','app_offset':'0x10000',
+                  'variants':{}}
+          for env,label in [('m5stack-cardputer','standard'),
+                            ('m5stack-cardputer-classic','classic')]:
+              data=(Path('cardputer/.pio/build')/env/'firmware.bin').read_bytes()
+              assert len(data)>100000 and data[:1]==b'\xe9'
+              name='Cardputer_R67_HashedArt_'+label+'.bin'
+              (dst/name).write_bytes(data)
+              report['variants'][label]={'name':name,'bytes':len(data),
+                  'sha256':hashlib.sha256(data).hexdigest()}
+          assert report['variants']['standard']['sha256']!=report['variants']['classic']['sha256']
+          (dst/'RESULT.json').write_text(json.dumps(report,indent=2)+'\n')
+          print('PASS native standard+Classic no-flash firmware SHA256')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CARDPUTER-R67-8HEX-SD-THUMBNAIL-CACHE-NOFLASH
+          path: cardputer/r67_hashed_thumbnails/
+          retention-days: 14
