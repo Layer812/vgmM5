@@ -256,6 +256,10 @@ int makevgmlist(fs::FS &fs) {
   }
   if(file)file.close();
   root.close();
+  // Before the first cursor draw, generate a tiny hashed cache only if
+  // this album contains a known 64x64 opaque PNG filename. This happens
+  // at FOLDER ENTRY, not per cursor, and never decodes large album PNGs.
+  cardputer_artwork::prepare_album_once((const char*)cdir);
   filenum=i;
   snprintf(indexed_directory,sizeof(indexed_directory),"%s",(const char*)cdir);
   file_index_valid=true;
