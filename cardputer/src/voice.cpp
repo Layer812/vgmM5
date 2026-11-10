@@ -656,7 +656,7 @@ static void cardputer_draw_playback_view() {
 
     // The right-hand thumbnail is deliberately the same as in the browser.
     const cardputer_artwork::Kind kind=mdx?cardputer_artwork::MDX:cardputer_artwork::VGM;
-    cardputer_artwork::draw(cardputer_playing_path,kind,157,32,72);
+    cardputer_artwork::draw(cardputer_playing_path,kind,160,32,64);
     lcd.fillRect(144,109,96,26,BLACK);
     lcd.setTextSize(1.5f);
     lcd.setTextColor(cardputer_ui_paused?YELLOW:GREEN);
