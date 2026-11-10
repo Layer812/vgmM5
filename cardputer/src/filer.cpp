@@ -5,6 +5,7 @@
 #include <time.h>
 // #include <ESP32-targz.h>
 #include "filer.hpp"
+#include "cardputer_artwork.hpp"
 #include "misakiSJIS.h"
 
 int vol = 96;
@@ -247,62 +248,6 @@ static bool browser_make_path(char* out, size_t cap, const char* item) {
   return written >= 0 && (size_t)written < cap;
 }
 
-static bool browser_draw_jpg(const char* filename) {
-  if (!filename || !SD.exists(filename)) return false;
-  File image = SD.open(filename, FILE_READ);
-  if (!image || image.isDirectory() || image.size()==0 || image.size() > 131072) {
-    if (image) image.close();
-    return false;
-  }
-  image.close();
-  // Recommended 64x64 baseline JPG. Larger JPGs are cropped (not upscaled).
-  M5Cardputer.Display.drawJpgFile(SD, filename, 160, 30, 64, 64);
-  return true;
-}
-
-static void browser_thumbnail(const struct fl& entry, const char* fullpath,
-                              const char* itemname) {
-  auto& lcd = M5Cardputer.Display;
-  const bool directory = entry.type==TYPE_SDIR || entry.type==TYPE_UDIR;
-  lcd.fillRoundRect(159,29,66,66,4,0x0924);
-  lcd.drawRoundRect(159,29,66,66,4,0x35AA);
-  bool has_image = false;
-  char imagepath[PATHMAX+16] = {};
-  const char* name = itemname ? itemname : "";
-
-  if (entry.type==TYPE_UDIR) {
-    // Parent directory is represented by a slash, never an album cover.
-  } else if (directory) {
-    int n=snprintf(imagepath,sizeof(imagepath),"%s/cover.jpg", fullpath);
-    if(n>0&&(size_t)n<sizeof(imagepath))has_image=browser_draw_jpg(imagepath);
-  } else {
-    // Song-specific cover: "song.vgm" -> "song.jpg" in the same folder.
-    int n=snprintf(imagepath,sizeof(imagepath),"%s",fullpath);
-    if(n>0&&(size_t)n<sizeof(imagepath)) {
-      char* dot=strrchr(imagepath,'.');
-      if(dot && (size_t)(dot-imagepath)+5 < sizeof(imagepath)) {
-        strcpy(dot,".jpg");
-        has_image=browser_draw_jpg(imagepath);
-      }
-    }
-    if(!has_image) {
-      // Shared folder cover used for all tracks in an album directory.
-      n=snprintf(imagepath,sizeof(imagepath),"%s%scover.jpg",
-                 (const char*)cdir,strcmp((const char*)cdir,"/")==0?"":"/");
-      if(n>0&&(size_t)n<sizeof(imagepath))has_image=browser_draw_jpg(imagepath);
-    }
-  }
-  if (has_image) return;
-
-  // No artwork on SD: native vector thumbnail needs no DB/network/assets.
-  lcd.fillRect(162,32,60,60,0x0924);
-  lcd.setTextColor(directory?CYAN:0x6EE6);
-  lcd.setTextSize(directory?3.0f:2.0f);
-  lcd.drawCenterString(directory?"/":(entry.type==TYPE_MDX?"MDX":"VGM"),192,49);
-  lcd.drawFastHLine(171,85,42,0x34E7);
-  lcd.setTextSize(1.5f);
-}
-
 static void browser_draw_info(int selection) {
   auto& lcd=M5Cardputer.Display;
   lcd.fillRect(144,27,96,108,BLACK);
@@ -315,7 +260,12 @@ static void browser_draw_info(int selection) {
   const char* name=slash&&slash[1]?slash+1:stored;
   char path[PATHMAX+16]={};
   if(!browser_make_path(path,sizeof(path),stored))return;
-  browser_thumbnail(entry,path,name);
+  const cardputer_artwork::Kind kind =
+      entry.type==TYPE_UDIR ? cardputer_artwork::PARENT :
+      entry.type==TYPE_SDIR ? cardputer_artwork::FOLDER :
+      entry.type==TYPE_MDX ? cardputer_artwork::MDX : cardputer_artwork::VGM;
+  // The *same* art resolver draws the browser and now-playing views.
+  cardputer_artwork::draw(path,kind,161,31,62);
 
   const char* format=dir?"DIR":entry.type==TYPE_MDX?"MDX":"VGM";
   String ext=String(strrchr(name,'.')?strrchr(name,'.'):"");
