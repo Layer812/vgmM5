@@ -81,7 +81,7 @@ static inline void default_cover(const char* album,Kind kind,int x,int y) {
 }
 // Cursor movement: the album name is hashed and exactly one precomputed
 // /.VGMM5/XXXXXXXX.RGB path is opened. NO folder enumeration, image probing,
-// SD.exists(), PNG decode, sprite, or one-time conversion runs on-device.
+// SD exists-checks, PNG decode, sprite, or one-time conversion run on-device.
 // All album PNG/JPEG conversion is performed on Windows by
 // tools/MAKE_CARDPUTER_THUMBS.ps1 before inserting the card.
 static inline uint32_t album_key(const char* fullpath,Kind kind) {
