@@ -39,18 +39,24 @@ static inline bool exists_regular(const char* path) {
   if(file)file.close();
   return ok;
 }
-static inline bool try_candidate(const char* path,char* out,size_t cap) {
+static inline bool try_candidate(const char* path,char* out,size_t cap,
+                                 unsigned desired,unsigned& matched) {
   if(!out||cap==0||!path||!exists_regular(path))return false;
+  // Skip candidates that decoded unsuccessfully so a valid PNG can be
+  // selected even if a damaged JPEG with the same name also exists.
+  if(matched++ != desired)return false;
   const int n=snprintf(out,cap,"%s",path);
   return n>0 && (size_t)n<cap;
 }
 
 // Find JPG/PNG with the file's own name, then directory cover/folder art.
 // Sibling art is optional. Neither the image nor any metadata DB is required.
-static inline bool resolve(const char* fullpath,Kind kind,char* out,size_t cap) {
+static inline bool resolve(const char* fullpath,Kind kind,char* out,size_t cap,
+                           unsigned requested=0) {
   if(!fullpath||!out||cap<8)return false;
   out[0]=0;
   if(kind==PARENT)return false;
+  unsigned matched=0;
 
   char stem[320]={};
   char path[320]={};
@@ -61,15 +67,18 @@ static inline bool resolve(const char* fullpath,Kind kind,char* out,size_t cap) 
     char* slash=strrchr(stem,'/');
     char* dot=strrchr(stem,'.');
     if(dot && (!slash||dot>slash))*dot=0;
-    const char* extensions[]={".jpg",".JPG",".jpeg",".JPEG",".png",".PNG"};
+    // Prefer PNG when supplied explicitly, without depending on a JPEG.
+    // A damaged/unreadable candidate cannot mask a valid later file.
+    const char* extensions[]={".png",".PNG",".jpg",".JPG",".jpeg",".JPEG"};
     for(const char* ext:extensions) {
       const int count=snprintf(path,sizeof(path),"%s%s",stem,ext);
-      if(count>0&&(size_t)count<sizeof(path)&&try_candidate(path,out,cap))return true;
+      if(count>0&&(size_t)count<sizeof(path)&&try_candidate(path,out,cap,requested,matched))return true;
     }
   }
-  const char* cover_names[]={"cover.jpg","Cover.jpg","COVER.JPG",
-                              "cover.jpeg","cover.png","Cover.png",
-                              "folder.jpg","Folder.jpg","folder.png"};
+  const char* cover_names[]={"cover.png","Cover.png","COVER.PNG","cover.PNG",
+                              "folder.png","Folder.png","FOLDER.PNG",
+                              "cover.jpg","Cover.jpg","COVER.JPG","cover.jpeg",
+                              "folder.jpg","Folder.jpg","FOLDER.JPG"};
   char directory[320]={};
   if(kind==FOLDER) {
     const int count=snprintf(directory,sizeof(directory),"%s",fullpath);
@@ -86,7 +95,7 @@ static inline bool resolve(const char* fullpath,Kind kind,char* out,size_t cap) 
   for(const char* name:cover_names) {
     const int count=snprintf(path,sizeof(path),"%s%s%s",directory,
                              size && directory[size-1]=='/'?"":"/",name);
-    if(count>0&&(size_t)count<sizeof(path)&&try_candidate(path,out,cap))return true;
+    if(count>0&&(size_t)count<sizeof(path)&&try_candidate(path,out,cap,requested,matched))return true;
   }
   return false;
 }
@@ -121,19 +130,48 @@ static inline bool jpg_dimensions(const char* path,int& width,int& height) {
   f.close();
   return false;
 }
+static inline bool png_dimensions(const char* path,int& width,int& height) {
+  File f=SD.open(path,FILE_READ);
+  if(!f)return false;
+  uint8_t header[24]={};
+  const bool valid=f.read(header,sizeof(header))==(int)sizeof(header);
+  f.close();
+  const uint8_t magic[8]={137,80,78,71,13,10,26,10};
+  if(!valid||memcmp(header,magic,8)!=0 ||
+     memcmp(header+12,"IHDR",4)!=0)return false;
+  const uint32_t w=((uint32_t)header[16]<<24)|((uint32_t)header[17]<<16)|
+                   ((uint32_t)header[18]<<8)|header[19];
+  const uint32_t h=((uint32_t)header[20]<<24)|((uint32_t)header[21]<<16)|
+                   ((uint32_t)header[22]<<8)|header[23];
+  if(w==0||h==0||w>8192u||h>8192u)return false;
+  width=(int)w;
+  height=(int)h;
+  return true;
+}
+static inline float scale_to_fit(int width,int height,int side) {
+  const int longest=width>height?width:height;
+  return longest>side ? (float)side/(float)longest : 1.0f;
+}
 static inline bool draw_real(const char* path,int x,int y,int side) {
   if(!path||!exists_regular(path))return false;
   auto& lcd=M5Cardputer.Display;
-  if(ext_is(path,".png")){
-    return lcd.drawPngFile(SD,path,x,y,side,side,0,0,1.0f);
-  }
   int width=side,height=side;
-  float scale=1.0f;
-  if(jpg_dimensions(path,width,height)) {
-    const int largest=width>height?width:height;
-    if(largest>side)scale=(float)side/(float)largest;
+  bool is_png=ext_is(path,".png");
+  if(is_png) {
+    if(!png_dimensions(path,width,height))return false;
+  } else {
+    if(!jpg_dimensions(path,width,height))return false;
   }
-  return lcd.drawJpgFile(SD,path,x,y,side,side,0,0,scale);
+  const float scale=scale_to_fit(width,height,side);
+  const int w=(int)(width*scale);
+  const int h=(int)(height*scale);
+  const int cx=x+(side-w)/2,cy=y+(side-h)/2;
+  // In R67 the PNG path always used scale=1.0, which cropped ordinary
+  // album-art PNGs larger than 64/72 pixels to a tiny top-left corner.
+  // Read IHDR first, scale the *entire* image, then center on the cover tile.
+  return is_png
+        ? lcd.drawPngFile(SD,path,cx,cy,side,side,0,0,scale)
+        : lcd.drawJpgFile(SD,path,cx,cy,side,side,0,0,scale);
 }
 
 // Always draws a proper colorful thumbnail even with no matching cover.jpg.
@@ -177,7 +215,10 @@ static inline void draw(const char* fullpath,Kind kind,
   lcd.fillRoundRect(x-2,y-2,side+4,side+4,4,0x09C4);
   char candidate[320]={};
   bool rendered=false;
-  if(resolve(fullpath,kind,candidate,sizeof(candidate))) {
+  // Try next file on decode failure (e.g. unsupported indexed/animated PNG).
+  for(unsigned which=0;which<22&&!rendered;++which) {
+    if(!resolve(fullpath,kind,candidate,sizeof(candidate),which))break;
+    lcd.fillRect(x,y,side,side,0x0842);
     rendered=draw_real(candidate,x,y,side);
     if(!rendered)Serial.printf("Cardputer cover decode failed: %s\n",candidate);
   }
