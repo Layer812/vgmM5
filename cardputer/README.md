@@ -48,6 +48,17 @@ microSDに以下のJPEG／PNG画像を置くと、選択画面と再生画面の
 
 **再生画面**は曲名・音源とサムネイルのみのシンプルな表示です。サムネイルの下に `NOW PLAYING`、`P` で一時停止中は `PAUSED` と表示します。`MICRO SD`、`SPACE STOP`、`VOL`、下部進行バーは表示しません。`BS` を押せば再生を止めて同じフォルダのファイル一覧へ戻ります。
 
+### サムネイル高速キャッシュ（8桁ハッシュ）
+
+一部のフォルダにある大きな「**フォルダ名.png**」は、Cardputer上で毎回展開すると操作が遅くなります。この版では元の大きなPNGをカーソル移動中に開かず、フォルダのフルパスをFNV-1aで8桁の16進数にして、microSDの **`/.VGMM5/XXXXXXXX.RGB`** を使用します。中身は64×64・RGB565の8,192バイトです。
+
+- **再生時**：キャッシュを4行ずつ（512バイト）読み取り表示。PNGの再デコード、追加スプライト、常駐画像キャッシュはありません。
+- **新しい小さなPNG**：フォルダ内の `cover64.png`（64×64ピクセル・透過なしRGB）からファイラで初回にキャッシュを作成。変換時だけ約8KBの一時スプライトを使用し、直後に解放します。
+- **既存の大きなPNG/JPEG**：WindowsでmicroSDを開き、`MAKE_CARDPUTER_THUMBS.cmd E:\\` を一度実行してください。インストール不要のWindows標準PowerShell/System.Drawingで、各フォルダの `フォルダ名.png` や `cover.png` などを64×64へ変換し、ハッシュ名でmicroSDに保存します。初回の画像処理による実機待ちを防げます。
+- 変換元の画像・VGM/MDX・フォルダ構造は**変更しません**。既存のハッシュキャッシュは再利用します。
+
+キャッシュがまだなく、64×64のPNGもない場合は、画像を長時間待たずに内蔵サムネイルを表示します。これは故障ではありません。
+
 ### Windowsでビルド（書き込みなし）
 
 リポジトリのルートから：
@@ -122,6 +133,14 @@ Put `song.jpg` or `song.png` next to `song.vgm`, or a shared `cover.jpg` / `cove
 The right pane shows file type and size. For uncompressed VGM it also detects YM2151/C140 header clocks when present. VGZ is marked compressed without decompression during browsing.
 
 The now-playing screen has only the track title, chip and artwork with `NOW PLAYING` / `PAUSED` below it. The old SD, stop/volume footer and activity bar are gone. `BS` immediately stops playback and returns to the same directory.
+
+### Fast 8-character hashed album thumbnail cache
+
+Large pre-existing `foldername.png` images caused slow SD browsing. Cardputer R67 now hashes the **full normalized album folder path** using FNV-1a and uses `/.VGMM5/XXXXXXXX.RGB`. Each 64×64 RGB565 cache file is exactly **8,192 bytes**.
+
+Playback streams only four rows (**512 bytes**) at a time from SD with **no PNG decoding, extra image sprite or persistent bitmap**. The browser can make a cache once from an opaque 64×64 `cover64.png`, releasing its temporary 8KB sprite immediately. Larger PNGs are not decompressed during cursor movement.
+
+For existing large folder-named images, run the included **Windows one-time preparation helper**, for example `MAKE_CARDPUTER_THUMBS.cmd E:\\`, while the SD is mounted on your PC. It uses built-in Windows PowerShell/System.Drawing (no Pillow) to create the correct hashed cache files from `foldername.png`, `cover.png`, etc. Your source audio and cover images remain unchanged. Existing cache files are reused.
 
 ### Build on Windows (no flash)
 
