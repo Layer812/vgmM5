@@ -18,6 +18,7 @@
 #include <M5Cardputer.h>
 #include <SD.h>
 #include "filer.hpp"
+#include "cardputer_artwork.hpp"
 static bool cardputer_sd_ready = false;
 #endif
 
@@ -400,6 +401,9 @@ static String cardputer_display_title;
 static bool cardputer_player_dirty = true;
 static uint32_t cardputer_track_start_ms = 0;
 static bool cardputer_browser_initialized = false;
+static char cardputer_playing_path[PATHMAX] = {};
+static bool cardputer_ui_paused = false;
+static bool cardputer_playback_help = false;
 
 static String cardputer_fit_text(String value, int max_px) {
     auto& lcd = M5Cardputer.Display;
@@ -463,6 +467,8 @@ void phase_file_selection() {
     if (!is_mdx && filelist[i].type != TYPE_VGM) return;
     vgm_engine_stop();
     mdx_engine_stop();
+    cardputer_ui_paused=false;
+    cardputer_playback_help=false;
     delay(20);
     disptitle(STATLOAD, (char*)"LOADING");
     const bool ok = is_mdx ? mdx_engine_play((const char*)path, true)
@@ -474,6 +480,7 @@ void phase_file_selection() {
     const char *title = is_mdx ? mdx_engine_get_title() : vgm_engine_get_title();
     const char *name = strrchr((const char*)path, '/');
     if (!title || !title[0]) title = name ? name + 1 : (const char*)path;
+    snprintf(cardputer_playing_path, sizeof(cardputer_playing_path), "%s", (const char*)path);
     disptitle(STATLOOP, (char*)title);
 }
 #endif // IS_CARDPUTER
@@ -580,62 +587,80 @@ static void atoms3_play_current() {
 // R67 240x135 playback screen. The synth/DMA tasks never draw.
 // Static labels are drawn on track/key changes; only the small footer
 // and progress/activity strip are refreshed at a slow 2 Hz cadence.
-static void cardputer_draw_playback_view() {
-    const bool is_vgm = vgm_engine_is_playing();
-    const bool is_mdx = mdx_engine_is_playing();
-    if (!is_vgm && !is_mdx) return;
-
-    static uint32_t last_tick = 0;
-    const uint32_t now = millis();
-    if (!cardputer_player_dirty && (uint32_t)(now - last_tick) < 500) return;
-    last_tick = now;
-
-    auto& lcd = M5Cardputer.Display;
-    if (cardputer_player_dirty) {
-        lcd.fillScreen(BLACK);
-        lcd.setTextSize(2.0f);
-        lcd.setTextColor(CYAN);
-        lcd.drawString("vgmM5 R67", 6, 2);
-        lcd.setTextSize(1.5f);
-        lcd.setTextColor(is_mdx ? YELLOW : GREEN);
-        lcd.drawString(is_mdx ? "MDX" : "VGM", 197, 7);
-        lcd.drawLine(0, 30, 239, 30, DARKGREY);
-
-        String title = cardputer_display_title;
-        if (title.length() == 0) {
-            const char* name = is_mdx ? mdx_engine_get_title() : vgm_engine_get_title();
-            if (name && name[0]) title = String(name);
-        }
-        if (title.length() == 0) title = "Now Playing";
-        lcd.setTextColor(WHITE);
-        lcd.drawString(cardputer_fit_text(title, 226), 7, 37);
-
-        String chip = is_mdx ? "YM2151 + ADPCM" : String(vgm_engine_get_chip());
-        if (chip.length() == 0) chip = "Sound chip";
-        lcd.setTextColor(0x7FFD);
-        lcd.drawString(cardputer_fit_text(chip, 226), 7, 58);
-
-        lcd.setTextColor(LIGHTGREY);
-        lcd.drawString("MICRO SD", 7, 78);
-        lcd.setTextColor(YELLOW);
-        lcd.drawString(cardputer_fit_text("SPACE Stop  +/- Volume", 230), 6, 99);
-        cardputer_player_dirty = false;
-    }
-
-    const uint32_t elapsed_ms = now - cardputer_track_start_ms;
-    const uint32_t seconds = elapsed_ms / 1000u;
-    char status[40];
-    snprintf(status, sizeof(status), "VOL %3d  %02lu:%02lu",
-             (int)M5.Speaker.getVolume(),
-             (unsigned long)(seconds / 60u), (unsigned long)(seconds % 60u));
-    lcd.fillRect(0, 115, 240, 20, BLACK);
+static void cardputer_draw_playback_help() {
+    auto& lcd=M5Cardputer.Display;
+    lcd.fillScreen(BLACK);
+    lcd.setTextSize(2.0f);
+    lcd.setTextColor(CYAN);
+    lcd.drawString("PLAYBACK HELP",5,3);
     lcd.setTextSize(1.5f);
     lcd.setTextColor(GREEN);
-    lcd.drawString(status, 7, 115);
-    lcd.fillRect(7, 131, 226, 4, DARKGREY);
-    // Live activity (length may be unknown for local MDX/VGM files).
-    const int position = (int)((seconds % 30u) * 208u / 30u);
-    lcd.fillRect(7 + position, 131, 18, 4, CYAN);
+    lcd.drawString("M:CLOSE",177,6);
+    lcd.drawLine(0,27,239,27,0x2C68);
+    lcd.setTextColor(WHITE);
+    lcd.drawString("BS    BACK TO FILES",7,35);
+    lcd.drawString("SPACE STOP",7,57);
+    lcd.drawString("P     PAUSE/RESUME VGM",7,79);
+    lcd.drawString("+/-   VOLUME",7,101);
+}
+
+static void cardputer_draw_playback_view() {
+    const bool vgm=vgm_engine_is_playing();
+    const bool mdx=mdx_engine_is_playing();
+    if(!vgm&&!mdx)return;
+    if(cardputer_playback_help) {
+        if(cardputer_player_dirty) {
+            cardputer_draw_playback_help();
+            cardputer_player_dirty=false;
+        }
+        return;
+    }
+    if(!cardputer_player_dirty)return; // No unnecessary periodic repaint.
+    cardputer_player_dirty=false;
+
+    auto& lcd=M5Cardputer.Display;
+    lcd.fillScreen(BLACK);
+    lcd.setTextSize(2.0f);
+    lcd.setTextColor(CYAN);
+    lcd.drawString("vgmM5 R67",5,2);
+    lcd.setTextSize(1.5f);
+    lcd.setTextColor(0x9FE7);
+    lcd.drawString("M:HELP",182,6);
+    lcd.drawLine(0,26,239,26,0x2C68);
+
+    // Clean 2-column playing screen: title + chip on left;
+    // actual SD artwork (or generated graphic) + state on right.
+    String title=cardputer_display_title;
+    if(title.length()==0) {
+        const char* detected=mdx?mdx_engine_get_title():vgm_engine_get_title();
+        if(detected&&detected[0])title=detected;
+    }
+    if(title.length()==0) {
+        const char* name=strrchr(cardputer_playing_path,'/');
+        title=name?name+1:cardputer_playing_path;
+    }
+    lcd.setTextSize(1.75f);
+    lcd.setTextColor(WHITE);
+    lcd.drawString(cardputer_fit_text(title,132),6,36);
+    String chip=mdx?"YM2151":String(vgm_engine_get_chip());
+    if(chip.length()==0)chip=mdx?"MDX":"VGM";
+    lcd.setTextSize(1.5f);
+    lcd.setTextColor(0x7FFE);
+    lcd.drawString(cardputer_fit_text(chip,130),6,77);
+
+    // The right-hand thumbnail is deliberately the same as in the browser.
+    const cardputer_artwork::Kind kind=mdx?cardputer_artwork::MDX:cardputer_artwork::VGM;
+    cardputer_artwork::draw(cardputer_playing_path,kind,157,32,72);
+    lcd.fillRect(144,109,96,26,BLACK);
+    lcd.setTextSize(1.5f);
+    lcd.setTextColor(cardputer_ui_paused?YELLOW:GREEN);
+    if(cardputer_ui_paused) {
+        lcd.drawCenterString("PAUSED",192,115);
+    } else {
+        lcd.drawCenterString("NOW",192,108);
+        lcd.drawCenterString("PLAYING",192,122);
+    }
+    // No MICRO SD, SPACE STOP, VOL, elapsed-time footer or progress bar.
 }
 #endif // IS_CARDPUTER
 
@@ -645,23 +670,42 @@ void phase_playback() {
     // ボードに合わせたキー入力（停止・スキップ等）
 #if defined(IS_CARDPUTER)
     M5Cardputer.update();
-    if (M5Cardputer.Keyboard.isChange()) {
-        if (M5Cardputer.Keyboard.isKeyPressed(' ')) {
+    if(M5Cardputer.Keyboard.isChange()) {
+        const auto state=M5Cardputer.Keyboard.keysState();
+        // Physical BS generates the dedicated backspace state, not text '\b'.
+        if(state.backspace||state.del||
+           M5Cardputer.Keyboard.isKeyPressed('\b')) {
+            cardputer_ui_paused=false;
+            cardputer_playback_help=false;
             vgm_engine_stop();
             mdx_engine_stop();
-            cardputer_player_dirty = true;
+            cardputer_player_dirty=true;
+            return;  // next loop iteration redraws the same SD directory
         }
-        if (M5Cardputer.Keyboard.isKeyPressed('=')) {
-            int vol = (int)M5.Speaker.getVolume() + 20;
-            if (vol > 255) vol = 255;
-            M5.Speaker.setVolume(vol);
-            cardputer_player_dirty = true;
+        if(M5Cardputer.Keyboard.isKeyPressed(' ')) {
+            cardputer_ui_paused=false;
+            cardputer_playback_help=false;
+            vgm_engine_stop();
+            mdx_engine_stop();
+            cardputer_player_dirty=true;
+            return;
         }
-        if (M5Cardputer.Keyboard.isKeyPressed('-')) {
-            int vol = (int)M5.Speaker.getVolume() - 20;
-            if (vol < 0) vol = 0;
-            M5.Speaker.setVolume(vol);
-            cardputer_player_dirty = true;
+        if(M5Cardputer.Keyboard.isKeyPressed('m')) {
+            cardputer_playback_help=!cardputer_playback_help;
+            cardputer_player_dirty=true;
+        }
+        if(M5Cardputer.Keyboard.isKeyPressed('p') &&
+           vgm_engine_is_playing() && !mdx_engine_is_playing()) {
+            vgm_engine_toggle_pause();
+            cardputer_ui_paused=!cardputer_ui_paused;
+            cardputer_player_dirty=true;
+        }
+        if(M5Cardputer.Keyboard.isKeyPressed('=')) {
+            const int n=(int)M5.Speaker.getVolume()+20;
+            M5.Speaker.setVolume(n>255?255:n);
+        } else if(M5Cardputer.Keyboard.isKeyPressed('-')) {
+            const int n=(int)M5.Speaker.getVolume()-20;
+            M5.Speaker.setVolume(n<0?0:n);
         }
     }
     cardputer_draw_playback_view();
