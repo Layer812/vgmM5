@@ -39,10 +39,10 @@ microSDのルートにVGM/VGZ・MDXファイルを直接置いて使えます。
 microSDに以下のJPEG／PNG画像を置くと、選択画面と再生画面のサムネイルに表示します。
 
 - 曲と同じ名前の画像：`DRAGON_SABER.vgm` に対して `DRAGON_SABER.png` または `DRAGON_SABER.jpg`（曲ごとの絵）
-- フォルダ全体の画像：同じフォルダに `cover.png` または `cover.jpg`（アルバム共通）
+- フォルダ全体の画像：同じフォルダに **`cover64.png`（推奨）**、`cover.png` または `cover.jpg`
 - フォルダの画像：フォルダ内に `cover.png` または `cover.jpg`
 
-画像は **JPEG／PNG** に対応します（PNG最大8MiB、JPEG最大4MiB）。64×64より大きなPNG／JPEGは、縦横比を保ってサムネイル枠へ縮小します。画像がない場合や読み込みに失敗した場合には、曲ごとに色と波形の異なるサムネイルを自動描画するため、画像ファイルを用意する必要はありません。**選択画面と再生画面は同じ画像**を表示します。
+**推奨：64×64ピクセル、RGB（透過なし）のPNG** をmicroSDの曲と同じフォルダに保存します。曲専用なら `曲名.thumb.png`、アルバム共通なら `cover64.png` が最優先です。小さなPNGは**SDからLCDへ直接1回描画**し、再生中はスプライトやサムネイル画像キャッシュを確保しません。JPEGや大きなPNGも従来どおり読めますが、描画時の一時メモリ・負荷を減らすには小さなRGB PNGを使用してください。画像がない場合や読み込みに失敗した場合には、曲ごとに色と波形の異なるサムネイルを自動描画するため、画像ファイルを用意する必要はありません。**選択画面と再生画面は同じ画像**を表示します。
 
 情報欄には形式・ファイルサイズを表示します。非圧縮VGMにYM2151/C140のヘッダ情報がある場合には音源名も表示します。VGZの内部音源名は選択時には展開しません（`COMPRESSED` と表示）。
 
@@ -117,7 +117,7 @@ pio run -d cardputer -e m5stack-cardputer-classic
 
 ### Optional microSD thumbnails
 
-Put `song.jpg` or `song.png` next to `song.vgm`, or a shared `cover.jpg` / `cover.png` in the same folder (also supports subfolder artwork). PNG up to 8 MiB and JPEG up to 4 MiB are supported. Both formats are scaled to fit the thumbnail while preserving aspect ratio. If a candidate fails to decode, the next matching artwork file is tried. If no image exists or decoding fails, each track receives its own colorful waveform cover. **The browser and now-playing view use the same image.** No external DB or internet connection is required.
+Put `song.jpg` or `song.png` next to `song.vgm`, or a shared `cover.jpg` / `cover.png` in the same folder (also supports subfolder artwork). **Recommended: 64×64 RGB (opaque) PNG** saved alongside music on the microSD card. Use `song.thumb.png` for per-track art or `cover64.png` for the whole album. These small files are decoded directly from SD to the LCD when drawn; the player allocates **no additional artwork sprite or persistent image cache**. Larger JPEG/PNG files remain supported but require more decode work. If a candidate fails to decode, the next matching artwork file is tried. If no image exists or decoding fails, each track receives its own colorful waveform cover. **The browser and now-playing view use the same image.** No external DB or internet connection is required.
 
 The right pane shows file type and size. For uncompressed VGM it also detects YM2151/C140 header clocks when present. VGZ is marked compressed without decompression during browsing.
 

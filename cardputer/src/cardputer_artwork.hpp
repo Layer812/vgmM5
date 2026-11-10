@@ -73,13 +73,14 @@ static inline bool resolve(const char* fullpath,Kind kind,char* out,size_t cap,
     if(dot && (!slash||dot>slash))*dot=0;
     // Prefer PNG when supplied explicitly, without depending on a JPEG.
     // A damaged/unreadable candidate cannot mask a valid later file.
-    const char* extensions[]={".png",".PNG",".jpg",".JPG",".jpeg",".JPEG"};
+    const char* extensions[]={".thumb.png",".png",".PNG",".jpg",".JPG",".jpeg",".JPEG"};
     for(const char* ext:extensions) {
       const int count=snprintf(path,sizeof(path),"%s%s",stem,ext);
       if(count>0&&(size_t)count<sizeof(path)&&try_candidate(path,out,cap,requested,matched))return true;
     }
   }
-  const char* cover_names[]={"cover.png","Cover.png","COVER.PNG","cover.PNG",
+  const char* cover_names[]={"cover64.png","cover_64.png","thumb.png",
+                              "cover.png","Cover.png","COVER.PNG","cover.PNG",
                               "folder.png","Folder.png","FOLDER.PNG",
                               "cover.jpg","Cover.jpg","COVER.JPG","cover.jpeg",
                               "folder.jpg","Folder.jpg","FOLDER.JPG"};
@@ -100,6 +101,46 @@ static inline bool resolve(const char* fullpath,Kind kind,char* out,size_t cap,
     const int count=snprintf(path,sizeof(path),"%s%s%s",directory,
                              size && directory[size-1]=='/'?"":"/",name);
     if(count>0&&(size_t)count<sizeof(path)&&try_candidate(path,out,cap,requested,matched))return true;
+  }
+  // On FAT SD cards users often name album artwork with the album title,
+  // use mixed-case names, or add an arbitrary PNG rather than "cover.png".
+  // The exact-name checks above will not find those images. Enumerate the
+  // current album folder and use a real PNG if available, then a JPEG.
+  // This uses the actual case returned by File::name() (ESP32 v2 uses
+  // basename) and does not depend on guessing the filename.
+  for (int pass=0;pass<2;++pass) {
+    File folder=SD.open(directory,FILE_READ);
+    if(!folder || !folder.isDirectory()) {
+      if(folder)folder.close();
+      break;
+    }
+    File image=folder.openNextFile();
+    unsigned checked=0;
+    while(image && checked++<256u) {
+      if(!image.isDirectory()) {
+        const char* filename=image.name();
+        if(filename) {
+          const char* leaf=strrchr(filename,'/');
+          if(leaf&&leaf[1])filename=leaf+1;
+          const bool png=ext_is(filename,".png");
+          const bool jpg=ext_is(filename,".jpg")||ext_is(filename,".jpeg");
+          if((pass==0&&png)||(pass==1&&jpg)) {
+            const int count=snprintf(path,sizeof(path),"%s%s%s",directory,
+                       size&&directory[size-1]=='/'?"":"/",filename);
+            if(count>0&&(size_t)count<sizeof(path)&&
+               try_candidate(path,out,cap,requested,matched)) {
+              image.close();
+              folder.close();
+              return true;
+            }
+          }
+        }
+      }
+      image.close();
+      image=folder.openNextFile();
+    }
+    if(image)image.close();
+    folder.close();
   }
   return false;
 }
@@ -173,9 +214,12 @@ static inline bool draw_real(const char* path,int x,int y,int side) {
   // In R67 the PNG path always used scale=1.0, which cropped ordinary
   // album-art PNGs larger than 64/72 pixels to a tiny top-left corner.
   // Read IHDR first, scale the *entire* image, then center on the cover tile.
-  return is_png
-        ? lcd.drawPngFile(SD,path,cx,cy,side,side,0,0,scale)
-        : lcd.drawJpgFile(SD,path,cx,cy,side,side,0,0,scale);
+  if(!is_png) return lcd.drawJpgFile(SD,path,cx,cy,side,side,0,0,scale);
+  // The user can provide a 64x64 RGB PNG alongside the track or folder.
+  // Decode that tiny image straight to LCD; NEVER allocate an image sprite
+  // or cache during playback. A larger PNG still scales during decode.
+  // M5GFX maintains its own small temporary decoder buffers.
+  return lcd.drawPngFile(SD,path,cx,cy,side,side,0,0,scale);
 }
 
 // Always draws a proper colorful thumbnail even with no matching cover.jpg.
@@ -220,7 +264,7 @@ static inline void draw(const char* fullpath,Kind kind,
   char candidate[320]={};
   bool rendered=false;
   // Try next file on decode failure (e.g. unsupported indexed/animated PNG).
-  for(unsigned which=0;which<22&&!rendered;++which) {
+  for(unsigned which=0;which<28&&!rendered;++which) {
     if(!resolve(fullpath,kind,candidate,sizeof(candidate),which))break;
     lcd.fillRect(x,y,side,side,0x0842);
     rendered=draw_real(candidate,x,y,side);
