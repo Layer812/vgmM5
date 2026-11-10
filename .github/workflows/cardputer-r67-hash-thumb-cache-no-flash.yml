@@ -119,6 +119,7 @@ jobs:
             } finally { $g.Dispose() }
             $img.Save((Join-Path $album 'ALBUM.png'),[System.Drawing.Imaging.ImageFormat]::Png)
           } finally { $img.Dispose() }
+          $global:LASTEXITCODE=0
           & ./cardputer/tools/MAKE_CARDPUTER_THUMBS.ps1 $root
           if($LASTEXITCODE -ne 0) {throw 'PowerShell converter failed'}
           $hashFile=Join-Path $root '.VGMM5\064B157D.RGB'
@@ -126,6 +127,7 @@ jobs:
           if((Get-Item -LiteralPath $hashFile).Length -ne 8192) {throw 'RGB565 byte length wrong'}
           $original=[System.IO.File]::ReadAllBytes((Join-Path $album 'ALBUM.png'))
           if($original.Length -lt 100){throw 'Source image missing'}
+          $global:LASTEXITCODE=0
           & ./cardputer/tools/MAKE_CARDPUTER_THUMBS.ps1 $root
           if($LASTEXITCODE -ne 0) {throw 'Reuse existing cache failed'}
           Write-Host 'PASS real Windows System.Drawing preprocessing; 064B157D.RGB is 8192 bytes; source retained'
