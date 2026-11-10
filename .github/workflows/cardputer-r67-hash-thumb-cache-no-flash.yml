@@ -132,12 +132,23 @@ jobs:
             } finally { $g.Dispose() }
             $img.Save((Join-Path $album 'ALBUM.png'),[System.Drawing.Imaging.ImageFormat]::Png)
           } finally { $img.Dispose() }
+          # Japanese folder names must hash to the same UTF-8 bytes on ESP32.
+          $japanese=Join-Path $root '音楽\カセット'
+          [void][System.IO.Directory]::CreateDirectory($japanese)
+          $jpimg=[System.Drawing.Bitmap]::new(64,64)
+          try {
+            $jpimg.SetPixel(0,0,[System.Drawing.Color]::Red)
+            $jpimg.Save((Join-Path $japanese 'カセット.png'),[System.Drawing.Imaging.ImageFormat]::Png)
+          } finally {$jpimg.Dispose()}
           $global:LASTEXITCODE=0
           & ./cardputer/tools/MAKE_CARDPUTER_THUMBS.ps1 $root -AllowFolderRoot
           if($LASTEXITCODE -ne 0) {throw 'PowerShell converter failed'}
           $hashFile=Join-Path $root '.VGMM5\064B157D.RGB'
           if(-not (Test-Path -LiteralPath $hashFile)) {throw "FNV-1a /MUSIC/ALBUM cache not created: $hashFile"}
           if((Get-Item -LiteralPath $hashFile).Length -ne 8192) {throw 'RGB565 byte length wrong'}
+          $jpHash=Join-Path $root '.VGMM5\037C0295.RGB'
+          if(-not (Test-Path -LiteralPath $jpHash)) {throw 'Japanese album path hash mismatch'}
+          if((Get-Item -LiteralPath $jpHash).Length -ne 8192) {throw 'Japanese RGB565 byte length wrong'}
           $original=[System.IO.File]::ReadAllBytes((Join-Path $album 'ALBUM.png'))
           if($original.Length -lt 100){throw 'Source image missing'}
           $global:LASTEXITCODE=0
