@@ -133,7 +133,7 @@ jobs:
             $img.Save((Join-Path $album 'ALBUM.png'),[System.Drawing.Imaging.ImageFormat]::Png)
           } finally { $img.Dispose() }
           $global:LASTEXITCODE=0
-          & ./cardputer/tools/MAKE_CARDPUTER_THUMBS.ps1 $root
+          & ./cardputer/tools/MAKE_CARDPUTER_THUMBS.ps1 $root -AllowFolderRoot
           if($LASTEXITCODE -ne 0) {throw 'PowerShell converter failed'}
           $hashFile=Join-Path $root '.VGMM5\064B157D.RGB'
           if(-not (Test-Path -LiteralPath $hashFile)) {throw "FNV-1a /MUSIC/ALBUM cache not created: $hashFile"}
@@ -141,6 +141,6 @@ jobs:
           $original=[System.IO.File]::ReadAllBytes((Join-Path $album 'ALBUM.png'))
           if($original.Length -lt 100){throw 'Source image missing'}
           $global:LASTEXITCODE=0
-          & ./cardputer/tools/MAKE_CARDPUTER_THUMBS.ps1 $root
+          & ./cardputer/tools/MAKE_CARDPUTER_THUMBS.ps1 $root -AllowFolderRoot
           if($LASTEXITCODE -ne 0) {throw 'Reuse existing cache failed'}
           Write-Host 'PASS real Windows System.Drawing preprocessing; 064B157D.RGB is 8192 bytes; source retained'
