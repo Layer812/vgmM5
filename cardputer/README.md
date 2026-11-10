@@ -36,13 +36,13 @@ microSDのルートにVGM/VGZ・MDXファイルを直接置いて使えます。
 
 ### サムネイル（省略可能）
 
-microSDに以下のJPEG画像を置くと、右側のプレビューに表示します。
+microSDに以下のJPEG／PNG画像を置くと、選択画面と再生画面のサムネイルに表示します。
 
-- 曲と同じ名前の画像：`DRAGON_SABER.vgm` に対して `DRAGON_SABER.jpg`（曲ごとの絵）
-- フォルダ全体の画像：同じフォルダに `cover.jpg`（アルバム共通）
-- フォルダの画像：フォルダ内に `cover.jpg`
+- 曲と同じ名前の画像：`DRAGON_SABER.vgm` に対して `DRAGON_SABER.png` または `DRAGON_SABER.jpg`（曲ごとの絵）
+- フォルダ全体の画像：同じフォルダに `cover.png` または `cover.jpg`（アルバム共通）
+- フォルダの画像：フォルダ内に `cover.png` または `cover.jpg`
 
-画像は **64×64ピクセル以上のJPEG/PNG** を使用できます（最大2MB）。大きなJPEGもサムネイルサイズに縮小します。画像がない場合や読み込みに失敗した場合には、曲ごとに色と波形の異なるサムネイルを自動描画するため、画像ファイルを用意する必要はありません。**選択画面と再生画面は同じ画像**を表示します。
+画像は **JPEG／PNG** に対応します（PNG最大8MiB、JPEG最大4MiB）。64×64より大きなPNG／JPEGは、縦横比を保ってサムネイル枠へ縮小します。画像がない場合や読み込みに失敗した場合には、曲ごとに色と波形の異なるサムネイルを自動描画するため、画像ファイルを用意する必要はありません。**選択画面と再生画面は同じ画像**を表示します。
 
 情報欄には形式・ファイルサイズを表示します。非圧縮VGMにYM2151/C140のヘッダ情報がある場合には音源名も表示します。VGZの内部音源名は選択時には展開しません（`COMPRESSED` と表示）。
 
@@ -117,7 +117,7 @@ pio run -d cardputer -e m5stack-cardputer-classic
 
 ### Optional microSD thumbnails
 
-Put `song.jpg` or `song.png` next to `song.vgm`, or a shared `cover.jpg` / `cover.png` in the same folder (also supports subfolder artwork). Artwork up to 2 MB is supported; JPEG images are downscaled. If no image exists or decoding fails, each track receives its own colorful waveform cover. **The browser and now-playing view use the same image.** No external DB or internet connection is required.
+Put `song.jpg` or `song.png` next to `song.vgm`, or a shared `cover.jpg` / `cover.png` in the same folder (also supports subfolder artwork). PNG up to 8 MiB and JPEG up to 4 MiB are supported. Both formats are scaled to fit the thumbnail while preserving aspect ratio. If a candidate fails to decode, the next matching artwork file is tried. If no image exists or decoding fails, each track receives its own colorful waveform cover. **The browser and now-playing view use the same image.** No external DB or internet connection is required.
 
 The right pane shows file type and size. For uncompressed VGM it also detects YM2151/C140 header clocks when present. VGZ is marked compressed without decompression during browsing.
 
