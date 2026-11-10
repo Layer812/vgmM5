@@ -1,7 +1,7 @@
 # Convert album PNG/JPEG files into 64x64 RGB565 SD cache files for Cardputer.
 # Windows PowerShell 5.1 / built-in System.Drawing. No Python/Pillow required.
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File MAKE_CARDPUTER_THUMBS.ps1 E:\
-# Cache: E:\.VGMM5\XXXXXXXX.RGB (8-character FNV-1a of normalized /album/path).
+# Cache: E:\VGMM5\XXXXXXXX.RGB (FAT 8.3-friendly, same 8-hex FNV-1a album hash).
 param(
   [Parameter(Position=0,Mandatory=$true)][string]$SdRoot,
   [switch]$Force,
@@ -21,8 +21,22 @@ if(-not $AllowFolderRoot -and
 }
 if(-not $rootItem.PSIsContainer){throw "SD path is not a folder: $SdRoot"}
 $root=$rootItem.FullName.TrimEnd([char[]]@('\','/'))
-$cache=Join-Path $rootItem.FullName '.VGMM5'
+$cache=Join-Path $rootItem.FullName 'VGMM5'
+$legacy=Join-Path $rootItem.FullName '.VGMM5'
 [void][System.IO.Directory]::CreateDirectory($cache)
+# Earlier R67 test builds used /.VGMM5. Reuse the raw 8192-byte images
+# without decoding originals or changing user music.
+$migrated=0
+if(Test-Path -LiteralPath $legacy -PathType Container) {
+  foreach($old in @(Get-ChildItem -LiteralPath $legacy -Filter '*.RGB' -File -ErrorAction SilentlyContinue)) {
+    if($old.Length -ne 8192){continue}
+    $new=Join-Path $cache $old.Name
+    if(-not (Test-Path -LiteralPath $new)) {
+      Copy-Item -LiteralPath $old.FullName -Destination $new
+      $migrated++
+    }
+  }
+}
 
 function Get-AlbumHash([string]$album) {
   # Match Cardputer's hash_album(): FNV-1a on UTF-8 bytes, ASCII case folded.
@@ -102,7 +116,7 @@ function Save-Rgb565([string]$imagePath,[string]$outputPath) {
 }
 $folders=@($rootItem)
 $folders+=@(Get-ChildItem -LiteralPath $rootItem.FullName -Directory -Recurse -ErrorAction SilentlyContinue |
-           Where-Object{$_.FullName -notlike "$cache*"})
+           Where-Object{$_.FullName -notlike "$cache*" -and $_.FullName -notlike "$legacy*"})
 $written=0;$skipped=0;$errors=0
 foreach($folder in $folders) {
   try {
@@ -123,11 +137,11 @@ foreach($folder in $folders) {
     $errors++
   }
 }
-Write-Host "Cardputer R67 hashed thumbnail cache: created=$written existing=$skipped errors=$errors"
+Write-Host "Cardputer R67 hashed thumbnail cache: created=$written existing=$skipped migrated=$migrated errors=$errors"
 Write-Host "Images are 64x64 RGB565, 8192 bytes each; the music and original PNG/JPG files are untouched."
 if($errors -gt 0){exit 1}
 Write-Host "Cache directory: $cache"
-if($written -eq 0 -and $skipped -eq 0) {
+if($written -eq 0 -and $skipped -eq 0 -and $migrated -eq 0) {
   Write-Warning "NO artwork found: no cache could be created. Use cover.png, foldername.png or JPG files under the SD root."
   exit 2
 }
