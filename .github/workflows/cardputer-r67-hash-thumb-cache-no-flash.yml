@@ -27,14 +27,22 @@ jobs:
           assert 'hash=(hash^c)*16777619u' in h
           assert 'uint16_t strip[64*4]' in h
           assert 'pushImage(x,y+py,64,4,strip)' in h
-          assert 'createSprite(64,64)' in h
-          assert 'temp.deleteSprite(); // release 8KiB before any music playback' in h
-          assert 'if(!shown&&allow_build&&generate_from_small_png' in h
-          assert 'cardputer_artwork::draw(path,kind,160,31,64,true)' in f
-          assert 'cardputer_artwork::draw(cardputer_playing_path,kind,160,32,64,false)' in v
+          assert 'generate_from_small_png' not in h
+          assert 'drawPngFile(' not in h and 'drawJpgFile(' not in h
+          assert 'openNextFile(' not in h and 'SD.exists(' not in h
+          assert 'LGFX_Sprite' not in h and 'createSprite(' not in h
+          assert 'cardputer_artwork::draw(path,kind,160,31,64)' in f
+          assert 'cardputer_artwork::draw(cardputer_playing_path,kind,160,32,64)' in v
+          info=f.split('static void browser_draw_info(',1)[1].split('void dispfiles(',1)[0]
+          assert 'SD.open(' not in info and 'openNextFile(' not in info
+          assert 'file.read(' not in info and 'file.size(' not in info
+          assert 'uint32_t length=entry.size_bytes' in info
+          assert 'if(new_album)' in info and 'browser_preview_valid=true' in info
+          assert 'file_index_valid' in f and 'indexed_directory' in f
+          assert 'filelist[i].size_bytes = (uint32_t)file.size()' in f
+          assert 'invalidate_file_index();' in f
           assert 'strcmp(fname, ".VGMM5") != 0' in f
           assert 'BinaryWriter' in ps and "Get-AlbumHash" in ps
-          assert 'LGFX_Sprite' in h
           player=v.split('static void cardputer_draw_playback_view()',1)[1].split('#endif // IS_CARDPUTER',1)[0]
           assert 'LGFX_Sprite' not in player
           assert 'board_build.embed_txtfiles' not in cfg
@@ -48,7 +56,7 @@ jobs:
               return '%08X'%h
           assert h32('/')=='2A0C975E'
           assert h32('/MUSIC/ALBUM')=='064B157D'
-          print('PASS 8-char hash layout, 8192B SD cache, 512B streaming, no playback image decode')
+          print('PASS hash-only cursor path: no SD listing/decode/music open, one initial index, 512B image streaming')
           PY
       - name: Install pinned PlatformIO and Cardputer libraries
         run: |
