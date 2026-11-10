@@ -414,14 +414,15 @@ static String cardputer_fit_text(String value, int max_px) {
 
 void disptitle(int stat, char *title) {
     auto& lcd = M5Cardputer.Display;
-    lcd.fillRect(0, 0, 240, 35, BLACK);
-    lcd.setTextSize(2);
+    // R67 side-preview layout: one compact 27px header; five file rows.
+    lcd.fillRect(0, 0, 240, 27, BLACK);
+    lcd.setTextSize(2.0f);
     lcd.setTextColor(CYAN);
-    lcd.drawString("vgmM5 R67", 6, 0);
+    lcd.drawString("vgmM5 R67", 5, 2);
     lcd.setTextSize(1.5f);
-    lcd.setTextColor(stat == STATLOOP ? GREEN : LIGHTGREY);
-    if (title && title[0]) lcd.drawString(cardputer_fit_text(String(title), 228), 6, 19);
-    lcd.drawLine(0, 34, 239, 34, OLIVE);
+    lcd.setTextColor(0x9FE7);
+    lcd.drawString("M:HELP", 182, 6);
+    lcd.drawLine(0, 26, 239, 26, 0x2C68);
     if (stat == STATLOOP && title) {
         cardputer_display_title = title;
         cardputer_track_start_ms = millis();
