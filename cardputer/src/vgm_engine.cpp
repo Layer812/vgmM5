@@ -144,7 +144,10 @@ static int get_cmd_length(uint8_t cmd) {
 }
 
 void vgm_engine_toggle_pause(void) {
+    if (!isPlaying) return;
     isPaused = !isPaused;
+    // Resume production promptly even when the queue was not yet primed.
+    if (!isPaused && xSemaphore) xSemaphoreGive(xSemaphore);
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -1023,8 +1026,9 @@ bool vgm_engine_play(const char* filepath, bool use_sd) {
     return true;
 }
 
-void vgm_engine_stop() { 
+void vgm_engine_stop() {
     isPlaying = false;
+    isPaused = false;
     g_vgmm5lib_opll_active = false; 
     delay(50); 
     pcm_engine_free(&g_pcm_engine); 
@@ -1351,6 +1355,9 @@ void audio_generate_task(void *args) {
         uint32_t consecutive_blocks = 0;
 
         while (isPlaying) {
+            // Do not advance the VGM timestamp while P/PAUSE is active.
+            // The speaker playback task already holds the queued PCM.
+            if (isPaused) break;
             if (wav_count < (WAV_BUFF_COUNT - 4)) {
                 processAudioBlock();
                 if (chip_type == CHIP_YM2151 || chip_type == CHIP_YM2608) {
