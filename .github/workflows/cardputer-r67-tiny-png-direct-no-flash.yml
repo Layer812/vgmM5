@@ -1,0 +1,68 @@
+name: Cardputer R67 tiny 64px RGB PNG directly to LCD (NO FLASH)
+on:
+  push:
+    branches: [dev/cardputer-r67-png-album-scanning-sprite-20261110]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-builds:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Guard zero extra thumbnail sprite and SD-only interface
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          a=Path('cardputer/src/cardputer_artwork.hpp').read_text()
+          f=Path('cardputer/src/filer.cpp').read_text()
+          v=Path('cardputer/src/voice.cpp').read_text()
+          assert 'LGFX_Sprite tile' not in a
+          assert 'createSprite(side,side)' not in a
+          assert 'return lcd.drawPngFile(SD,path,cx,cy,side,side,0,0,scale);' in a
+          assert '".thumb.png"' in a and '"cover64.png"' in a
+          assert 'SD.open(directory,FILE_READ)' in a
+          assert 'cardputer_artwork::draw(path,kind,160,31,64)' in f
+          assert 'cardputer_artwork::draw(cardputer_playing_path,kind,160,32,64)' in v
+          assert 'board_build.embed_txtfiles' not in Path('cardputer/platformio.ini').read_text()
+          assert 'cloud_db_' not in v
+          print('PASS: 64px SD artwork, no sprite/cache, same browser/player cover, no online DB')
+          PY
+      - name: Install pinned PlatformIO and Cardputer libs
+        run: |
+          python3 -m pip install --disable-pip-version-check platformio 'click==8.1.8'
+          pio pkg install -d cardputer -e m5stack-cardputer
+      - name: Native Cardputer R67 Standard (NO FLASH)
+        run: pio run -d cardputer -e m5stack-cardputer
+      - name: Native Cardputer R67 Classic C140 (NO FLASH)
+        run: pio run -d cardputer -e m5stack-cardputer-classic
+      - name: Export verified app-only binaries
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          out=Path('cardputer/r67_tiny_png')
+          out.mkdir(exist_ok=True)
+          report={'release':'Cardputer R67 RGB PNG low-memory',
+                  'flash':'NOT PERFORMED', 'source':'development branch',
+                  'app_offset':'0x10000','variants':{}}
+          for env,suffix in [('m5stack-cardputer','standard'),('m5stack-cardputer-classic','classic')]:
+              p=Path('cardputer/.pio/build')/env/'firmware.bin'
+              data=p.read_bytes()
+              assert len(data)>100000 and data[0]==0xe9
+              name='Cardputer_R67_TinyPNG_'+suffix+'.bin'
+              (out/name).write_bytes(data)
+              report['variants'][suffix]={'name':name,'bytes':len(data),
+                   'sha256':hashlib.sha256(data).hexdigest()}
+          assert report['variants']['standard']['sha256']!=report['variants']['classic']['sha256']
+          (out/'RESULT.json').write_text(json.dumps(report,indent=2)+'\n')
+          print('PASS two native Cardputer firmware builds. No flash.')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CARDPUTER-R67-TINY-PNG-DIRECT-LCD-APPONLY-NOFLASH
+          path: cardputer/r67_tiny_png/
+          retention-days: 14
