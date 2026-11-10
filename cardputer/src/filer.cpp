@@ -405,110 +405,111 @@ void dispfiles(int offset, int chosen, bool start) {
   browser_draw_info(chosen);
 }
 
-int selectfile(){
-    if(filenum<0)filenum=0;
-    if(filenum>0 && sel>=filenum)sel=filenum-1;
-    if(sel<0)sel=0;
-    if(disp>sel)disp=sel;
-    if(filenum==0){
-      M5Cardputer.Display.fillRect(0,35,240,100,BLACK);
-      M5Cardputer.Display.setTextSize(1.5f);
-      M5Cardputer.Display.setTextColor(YELLOW);
-      M5Cardputer.Display.drawString("NO MUSIC FILES",6,46);
-      M5Cardputer.Display.setTextColor(WHITE);
-      M5Cardputer.Display.drawString("Add VGM/VGZ/MDX",6,72);
-      M5Cardputer.Display.drawString("B: Rescan",6,100);
-    }else{
-      dispfiles(disp, sel, false);
-    }
-    if(playall){
-      if(sel < (filenum - 1)){
-        sel++;
-        disp++;
-        dispfiles(disp, sel, true);
+int selectfile() {
+  browser_help_visible=false;
+  if(filenum<0)filenum=0;
+  if(filenum>0&&sel>=filenum)sel=filenum-1;
+  if(sel<0)sel=0;
+  if(disp>sel)disp=sel;
+  if(filenum>0) {
+    disp=(sel/DISPMAX)*DISPMAX;
+    dispfiles(disp,sel,false);
+  } else {
+    auto& lcd=M5Cardputer.Display;
+    lcd.fillRect(0,27,240,108,BLACK);
+    lcd.setTextSize(1.5f);
+    lcd.setTextColor(YELLOW);
+    lcd.drawString("NO MUSIC FILES",7,45);
+    lcd.setTextColor(WHITE);
+    lcd.drawString("Put VGM/VGZ/MDX",7,67);
+    lcd.drawString("on microSD",7,87);
+    lcd.drawString("B: RESCAN",7,107);
+  }
+
+  // Folder-local auto-play skips directories and wraps to the first track.
+  if(playall&&filenum>0) {
+    int next=sel;
+    for(int attempt=0;attempt<filenum;++attempt) {
+      next=(next+1)%filenum;
+      if(filelist[next].type==TYPE_VGM||filelist[next].type==TYPE_MDX) {
+        sel=next;
+        disp=(sel/DISPMAX)*DISPMAX;
+        dispfiles(disp,sel,true);
         return sel;
-      }else{
-        playall = false;
-        sel = disp = 0;
-        dispfiles(disp, sel, false);
       }
     }
-    while(1){
-      delay(10); // leave CPU time for the synthesis/DMA tasks
-      M5Cardputer.update();
-      if (M5Cardputer.Keyboard.isChange()) {
-          if(filenum == 0){
-              if(M5Cardputer.Keyboard.isKeyPressed('b') ||
-                 M5Cardputer.Keyboard.isKeyPressed('`')) return -1;
-              continue; // never index filelist when the folder is empty
-          }
-          if (M5Cardputer.Keyboard.isKeyPressed(';')){
-            if(sel != 0){
-              if(sel == disp)
-                disp--;
-              sel--;
-            }
-            dispfiles(disp, sel, false);
-          }
-          if (M5Cardputer.Keyboard.isKeyPressed('.')){
-            if((sel - disp) < (DISPMAX - 1)){
-              sel++;
-            }else{
-              if(sel < (filenum - 1)){
-                sel++;
-                disp++;
-              }
-            }
-            dispfiles(disp, sel, false);
-          }
-          if (M5Cardputer.Keyboard.isKeyPressed(',')){
-            if(sel - DISPMAX > 0){
-              sel -= DISPMAX;
-              disp = sel;
-            }else{
-              sel = disp = 0;
-            }
-            dispfiles(disp, sel, false);
-          }
-          if (M5Cardputer.Keyboard.isKeyPressed('/')){
-             if(sel < filenum - DISPMAX){
-              sel += DISPMAX;
-              disp += DISPMAX;
-            }
-            dispfiles(disp, sel, false);
-          }
-          if (M5Cardputer.Keyboard.isKeyPressed(' ') && filenum>0){
-            dispfiles(disp, sel, true);
-            return sel;
-          }
-          if (M5Cardputer.Keyboard.isKeyPressed('') || M5Cardputer.Keyboard.isKeyPressed('`') || M5Cardputer.Keyboard.isKeyPressed('b')){
-            // Exit local mode
-            return -1;
-          }
-          if (M5Cardputer.Keyboard.isKeyPressed('=')){
-            int v = M5.Speaker.getVolume() + 20;
-            if(v > 255) v = 255;
-            M5.Speaker.setVolume(v);
-          }
-          if (M5Cardputer.Keyboard.isKeyPressed('-')){
-            int v = M5.Speaker.getVolume() - 20;
-            if(v < 0) v = 0;
-            M5.Speaker.setVolume(v);
-          }       
-          if (M5Cardputer.Keyboard.isKeyPressed('m')){
-            dispmenu();
-            //printf("m pressed \n");
-          }
-          if (M5Cardputer.Keyboard.isKeyPressed('a')){
-            if(filelist[sel].type != TYPE_VGM && filelist[sel].type != TYPE_MDX)
-              continue;
-            playall = true;
-            loopflag = false;
-            disptitle(playall? STATALL: STATCLR, gtitle);
-            return sel;
-          }
+    playall=false;
+  }
+
+  while(1) {
+    delay(10); // Keyboard polling must yield to the sound and DMA tasks.
+    M5Cardputer.update();
+    if(!M5Cardputer.Keyboard.isChange())continue;
+    const auto state=M5Cardputer.Keyboard.keysState();
+
+    if(M5Cardputer.Keyboard.isKeyPressed('m')) {
+      if(browser_help_visible) {
+        browser_help_visible=false;
+        disptitle(STATCLR,(char*)"");
+        if(filenum>0)dispfiles(disp,sel,false);
+        else return -1;
+      } else {
+        dispmenu();
       }
+      continue;
     }
+    if(browser_help_visible) {
+      browser_help_visible=false;
+      disptitle(STATCLR,(char*)"");
+      if(filenum>0)dispfiles(disp,sel,false);
+      else return -1;
+      continue;
+    }
+    if(filenum==0) {
+      if(M5Cardputer.Keyboard.isKeyPressed('b')||
+         M5Cardputer.Keyboard.isKeyPressed(0x60)||
+         M5Cardputer.Keyboard.isKeyPressed('\b'))return -1;
+      continue;
+    }
+
+    bool moved=false;
+    if(M5Cardputer.Keyboard.isKeyPressed(';')&&sel>0) {
+      --sel; moved=true;
+    } else if(M5Cardputer.Keyboard.isKeyPressed('.')&&sel+1<filenum) {
+      ++sel; moved=true;
+    } else if(M5Cardputer.Keyboard.isKeyPressed(',')&&sel>0) {
+      sel=sel>=DISPMAX?sel-DISPMAX:0; moved=true;
+    } else if(M5Cardputer.Keyboard.isKeyPressed('/')&&sel<filenum-1) {
+      sel=sel+DISPMAX<filenum?sel+DISPMAX:filenum-1; moved=true;
+    }
+    if(moved) {
+      disp=(sel/DISPMAX)*DISPMAX;
+      dispfiles(disp,sel,false);
+      continue;
+    }
+    if(M5Cardputer.Keyboard.isKeyPressed(' ')||state.enter) {
+      playall=false;
+      dispfiles(disp,sel,true);
+      return sel;
+    }
+    if(M5Cardputer.Keyboard.isKeyPressed('a')&&
+       (filelist[sel].type==TYPE_VGM||filelist[sel].type==TYPE_MDX)) {
+      playall=true;
+      loopflag=false;
+      dispfiles(disp,sel,true);
+      return sel;
+    }
+    if(M5Cardputer.Keyboard.isKeyPressed('b')||
+       M5Cardputer.Keyboard.isKeyPressed(0x60)||
+       M5Cardputer.Keyboard.isKeyPressed('\b'))return -1;
+    if(M5Cardputer.Keyboard.isKeyPressed('=')) {
+      int value=(int)M5.Speaker.getVolume()+20;
+      M5.Speaker.setVolume(value>255?255:value);
+    } else if(M5Cardputer.Keyboard.isKeyPressed('-')) {
+      int value=(int)M5.Speaker.getVolume()-20;
+      M5.Speaker.setVolume(value<0?0:value);
+    }
+  }
 }
 
 bool cnvfile(fs::FS &fs, struct fl *srct, uint8_t *dst){
