@@ -11,7 +11,7 @@
 #define STATLOOP 2
 #define STATALL 3
 
-#define DISPMAX 4
+#define DISPMAX 5
 #define LISTMAX 256   // max files in a directory
 #define PATHMAX 256   // filename max include pathname
 

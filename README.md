@@ -49,9 +49,9 @@ vgmM5 は M5Stackシリーズで動作するVGM/VGZおよびMDX(MXDRV)ファイ�
 ※ 従来のv0.98系に加え、Cardputer R67・CoreS3 R67・Tab5の更新版ソースを公開しています。
 ※ ステータスが「対応済」となっていても、もし再生時に音がおかしい・違和感があると感じた場合は、曲名とおかしい点を優しく申告していただければ対応いたします！
 
-#### M5Stack Cardputer版 R67 正式版（2026年11月7日）
+#### M5Stack Cardputer版 R67 正式版（2026年11月10日 UI更新）
 
-CoreS3 R67と同じ `vgmM5lib` 音源コアを採用。起動すると**直接microSDのファイル一覧**が表示され、VGM/VGZ・MDX/PDXを選択できます。240×135画面の文字を大きくし、曲名・音源・音量・再生状態が分かる画面にしました。**オンライン／ローカル選択メニューやWi-Fi設定はなく、DBファイルも不要です。**
+CoreS3 R67と同じ `vgmM5lib` 音源コアを採用。起動すると**直接microSDのファイル一覧**が表示され、VGM/VGZ・MDX/PDXを選択できます。240×135画面に**左5行のファイル一覧＋右側64×64サムネイル／曲情報**を表示。フォルダは水色と末尾 `/`、タイトル右に `M:HELP` を配置して操作説明を必要なときだけ表示します。曲名・音源・音量・再生状態が分かる再生画面も搭載しています。**オンライン／ローカル選択メニューやWi-Fi設定はなく、DBファイルも不要です。**
 
 [Cardputer R67の説明・ビルド方法](cardputer/README.md) ／ [Web Burner（従来のCardputer掲載版）](https://burner.m5stack.com/METQC2)
 
@@ -156,9 +156,9 @@ vgmM5 is a VGM/VGZ and MDX (X68000) file player designed specifically for the M5
 *Note: Updated Cardputer R67, CoreS3 R67 and Tab5 sources are available alongside the original v0.98 implementation.*
 *Even if a chip is listed as "Supported," if you notice any strange sounds or something feels off during playback, please kindly report it (gently) with the song title and the issue, and I will address it!*
 
-#### M5Stack Cardputer R67 production edition (November 7, 2026)
+#### M5Stack Cardputer R67 production edition (UI update November 10, 2026)
 
-Uses the same `vgmM5lib` sound cores as CoreS3 R67, with readable 240×135 menus and a dedicated title/chip/volume/playback display. Boots **directly into the microSD browser**, supporting local VGM/VGZ and MDX/PDX. **No Online/Local chooser, Wi-Fi setup or embedded cloud DB is required.**
+Uses the same `vgmM5lib` sound cores as CoreS3 R67, with a **two-pane 240×135 browser** (five file rows on the left, optional 64×64 cover and file metadata on the right), cyan folders ending in `/`, and `M:HELP` in the header. Playback has a dedicated title/chip/volume display. Boots **directly into the microSD browser**, supporting local VGM/VGZ and MDX/PDX. **No Online/Local chooser, Wi-Fi setup or embedded cloud DB is required.**
 
 [Cardputer R67 source and build guide](cardputer/README.md) / [Web Burner (previously published Cardputer edition)](https://burner.m5stack.com/METQC2)
 
