@@ -55,7 +55,7 @@ function Find-AlbumArt([System.IO.DirectoryInfo]$folder) {
 }
 function Save-Rgb565([string]$imagePath,[string]$outputPath) {
   $image=[System.Drawing.Image]::FromFile($imagePath)
-  $bmp=New-Object System.Drawing.Bitmap(64,64,[System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+  $bmp=[System.Drawing.Bitmap]::new(64,64,[System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
   try {
     $gfx=[System.Drawing.Graphics]::FromImage($bmp)
     try {
