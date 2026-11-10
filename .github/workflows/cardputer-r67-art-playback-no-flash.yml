@@ -33,7 +33,7 @@ jobs:
           for obsolete in ('lcd.drawString("MICRO SD"','"SPACE Stop','"VOL ','fillRect(7, 131','elapsed_ms'):
               assert obsolete not in view,obsolete
           assert '"NOW"' in view and '"PLAYING"' in view and '"PAUSED"' in view
-          assert 'state.backspace||state.del' in v
+          assert "if(state.del ||" in v and "isKeyPressed('\\b')" in v
           assert "vgm_engine_toggle_pause()" in v
           assert 'if (isPaused) break;' in engine
           assert 'if (!isPaused && xSemaphore)' in engine
