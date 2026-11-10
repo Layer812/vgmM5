@@ -1,0 +1,77 @@
+name: Cardputer R67 cover + slim playback native (NO FLASH)
+on:
+  push:
+    branches: [dev/cardputer-r67-cover-playback-slim-20261110]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  standard-and-classic:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Guard Cardputer UI behaviors without changing CoreS3
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          f=Path('cardputer/src/filer.cpp').read_text()
+          v=Path('cardputer/src/voice.cpp').read_text()
+          art=Path('cardputer/src/cardputer_artwork.hpp').read_text()
+          engine=Path('cardputer/src/vgm_engine.cpp').read_text()
+          assert 'cardputer_artwork::draw(path,kind,161,31,62)' in f
+          assert 'cardputer_artwork::draw(cardputer_playing_path,kind,157,32,72)' in v
+          assert 'draw_default' in art and 'draw_real' in art
+          assert 'return lcd.drawJpgFile' in art and 'return lcd.drawPngFile' in art
+          assert 'cover.jpg' in art and '.png' in art
+          a=v.index('static void cardputer_draw_playback_view()')
+          b=v.index('#endif // IS_CARDPUTER',a)
+          view=v[a:b]
+          for obsolete in ('"MICRO SD"','"SPACE Stop','"VOL ','fillRect(7, 131','elapsed_ms','progress'):
+              assert obsolete not in view,obsolete
+          assert '"NOW"' in view and '"PLAYING"' in view and '"PAUSED"' in view
+          assert 'state.backspace||state.del' in v
+          assert "vgm_engine_toggle_pause()" in v
+          assert 'if (isPaused) break;' in engine
+          assert 'if (!isPaused && xSemaphore)' in engine
+          assert 'STATE_BOOT_MENU' not in v and 'cloud_db_' not in v
+          assert '#define DISPMAX 5' in Path('cardputer/src/filer.hpp').read_text()
+          print('PASS shared browser/player art, generated fallback, clean playback, BS return and paused state')
+          PY
+      - name: Install pinned Cardputer native build dependencies
+        run: |
+          python3 -m pip install --disable-pip-version-check platformio 'click==8.1.8'
+          pio pkg install -d cardputer -e m5stack-cardputer
+      - name: Build ESP32-S3 Cardputer R67 standard firmware (NO FLASH)
+        run: pio run -d cardputer -e m5stack-cardputer
+      - name: Build ESP32-S3 Cardputer R67 Classic firmware (NO FLASH)
+        run: pio run -d cardputer -e m5stack-cardputer-classic
+      - name: Verify and package APP-ONLY images
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          out=Path('cardputer/r67_art_playback')
+          out.mkdir(exist_ok=True)
+          result={'edition':'Cardputer R67 art + minimal playback','flashed':False,
+                  'firmware_offset':'0x10000','variants':{}}
+          for mode,suffix in (('m5stack-cardputer','standard'),
+                              ('m5stack-cardputer-classic','classic')):
+              fw=Path('cardputer/.pio/build')/mode/'firmware.bin'
+              data=fw.read_bytes()
+              assert len(data)>100000 and data[0]==0xe9
+              (out/('cardputer_r67_'+suffix+'.bin')).write_bytes(data)
+              result['variants'][suffix]={'sha256':hashlib.sha256(data).hexdigest(),
+                                           'bytes':len(data)}
+          assert result['variants']['standard']['sha256'] != result['variants']['classic']['sha256']
+          (out/'RESULT.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
+          print('PASS Cardputer R67 standard/Classic APP-only native builds, SHA256')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CARDPUTER-R67-COVER-MINIMAL-PLAYER-APPONLY-NOFLASH
+          path: cardputer/r67_art_playback/
+          retention-days: 14
