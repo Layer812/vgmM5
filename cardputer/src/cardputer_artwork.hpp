@@ -5,7 +5,7 @@
 // Large "<folder>.png" files are NEVER decoded on cursor movement.
 // No changes to audio, partition layout, network or music.
 #if defined(IS_CARDPUTER)
-#include <SD.h> // before M5Cardputer/M5GFX for fs::SDFS image file support
+#include <SD.h>
 #include <M5Cardputer.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -79,92 +79,27 @@ static inline void default_cover(const char* album,Kind kind,int x,int y) {
   screen.drawCenterString(kind==FOLDER?"DIR":kind==PARENT?"../":
                           kind==MDX?"MDX":"VGM",x+32,y+46);
 }
-// Avoid scanning image directories for each highlighted file.
-// Only recognized, small 64x64 RGB PNGs may be decoded once on-device.
-// Everything larger must be converted beforehand using the Windows helper.
-static inline bool small_png(const char* album,char* filename,size_t cap) {
-  const char* leaf=strrchr(album,'/');
-  leaf=leaf?leaf+1:album;
-  char folder_png[128]={};
-  snprintf(folder_png,sizeof(folder_png),"%s.png",leaf);
-  const char* const names[]={"cover64.png","cover_64.png","thumb.png",
-                              folder_png,"cover.png","Cover.png","COVER.PNG"};
-  char candidate[320];
-  for(const char* name:names) {
-    const int n=snprintf(candidate,sizeof(candidate),"%s%s%s",album,
-                         strcmp(album,"/")==0?"":"/",name);
-    if(n<=0||(size_t)n>=sizeof(candidate))continue;
-    File f=SD.open(candidate,FILE_READ);
-    if(!f||f.isDirectory()||f.size()>65536u||f.size()<33u) {
-      if(f)f.close();continue;
-    }
-    uint8_t hdr[26]={};
-    const bool valid=f.read(hdr,sizeof(hdr))==(int)sizeof(hdr);
-    f.close();
-    static const uint8_t png[8]={137,80,78,71,13,10,26,10};
-    if(!valid||memcmp(hdr,png,8)!=0||memcmp(hdr+12,"IHDR",4)!=0)continue;
-    const uint32_t w=((uint32_t)hdr[16]<<24)|((uint32_t)hdr[17]<<16)|
-                     ((uint32_t)hdr[18]<<8)|hdr[19];
-    const uint32_t h=((uint32_t)hdr[20]<<24)|((uint32_t)hdr[21]<<16)|
-                     ((uint32_t)hdr[22]<<8)|hdr[23];
-    if(w!=64||h!=64||hdr[25]!=2)continue; // only opaque RGB, not RGBA
-    if((size_t)n<cap) {snprintf(filename,cap,"%s",candidate);return true;}
-  }
-  return false;
+// Cursor movement: the album name is hashed and exactly one precomputed
+// /.VGMM5/XXXXXXXX.RGB path is opened. NO folder enumeration, image probing,
+// SD.exists(), PNG decode, sprite, or one-time conversion runs on-device.
+// All album PNG/JPEG conversion is performed on Windows by
+// tools/MAKE_CARDPUTER_THUMBS.ps1 before inserting the card.
+static inline uint32_t album_key(const char* fullpath,Kind kind) {
+  char folder[256]={};
+  return folder_for(fullpath,kind,folder,sizeof(folder)) ?
+         hash_album(folder) : 0;
 }
-static inline bool generate_from_small_png(const char* album,
-                                            const char* destination) {
-  char source[320]={};
-  if(!small_png(album,source,sizeof(source)))return false;
-  LGFX_Sprite temp(&M5Cardputer.Display);
-  temp.setColorDepth(16);
-  if(!temp.createSprite(64,64))return false;
-  temp.fillSprite(0x0842);
-  const bool decoded=temp.drawPngFile(SD,source,0,0,64,64,0,0,1.0f);
-  if(!decoded){temp.deleteSprite();return false;}
-  if(!SD.exists(kCacheDir)&&!SD.mkdir(kCacheDir)){
-    temp.deleteSprite();return false;
-  }
-  char tempname[40]={};
-  if(!path_for_hash(album,tempname,sizeof(tempname),"TMP")){
-    temp.deleteSprite();return false;
-  }
-  SD.remove(tempname);
-  File out=SD.open(tempname,FILE_WRITE);
-  if(!out){temp.deleteSprite();return false;}
-  uint16_t line[64];
-  bool good=true;
-  for(int y=0;y<64&&good;++y) {
-    for(int x=0;x<64;++x)line[x]=temp.readPixel(x,y);
-    if(out.write((const uint8_t*)line,sizeof(line))!=sizeof(line))good=false;
-  }
-  out.flush();
-  out.close();
-  temp.deleteSprite(); // release 8KiB before any music playback
-  if(!good){SD.remove(tempname);return false;}
-  File verify=SD.open(tempname,FILE_READ);
-  const bool complete=verify&&verify.size()==kCacheBytes;
-  if(verify)verify.close();
-  if(!complete){SD.remove(tempname);return false;}
-  SD.remove(destination);
-  if(!SD.rename(tempname,destination)){
-    SD.remove(tempname);return false;
-  }
-  return true;
-}
-static inline void draw(const char* fullpath,Kind kind,int x,int y,int size,
-                        bool allow_build=false) {
+static inline void draw(const char* fullpath,Kind kind,int x,int y,int size) {
   if(size!=64)return;
   auto& lcd=M5Cardputer.Display;
   lcd.fillRoundRect(x-2,y-2,68,68,4,0x09C4);
-  char album[320]={};
+  char album[256]={};
   char filename[40]={};
   bool shown=false;
+  // The playback view and browser both use exactly this hash-based lookup.
   if(kind!=PARENT && folder_for(fullpath,kind,album,sizeof(album)) &&
      path_for_hash(album,filename,sizeof(filename))) {
     shown=stream_cache(filename,x,y);
-    if(!shown&&allow_build&&generate_from_small_png(album,filename))
-      shown=stream_cache(filename,x,y);
   }
   if(!shown)default_cover(album[0]?album:fullpath,kind,x,y);
   lcd.drawRoundRect(x-2,y-2,68,68,4,0x35AA);
