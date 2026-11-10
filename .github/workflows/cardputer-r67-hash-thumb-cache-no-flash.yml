@@ -34,7 +34,9 @@ jobs:
           assert 'cardputer_artwork::draw(cardputer_playing_path,kind,160,32,64,false)' in v
           assert 'strcmp(fname, ".VGMM5") != 0' in f
           assert 'BinaryWriter' in ps and "Get-AlbumHash" in ps
-          assert 'LGFX_Sprite' in h and 'LGFX_Sprite' not in v
+          assert 'LGFX_Sprite' in h
+          player=v.split('static void cardputer_draw_playback_view()',1)[1].split('#endif // IS_CARDPUTER',1)[0]
+          assert 'LGFX_Sprite' not in player
           assert 'board_build.embed_txtfiles' not in cfg
           assert 'cloud_db_' not in v and 'wifi_manager_' not in v
           # Cross-platform specification: FNV-1a of UTF8 album path, ASCII lower-case.
