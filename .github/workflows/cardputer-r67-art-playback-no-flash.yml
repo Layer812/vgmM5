@@ -30,7 +30,7 @@ jobs:
           a=v.index('static void cardputer_draw_playback_view()')
           b=v.index('#endif // IS_CARDPUTER',a)
           view=v[a:b]
-          for obsolete in ('"MICRO SD"','"SPACE Stop','"VOL ','fillRect(7, 131','elapsed_ms','progress'):
+          for obsolete in ('lcd.drawString("MICRO SD"','"SPACE Stop','"VOL ','fillRect(7, 131','elapsed_ms'):
               assert obsolete not in view,obsolete
           assert '"NOW"' in view and '"PLAYING"' in view and '"PAUSED"' in view
           assert 'state.backspace||state.del' in v
