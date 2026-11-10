@@ -1,6 +1,12 @@
 // vgmM5 / Layer812
 
 #include <Arduino.h>
+// SD must be included BEFORE M5GFX/M5Unified to register the fs::SDFS
+// DataWrapper specialization required by drawJpgFile/drawPngFile.
+// The previous R67 selector included SD correctly; the player did not.
+#if defined(IS_CARDPUTER)
+#include <SD.h>
+#endif
 #include <M5Unified.h>
 #include "vgm_engine.h"
 #include "mdx_engine.hpp"
@@ -673,8 +679,9 @@ void phase_playback() {
     if(M5Cardputer.Keyboard.isChange()) {
         const auto state=M5Cardputer.Keyboard.keysState();
         // Physical BS generates the dedicated backspace state, not text '\b'.
-        if(state.backspace||state.del||
-           M5Cardputer.Keyboard.isKeyPressed('\b')) {
+        if(state.del ||
+           M5Cardputer.Keyboard.isKeyPressed('\b') ||
+           M5Cardputer.Keyboard.isKeyPressed(0x7f)) {
             cardputer_ui_paused=false;
             cardputer_playback_help=false;
             vgm_engine_stop();
