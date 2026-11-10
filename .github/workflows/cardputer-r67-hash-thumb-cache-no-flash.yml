@@ -27,10 +27,14 @@ jobs:
           assert 'hash=(hash^c)*16777619u' in h
           assert 'uint16_t strip[64*4]' in h
           assert 'pushImage(x,y+py,64,4,strip)' in h
-          assert 'generate_from_small_png' not in h
-          assert 'drawPngFile(' not in h and 'drawJpgFile(' not in h
-          assert 'openNextFile(' not in h and 'SD.exists(' not in h
-          assert 'LGFX_Sprite' not in h and 'createSprite(' not in h
+          assert all(x in h for x in ('prepare_album_once(', 'small_opaque_png(', 'write_small_cover('))
+          assert 'cardputer_artwork::prepare_album_once((const char*)cdir)' in f
+          assert 'LGFX_Sprite' in h and 'createSprite(64,64)' in h
+          assert 'drawPngFile(SD,source,0,0,64,64,0,0,1.0f)' in h
+          art_draw=h.split('static inline void draw(',1)[1]
+          assert 'drawPngFile(' not in art_draw and 'drawJpgFile(' not in art_draw
+          assert 'small_opaque_png(' not in art_draw and 'SD.exists(' not in art_draw
+          assert 'openNextFile(' not in art_draw and 'createSprite(' not in art_draw
           assert 'cardputer_artwork::draw(path,kind,160,31,64)' in f
           assert 'cardputer_artwork::draw(cardputer_playing_path,kind,160,32,64)' in v
           info=f.split('static void browser_draw_info(',1)[1].split('void dispfiles(',1)[0]
