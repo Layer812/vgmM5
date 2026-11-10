@@ -304,65 +304,61 @@ static void browser_thumbnail(const struct fl& entry, const char* fullpath,
 }
 
 static void browser_draw_info(int selection) {
-  auto& lcd = M5Cardputer.Display;
+  auto& lcd=M5Cardputer.Display;
   lcd.fillRect(144,27,96,108,BLACK);
   lcd.drawFastVLine(143,27,108,0x2C68);
-  if (selection < 0 || selection>=filenum || !filelist) return;
-  const struct fl& e=filelist[selection];
-  const bool directory=e.type==TYPE_SDIR || e.type==TYPE_UDIR;
-  const char* stored=(const char*)e.filename;
-  const char* shortname=strrchr(stored,'/');
-  shortname = shortname&&shortname[1] ? shortname+1 : stored;
-  char fullpath[PATHMAX+16] = {};
-  if(!browser_make_path(fullpath,sizeof(fullpath),stored))return;
-  browser_thumbnail(e,fullpath,shortname);
+  if(selection<0||selection>=filenum||!filelist)return;
+  const struct fl& entry=filelist[selection];
+  const bool dir=entry.type==TYPE_SDIR||entry.type==TYPE_UDIR;
+  const char* stored=(const char*)entry.filename;
+  const char* slash=strrchr(stored,'/');
+  const char* name=slash&&slash[1]?slash+1:stored;
+  char path[PATHMAX+16]={};
+  if(!browser_make_path(path,sizeof(path),stored))return;
+  browser_thumbnail(entry,path,name);
 
-  lcd.setTextSize(1.5f);
-  lcd.setTextColor(directory?CYAN:0x9FE7);
-  const char* format=directory?"DIR":e.type==TYPE_MDX?"MDX":"VGM";
-  String ext=String(strrchr(shortname,'.')?strrchr(shortname,'.'):"");
+  const char* format=dir?"DIR":entry.type==TYPE_MDX?"MDX":"VGM";
+  String ext=String(strrchr(name,'.')?strrchr(name,'.'):"");
   ext.toLowerCase();
-  if (!directory && ext==".vgz") format="VGZ";
-  String metadata="";
+  if(!dir&&ext==".vgz")format="VGZ";
+  String sizeinfo="";
+  String chips=dir?(entry.type==TYPE_UDIR?"PARENT /":"OPEN /"):"AUDIO FILE";
 
-  if(directory) {
-    metadata = e.type==TYPE_UDIR?"PARENT /":"OPEN /";
-  } else {
-    File file=SD.open(fullpath, FILE_READ);
-    if(file && !file.isDirectory()) {
+  if(!dir) {
+    File file=SD.open(path, FILE_READ);
+    if(file&&!file.isDirectory()) {
       const uint32_t length=(uint32_t)file.size();
-      char bytes[16];
-      if(length>=1048576u)snprintf(bytes,sizeof(bytes),"%lu.%luM",
-         (unsigned long)(length/1048576u),
-         (unsigned long)((length%1048576u)*10u/1048576u));
-      else snprintf(bytes,sizeof(bytes),"%luK",(unsigned long)((length+1023u)/1024u));
-      metadata=bytes;
-      if(ext==".vgm" && length>=0xb0u) {
+      char human[16];
+      if(length>=1048576u)snprintf(human,sizeof(human),"%lu.%luM",
+        (unsigned long)(length/1048576u),
+        (unsigned long)((length%1048576u)*10u/1048576u));
+      else snprintf(human,sizeof(human),"%luK",(unsigned long)((length+1023u)/1024u));
+      sizeinfo=human;
+      if(ext==".vgm"&&length>=0xb0u) {
         uint8_t header[0xb0]={};
-        if(file.read(header,sizeof(header))==(int)sizeof(header) &&
+        if(file.read(header,sizeof(header))==(int)sizeof(header)&&
            memcmp(header,"Vgm ",4)==0) {
-          const bool fm=(header[0x30]||header[0x31]||header[0x32]||header[0x33]);
-          const bool c140=(header[0xa8]||header[0xa9]||header[0xaa]||header[0xab]);
-          if(fm&&c140)metadata += " OPM+C140";
-          else if(fm)metadata += " YM2151";
-          else if(c140)metadata += " C140";
+          const bool ym2151=header[0x30]||header[0x31]||header[0x32]||header[0x33];
+          const bool c140=header[0xa8]||header[0xa9]||header[0xaa]||header[0xab];
+          if(ym2151&&c140)chips="OPM+C140";
+          else if(ym2151)chips="YM2151";
+          else if(c140)chips="C140";
+          else chips="VGM AUDIO";
         }
-      }
+      } else if(ext==".vgz")chips="COMPRESSED";
+      else if(entry.type==TYPE_MDX)chips="X68000 MDX";
     }
     if(file)file.close();
   }
 
-  lcd.drawString(format,149,99);
+  lcd.setTextSize(1.5f);
+  lcd.setTextColor(dir?CYAN:0x9FE7);
+  String line=String(format)+(sizeinfo.length()?" "+sizeinfo:"");
+  while(line.length()>0&&lcd.textWidth(line)>87)line.remove(line.length()-1);
+  lcd.drawString(line,148,99);
   lcd.setTextColor(WHITE);
-  // Format on first line, size / native chip info on second line.
-  const String info=metadata.length() ? metadata : (directory?"FOLDER":"SD FILE");
-  String shown=info;
-  while(shown.length() && lcd.textWidth(shown)>87) {
-    int cut=(int)shown.length()-1;
-    while(cut>0 && (((uint8_t)shown[(unsigned)cut]&0xC0u)==0x80u))--cut;
-    shown.remove((unsigned)cut);
-  }
-  lcd.drawString(shown,148,117);
+  while(chips.length()>0&&lcd.textWidth(chips)>87)chips.remove(chips.length()-1);
+  lcd.drawString(chips,148,117);
 }
 
 void dispfiles(int offset, int chosen, bool start) {
