@@ -33,7 +33,7 @@ jobs:
           assert 'board_build.embed_txtfiles' not in p
           assert 'symlink://../lib/vgmM5lib' in p
           assert '[env:m5stack-cardputer-classic]' in p
-          assert '#define DISPMAX 4' in (root/'src/filer.hpp').read_text()
+          assert '#define DISPMAX 5' in (root/'src/filer.hpp').read_text()
           assert 'Cardputer R67' in (root/'README.md').read_text()
           print('PASS Cardputer R67 microSD-only release guard, no online DB assets')
           PY
