@@ -430,10 +430,33 @@ int selectfile() {
     playall=false;
   }
 
+  // Folder covers such as <foldername>.png often live INSIDE the folder.
+  // In the parent browser, that folder has not been entered yet, so its
+  // cache is absent. Prepare the selected folder only after the cursor
+  // has been idle for 250ms. Never open or decode artwork on key movement.
+  uint32_t cover_idle_since=millis();
+  int cover_prepared_selection=-1;
   while(1) {
     delay(10); // Keyboard polling must yield to the sound and DMA tasks.
     M5Cardputer.update();
-    if(!M5Cardputer.Keyboard.isChange())continue;
+    if(!M5Cardputer.Keyboard.isChange()) {
+      if(!browser_help_visible && cover_prepared_selection!=sel &&
+         filenum>0 && sel>=0 && sel<filenum &&
+         filelist[sel].type==TYPE_SDIR &&
+         (uint32_t)(millis()-cover_idle_since)>=250u) {
+        cover_prepared_selection=sel;
+        char selected_folder[PATHMAX+16]={};
+        if(browser_make_path(selected_folder,sizeof(selected_folder),
+                             (const char*)filelist[sel].filename)) {
+          // Cheap cache-size check inside prepare_album_once; at most one
+          // real PNG/JPEG decode, only when the user stops on a folder.
+          cardputer_artwork::prepare_album_once(selected_folder);
+          browser_preview_valid=false;
+          browser_draw_info(sel);
+        }
+      }
+      continue;
+    }
     const auto state=M5Cardputer.Keyboard.keysState();
 
     if(M5Cardputer.Keyboard.isKeyPressed('m')) {
@@ -477,6 +500,8 @@ int selectfile() {
       sel=sel+DISPMAX<filenum?sel+DISPMAX:filenum-1; moved=true;
     }
     if(moved) {
+      cover_idle_since=millis();
+      cover_prepared_selection=-1;
       disp=(sel/DISPMAX)*DISPMAX;
       dispfiles(disp,sel,false);
       continue;
