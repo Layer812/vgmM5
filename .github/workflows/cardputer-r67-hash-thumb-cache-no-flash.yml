@@ -66,6 +66,19 @@ jobs:
           assert h32('/MUSIC/ALBUM')=='064B157D'
           print('PASS hash-only cursor path: no SD listing/decode/music open, one initial index, 512B image streaming')
           PY
+      - name: Validate APP-only flasher syntax (never flash in CI)
+        run: |
+          python3 -m py_compile cardputer/tools/FLASH_R67_APP_ONLY.py
+          python3 - <<'PY'
+          from pathlib import Path
+          safe=Path('cardputer/tools/FLASH_R67_APP_ONLY.py').read_text()
+          assert 'read_flash' in safe and '"write_flash"' in safe
+          assert 'erase_flash' not in safe and 'erase_region' not in safe
+          assert 'table != EXPECTED' in safe and 'check_otadata' in safe
+          assert '"sha256"' in safe and 'single-OTA layout' in safe
+          assert '0x10000' in safe and '0x5F0000' in safe
+          print('PASS APP-only flasher source and Python syntax')
+          PY
       - name: Install pinned PlatformIO and Cardputer libraries
         run: |
           python3 -m pip install --disable-pip-version-check platformio 'click==8.1.8'
@@ -112,6 +125,9 @@ jobs:
             cardputer/r67_hashed_thumbnails/
             cardputer/MAKE_CARDPUTER_THUMBS.cmd
             cardputer/tools/MAKE_CARDPUTER_THUMBS.ps1
+            cardputer/FLASH_THIS_CARDPUTER_R67_STANDARD_APP_ONLY.cmd
+            cardputer/FLASH_THIS_CARDPUTER_R67_CLASSIC_APP_ONLY.cmd
+            cardputer/tools/FLASH_R67_APP_ONLY.py
           retention-days: 14
 
   windows-sd-cache:
