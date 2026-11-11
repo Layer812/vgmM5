@@ -1,8 +1,8 @@
 #pragma once
 // Cardputer R67 SD thumbnail cache: / .VGMM5 / 8-digit FNV-1a.RGB
 // Cache is raw 64x64 RGB565 little-endian (8192B). It is never held in RAM.
-// Browser may convert a small RGB PNG once; player only streams 4 lines at a time.
-// Large "<folder>.png" files are NEVER decoded on cursor movement.
+// At directory entry the browser downsizes ordinary PNG/JPEG covers once; player streams 4 lines at a time.
+// No image decode, album scan or sprite allocation occurs during cursor movement or playback.
 // No changes to audio, partition layout, network or music.
 #if defined(IS_CARDPUTER)
 #include <SD.h>
@@ -102,15 +102,94 @@ static inline bool small_opaque_png(const char* candidate) {
                    ((uint32_t)hdr[22]<<8)|hdr[23];
   return w==64&&h==64&&hdr[25]==2; // RGB without alpha
 }
+
+static inline bool artwork_ext(const char* path,const char* ext) {
+  if(!path||!ext)return false;
+  const char* dot=strrchr(path,'.');
+  if(!dot)return false;
+  while(*dot&&*ext) {
+    char a=*dot++, b=*ext++;
+    if(a>='A'&&a<='Z')a=(char)(a+32);
+    if(b>='A'&&b<='Z')b=(char)(b+32);
+    if(a!=b)return false;
+  }
+  return !*dot&&!*ext;
+}
+// Only at folder entry: inspect headers before asking the PNG/JPEG decoder
+// to downscale into the 8-KiB sprite. Do not allocate a full-size bitmap.
+static inline bool artwork_dimensions(const char* path,int& width,int& height,bool& png) {
+  png=artwork_ext(path,".png");
+  const bool jpg=artwork_ext(path,".jpg")||artwork_ext(path,".jpeg");
+  if(!png&&!jpg)return false;
+  File f=SD.open(path,FILE_READ);
+  if(!f||f.isDirectory()||f.size()<26 || f.size()>4194304u) {
+    if(f)f.close();
+    return false;
+  }
+  if(png) {
+    uint8_t hdr[26]={};
+    const bool ok=f.read(hdr,sizeof(hdr))==(int)sizeof(hdr);
+    f.close();
+    const uint8_t magic[8]={137,80,78,71,13,10,26,10};
+    if(!ok||memcmp(hdr,magic,8)!=0||memcmp(hdr+12,"IHDR",4)!=0)return false;
+    width=(int)(((uint32_t)hdr[16]<<24)|((uint32_t)hdr[17]<<16)|
+                ((uint32_t)hdr[18]<<8)|hdr[19]);
+    height=(int)(((uint32_t)hdr[20]<<24)|((uint32_t)hdr[21]<<16)|
+                 ((uint32_t)hdr[22]<<8)|hdr[23]);
+  } else {
+    if(f.read()!=0xFF||f.read()!=0xD8){f.close();return false;}
+    bool found=false;
+    while(f.available()>8&&f.position()<16384u) {
+      int marker=f.read();
+      if(marker!=0xFF)continue;
+      do{marker=f.read();}while(marker==0xFF&&f.available());
+      if(marker<0||marker==0xD9||marker==0xDA)break;
+      if(marker==0x01||(marker>=0xD0&&marker<=0xD7))continue;
+      const int hi=f.read(),lo=f.read();
+      if(hi<0||lo<0)break;
+      const int len=(hi<<8)|lo;
+      if(len<2||(uint32_t)f.position()+(uint32_t)len-2u>f.size())break;
+      if((marker>=0xC0&&marker<=0xC3)||
+         (marker>=0xC5&&marker<=0xC7)||
+         (marker>=0xC9&&marker<=0xCB)||
+         (marker>=0xCD&&marker<=0xCF)) {
+        if(len<7)break;
+        f.read(); // sample precision
+        height=(f.read()<<8)|f.read();
+        width=(f.read()<<8)|f.read();
+        found=true;break;
+      }
+      f.seek(f.position()+(size_t)len-2u);
+    }
+    f.close();
+    if(!found)return false;
+  }
+  return width>=1&&height>=1&&width<=4096&&height<=4096;
+}
+
 static inline bool write_small_cover(const char* source,const char* target,
                                      const char* album) {
+  int width=0,height=0;
+  bool is_png=false;
+  if(!artwork_dimensions(source,width,height,is_png))return false;
   auto& lcd=M5Cardputer.Display;
   LGFX_Sprite sprite(&lcd);
   sprite.setColorDepth(16);
   if(!sprite.createSprite(64,64))return false;
   sprite.fillSprite(0x0842);
-  if(!sprite.drawPngFile(SD,source,0,0,64,64,0,0,1.0f)) {
+  const int longest=width>height?width:height;
+  const float scale=longest>64?64.0f/(float)longest:1.0f;
+  const int w=(int)(width*scale),h=(int)(height*scale);
+  const int cx=(64-w)/2,cy=(64-h)/2;
+  // The 64x64 path stays exact; ordinary covers are proportionally scaled.
+  const bool decoded = is_png
+    ? ((width==64&&height==64)
+       ? sprite.drawPngFile(SD,source,0,0,64,64,0,0,1.0f)
+       : sprite.drawPngFile(SD,source,cx,cy,64,64,0,0,scale))
+    : sprite.drawJpgFile(SD,source,cx,cy,64,64,0,0,scale);
+  if(!decoded) {
     sprite.deleteSprite();
+    Serial.printf("[ART] Decode failed: %s\n",source);
     return false;
   }
   if(!SD.exists(kCacheDir)&&!SD.mkdir(kCacheDir)) {
@@ -151,7 +230,9 @@ static inline bool write_small_cover(const char* source,const char* target,
   if(!SD.rename(tmp,target)) {SD.remove(tmp);return false;}
   return true;
 }
-static inline void prepare_album_once(const char* album) {
+// Called once on entering a directory, not when moving the cursor.
+// The hint is collected during the existing music directory enumeration.
+static inline void prepare_album_once(const char* album,const char* image_hint=nullptr) {
   if(!album||album[0]!='/')return;
   char cache[40]={};
   if(!path_for_hash(album,cache,sizeof(cache)))return;
@@ -161,24 +242,53 @@ static inline void prepare_album_once(const char* album) {
   if(found)found.close();
   if(has_cache)return;
 
-  // Fixed filenames only. No list/scan of the album's contents.
-  const char* covers[]={"cover64.png","cover_64.png","cover.png",
-                         "Cover.png","COVER.PNG"};
   char candidate[320]={};
+  // Known album-cover filenames have priority over arbitrary PNG/JPEG.
+  const char* covers[]={"cover64.png","cover_64.png","cover.png",
+      "Cover.png","COVER.PNG","folder.png","Folder.png","FOLDER.PNG",
+      "cover.jpg","Cover.jpg","COVER.JPG","folder.jpg","Folder.jpg",
+      "cover.jpeg","folder.jpeg"};
   for(const char* leaf:covers) {
-    int n=snprintf(candidate,sizeof(candidate),"%s%s%s",album,
-                    strcmp(album,"/")==0?"":"/",leaf);
-    if(n<=0||(size_t)n>=sizeof(candidate))continue;
-    if(small_opaque_png(candidate) &&
+    const int n=snprintf(candidate,sizeof(candidate),"%s%s%s",album,
+                        strcmp(album,"/")==0?"":"/",leaf);
+    if(n>0&&(size_t)n<sizeof(candidate)&&
        write_small_cover(candidate,cache,album))return;
   }
-  // The album directory itself may contain "<album name>.png".
   const char* slash=strrchr(album,'/');
   const char* name=slash?slash+1:album;
-  if(!name[0])return;
-  int n=snprintf(candidate,sizeof(candidate),"%s/%s.png",album,name);
-  if(n>0&&(size_t)n<sizeof(candidate)&&small_opaque_png(candidate))
-    write_small_cover(candidate,cache,album);
+  if(name[0]) {
+    const char* extensions[]={".png",".PNG",".jpg",".JPG",".jpeg",".JPEG"};
+    for(const char* ext:extensions) {
+      const int n=snprintf(candidate,sizeof(candidate),"%s/%s%s",album,name,ext);
+      if(n>0&&(size_t)n<sizeof(candidate)&&
+         write_small_cover(candidate,cache,album))return;
+    }
+    // A cover named after its album may be beside the folder.
+    char parent[256]={};
+    snprintf(parent,sizeof(parent),"%s",album);
+    char* pslash=strrchr(parent,'/');
+    if(pslash) {
+      if(pslash==parent)parent[1]=0;else *pslash=0;
+      for(const char* ext:extensions) {
+        const int n=snprintf(candidate,sizeof(candidate),"%s%s%s%s",
+                             parent,strcmp(parent,"/")==0?"":"/",name,ext);
+        if(n>0&&(size_t)n<sizeof(candidate)&&
+           write_small_cover(candidate,cache,album))return;
+      }
+    }
+  }
+  // Every album can use an arbitrary PNG/JPEG name. The hint comes from
+  // the existing one-pass SD enumeration; we never scan again here.
+  if(image_hint&&image_hint[0]) {
+    const char* leaf=strrchr(image_hint,'/');
+    leaf=leaf?leaf+1:image_hint;
+    if(leaf[0] && strcmp(leaf,".")!=0 && strcmp(leaf,"..")!=0) {
+      const int n=snprintf(candidate,sizeof(candidate),"%s%s%s",album,
+                          strcmp(album,"/")==0?"":"/",leaf);
+      if(n>0&&(size_t)n<sizeof(candidate))
+        write_small_cover(candidate,cache,album);
+    }
+  }
 }
 
 // Cursor movement only reads the deterministic hashed cache; preparation
