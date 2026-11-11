@@ -28,7 +28,9 @@ jobs:
           assert 'uint16_t strip[64*4]' in h
           assert 'pushImage(x,y+py,64,4,strip)' in h
           assert all(x in h for x in ('prepare_album_once(', 'small_opaque_png(', 'write_small_cover('))
-          assert 'cardputer_artwork::prepare_album_once((const char*)cdir)' in f
+          assert 'cardputer_artwork::prepare_album_once((const char*)cdir,album_image_hint)' in f
+          assert 'artwork_dimensions(' in h and 'drawJpgFile(SD,source,cx,cy,64,64,0,0,scale)' in h
+          assert 'String lower=basename?' in f and 'lower.endsWith(".jpeg")' in f
           assert 'LGFX_Sprite' in h and 'createSprite(64,64)' in h
           assert 'drawPngFile(SD,source,0,0,64,64,0,0,1.0f)' in h
           art_draw=h.split('static inline void draw(',1)[1]
