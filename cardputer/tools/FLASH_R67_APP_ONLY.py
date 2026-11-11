@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Cardputer R67 APP-ONLY flasher: inspect actual partition layout before writing.
-No erase_flash, no bootloader, no partition/NVS/storage writes or backups.
+No full-device wipe, no bootloader, no partition/NVS/storage writes or backups.
 """
 import argparse
 import hashlib
