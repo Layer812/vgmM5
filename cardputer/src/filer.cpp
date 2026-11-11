@@ -218,6 +218,8 @@ int makevgmlist(fs::FS &fs) {
   }
   //printf("ck7 %d\n", dirnum);
   memset(filelist, 0, sizeof(struct fl) * LISTMAX);
+  // One artwork hint from the existing directory enumeration (not a new scan).
+  char album_image_hint[PATHMAX]={};
   if(dirnum > 0){
     strcpy((char *)filelist[0].filename, (char *)dirs[dirnum - 1]);
     filelist[0].type = TYPE_UDIR;
@@ -253,15 +255,24 @@ int makevgmlist(fs::FS &fs) {
       }
     }
 //    printf("ck5 %d %s\n", i, filelist[i]);
+    if(!album_image_hint[0] && !file.isDirectory()) {
+      const char* basename=file.name();
+      const char* slash=basename?strrchr(basename,'/'):nullptr;
+      if(slash)basename=slash+1;
+      String lower=basename?String(basename):String("");
+      lower.toLowerCase();
+      if(lower.endsWith(".png") || lower.endsWith(".jpg") ||
+         lower.endsWith(".jpeg"))
+        snprintf(album_image_hint,sizeof(album_image_hint),"%s",basename);
+    }
     file = root.openNextFile();
 //    printf("ck6\n");
   }
   if(file)file.close();
   root.close();
-  // Before the first cursor draw, generate a tiny hashed cache only if
-  // this album contains a known 64x64 opaque PNG filename. This happens
-  // at FOLDER ENTRY, not per cursor, and never decodes large album PNGs.
-  cardputer_artwork::prepare_album_once((const char*)cdir);
+  // Ordinary PNG/JPEG artwork is resized only when entering this folder.
+  // The existing single SD listing supplies a fallback image filename.
+  cardputer_artwork::prepare_album_once((const char*)cdir,album_image_hint);
   filenum=i;
   snprintf(indexed_directory,sizeof(indexed_directory),"%s",(const char*)cdir);
   file_index_valid=true;
