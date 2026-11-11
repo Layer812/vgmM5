@@ -34,25 +34,21 @@
 
 microSDのルートにVGM/VGZ・MDXファイルを直接置いて使えます。フォルダに分類しても利用できます。MDXに対応するPDXは、従来のMDX読み込み仕様に合わせて配置してください。
 
-### サムネイル — カーソル移動中の画像・フォルダ検索なし
+### サムネイル — microSDのPNG/JPEGから自動生成
 
-microSDの各アルバムフォルダにある大きな `フォルダ名.png`／`cover.png`／JPEGは、**Cardputerでは直接開きません**。画像を探すためにフォルダを一覧取得する処理もありません。
+アルバムフォルダに通常のPNG/JPEG画像を入れておけば、**最初にそのフォルダへ入った時だけ**Cardputerが自動的に64×64へ縮小し、microSDの `/VGMM5/XXXXXXXX.RGB` に保存します。**事前にWindowsで画像を変換する必要はありません。**
 
-**元のPNGが大きい場合**はWindowsでmicroSDを挿入し、一度だけ次のコマンドを実行します（`E:` は実際のドライブに変更）。**SDドライブ直下**を指定してください。`E:\MUSIC` などのサブフォルダを指定するとハッシュが一致しなくなるため、ツールはエラーにします。
+- 対応する名前：`cover.png`、`cover.jpg`、`folder.png`、`フォルダ名.png` など。アルバムフォルダ内で別の名前が付いたPNG/JPGも、ファイル一覧を読み込む際に見つかった最初の画像を使用します。親フォルダの `フォルダ名.png` も候補になります。
+- 縮小時には画像の縦横比を維持します。PNG/JPEGは最大4MiB、縦横各4096pxまでを対象とします。読み取りに失敗した画像は代替グラフィックを表示します。
+- **カーソル移動・再生中にPNG/JPEGを展開しません。** 最初に生成した8,192バイトのRGB565画像を4行（512バイト）単位で読み出します。曲や元画像は変更しません。
+- キャッシュはアルバムフォルダ単位です。フォルダ内で曲を切り替えても同じジャケットを使用します。ファイル名・容量の表示と`M:HELP`は従来どおりです。
+- 特に大きい画像を一括変換したい場合は、補助のWindowsツールも利用できます（`E:`はmicroSDのドライブ名に変更）。
 
 ```bat
 MAKE_CARDPUTER_THUMBS.cmd E:\
 ```
 
-画像を64×64のRGB565（各8,192バイト）に変換し、フォルダの**フルパスのFNV-1aハッシュ8桁**を使って `/VGMM5/XXXXXXXX.RGB` に保存します。元画像・音楽ファイルは変更しません。ハッシュ済みの画像は再利用します。 **旧版の `/.VGMM5` にあるキャッシュも、変換ツールで新しい `/VGMM5` に引き継ぎます。**
-
-- **カーソル移動時**：ハッシュ名でキャッシュを直接読むだけ。JPEG/PNGの探索・デコード、選択ファイルの再オープン、フォルダの再一覧取得を行いません。
-- **同じフォルダの別の曲**：右側の画像を再描画せず、形式・ファイル容量だけ更新します。
-- **再生画面**：ハッシュ画像を4行（512バイト）ずつ読み出し。画像用のスプライト・常駐ビットマップは不要です。
-- **キャッシュがないとき**：フォルダに入ったときの1回だけ、`cover64.png` または `フォルダ名.png` などの**64×64・透過なし・小さなPNG**を決め打ちの名前で探してキャッシュを作ります。大きなPNGは端末では変換せず、Windowsツールで事前に変換してください。どちらもなければすぐ内蔵サムネイルになります。
-- **曲の一覧取得**：フォルダへ入ったときに一度だけ行います（ファイル名の表示には必要です）。その際に容量も記録し、カーソル移動では再取得しません。Bキーで明示的に再読み込みできます。
-
-フォルダのサムネイルは、ファイル一覧と再生画面で共通です。ファイルごとのジャケット検索は行わず、アルバム単位で高速表示します。
+画像表示は実機検証中です。既存のR67正式版にはまだ統合していません。
 
 ### Windowsでビルド（書き込みなし）
 
@@ -121,23 +117,21 @@ pio run -d cardputer -e m5stack-cardputer-classic
 | Stop and return to file browser | **`BS` (Backspace)** |
 | Pause/resume VGM | `P` (shows `PAUSED` below cover) |
 
-### Album thumbnails without directory scans on cursor movement
+### Album artwork — automatic PNG/JPEG thumbnail preparation
 
-Large `foldername.png`, `cover.png` or JPEG album images are **not opened or enumerated on the Cardputer**. Run the included Windows helper once with the microSD in your PC (replace `E:` with your drive). Specify the **SD drive root**, never `E:\MUSIC` or another subfolder, because the hashed filenames would not match:
+Put an ordinary PNG or JPEG in an album folder on the microSD card. **When entering the folder for the first time**, Cardputer scales it to 64×64, preserves its aspect ratio and saves an 8,192-byte RGB565 thumbnail under `/VGMM5/XXXXXXXX.RGB`. **You do not need a PC conversion step.**
+
+- Typical names: `cover.png`, `cover.jpg`, `folder.png`, `albumname.png`, plus the first other PNG/JPEG found while enumerating the directory once. `albumname.png` next to its folder is supported.
+- Source images up to 4 MiB and 4096×4096 are eligible. Unsupported or undecodable files use the built-in fallback tile.
+- **No image decompression, album enumeration or artwork sprite allocation on cursor movement or during playback.** The cached RGB565 thumbnail is streamed using a four-row (512-byte) buffer; original files remain unchanged.
+- Album artwork is shared between tracks in one folder. This is intentionally an album-level cover, not per-track artwork.
+- Optional Windows batch preconversion is still available for bulk processing; replace `E:` with your SD drive letter.
 
 ```bat
 MAKE_CARDPUTER_THUMBS.cmd E:\
 ```
 
-This converts existing folder artwork to **64×64 RGB565, exactly 8,192 bytes**, stored at `/VGMM5/XXXXXXXX.RGB` using an **eight-digit FNV-1a hash of the normalized full album folder path**. Originals and music are unchanged; pre-existing caches are reused. Older `/.VGMM5` cached RGB files are migrated to the FAT 8.3-friendly `/VGMM5` folder.
-
-- Cursor movement opens only the deterministic hashed thumbnail path, without listing artwork folders, decoding PNG/JPEG or opening a selected music file to read its size.
-- Moving between tracks in the same folder keeps the existing cover on screen and changes only the file type/size text.
-- Playback streams the RGB565 cover in four-row (512-byte) chunks without an extra image sprite or retained bitmap.
-- Missing cache: **only once on entering an album folder**, Cardputer can create the cache automatically from a **small 64×64 opaque RGB PNG** such as `cover64.png` or `foldername.png`. This does not run on cursor movement. Larger existing PNG/JPEG files still require the Windows tool; otherwise the built-in graphic appears immediately.
-- The actual music-file listing is performed **once when entering a directory** (necessary to display filenames); file sizes are indexed then. B explicitly forces a rescan.
-
-The same *album* image is used in the file browser and now-playing view; per-track art is not searched at runtime.
+Native builds have CI coverage; on-device artwork rendering remains to be confirmed before merging into R67 production.
 
 ### Build on Windows (no flash)
 
