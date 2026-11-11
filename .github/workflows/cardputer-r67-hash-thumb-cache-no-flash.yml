@@ -29,6 +29,10 @@ jobs:
           assert 'pushImage(x,y+py,64,4,strip)' in h
           assert all(x in h for x in ('prepare_album_once(', 'small_opaque_png(', 'write_small_cover('))
           assert 'cardputer_artwork::prepare_album_once((const char*)cdir,album_image_hint)' in f
+          assert 'cardputer_artwork::prepare_album_once(selected_folder);' in f
+          assert 'cover_prepared_selection!=sel' in f
+          assert 'cover_idle_since=millis();' in f
+          assert 'browser_preview_valid=false;' in f
           assert 'artwork_dimensions(' in h and 'drawJpgFile(SD,source,cx,cy,64,64,0,0,scale)' in h
           assert 'String lower=basename?' in f and 'lower.endsWith(".jpeg")' in f
           assert 'LGFX_Sprite' in h and 'createSprite(64,64)' in h
