@@ -25,6 +25,7 @@
 struct fl{
   uint8_t filename[PATHMAX];
   uint8_t type;
+  uint32_t size_bytes; // Captured during the single folder listing, not on cursor movement.
 };
 
 void disptitle(int stat, char *title);
@@ -38,5 +39,6 @@ bool cnvfile(fs::FS &fs, struct fl *srct, uint8_t *dst);
 void filerinit();
 extern struct fl *filelist;
 extern int filenum;
+extern bool playall; // Shared Cardputer folder auto-play state.
 
 #endif // IS_CARDPUTER

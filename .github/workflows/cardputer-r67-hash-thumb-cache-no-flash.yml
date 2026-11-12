@@ -1,0 +1,189 @@
+name: Cardputer R67 hashed SD thumbnail cache native (NO FLASH)
+on:
+  push:
+    branches: [dev/cardputer-r67-hash-thumb-cache-20261110]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  standard-classic:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Source contract - eight-hex hashes and minimal playback RAM
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          h=Path('cardputer/src/cardputer_artwork.hpp').read_text()
+          f=Path('cardputer/src/filer.cpp').read_text()
+          v=Path('cardputer/src/voice.cpp').read_text()
+          ps=Path('cardputer/tools/MAKE_CARDPUTER_THUMBS.ps1').read_text()
+          cfg=Path('cardputer/platformio.ini').read_text()
+          assert 'kCacheBytes=64u*64u*2u' in h
+          assert '"/VGMM5/%08lX.%s"' in h
+          assert 'hash=(hash^c)*16777619u' in h
+          assert 'uint16_t strip[64*4]' in h
+          assert 'pushImage(x,y+py,64,4,strip)' in h
+          assert all(x in h for x in ('prepare_album_once(', 'small_opaque_png(', 'write_small_cover('))
+          assert 'cardputer_artwork::prepare_album_once((const char*)cdir,album_image_hint)' in f
+          assert 'cardputer_artwork::prepare_album_once(selected_folder);' in f
+          assert 'cover_prepared_selection!=sel' in f
+          assert 'cover_idle_since=millis();' in f
+          assert 'browser_preview_valid=false;' in f
+          assert 'artwork_dimensions(' in h and 'drawJpgFile(SD,source,cx,cy,64,64,0,0,scale)' in h
+          assert 'String lower=basename?' in f and 'lower.endsWith(".jpeg")' in f
+          assert 'LGFX_Sprite' in h and 'createSprite(64,64)' in h
+          assert 'drawPngFile(SD,source,0,0,64,64,0,0,1.0f)' in h
+          art_draw=h.split('static inline void draw(',1)[1]
+          assert 'drawPngFile(' not in art_draw and 'drawJpgFile(' not in art_draw
+          assert 'small_opaque_png(' not in art_draw and 'SD.exists(' not in art_draw
+          assert 'openNextFile(' not in art_draw and 'createSprite(' not in art_draw
+          assert 'cardputer_artwork::draw(path,kind,160,31,64)' in f
+          assert 'cardputer_artwork::draw(cardputer_playing_path,kind,160,32,64)' in v
+          info=f.split('static void browser_draw_info(',1)[1].split('void dispfiles(',1)[0]
+          source='\n'.join(line.split('//',1)[0] for line in info.splitlines())
+          assert 'SD.open(' not in source and 'openNextFile(' not in source
+          assert 'file.read(' not in source and 'file.size(' not in source
+          assert 'uint32_t length=entry.size_bytes' in info
+          assert 'if(new_album)' in info and 'browser_preview_valid=true' in info
+          assert 'file_index_valid' in f and 'indexed_directory' in f
+          assert 'filelist[i].size_bytes = (uint32_t)file.size()' in f
+          assert 'invalidate_file_index();' in f
+          assert 'strcmp(fname, ".VGMM5") != 0' in f
+          assert 'strcmp(fname, "VGMM5") != 0' in f
+          assert 'BinaryWriter' in ps and "Get-AlbumHash" in ps
+          player=v.split('static void cardputer_draw_playback_view()',1)[1].split('#endif // IS_CARDPUTER',1)[0]
+          assert 'LGFX_Sprite' not in player
+          assert 'board_build.embed_txtfiles' not in cfg
+          assert 'cloud_db_' not in v and 'wifi_manager_' not in v
+          # Folder auto-play: A toggles while playing, stop/BS cancel mode.
+          hpp=Path('cardputer/src/filer.hpp').read_text()
+          assert 'extern bool playall;' in hpp
+          player=v.split('void phase_playback() {',1)[1].split('#elif defined(IS_ATOMS3)',1)[0]
+          assert "isKeyPressed('a')" in player and 'playall=!playall;' in player
+          assert player.count('playall=false;') >= 2
+          assert '"A:AUTO ON"' in v and '"A:AUTO OFF"' in v
+          assert '"A     AUTO ON/OFF"' in v
+
+          # Cross-platform specification: FNV-1a of UTF8 album path, ASCII lower-case.
+          def h32(path):
+              h=2166136261
+              for b in path.encode('utf-8'):
+                  if 65<=b<=90:b+=32
+                  h=((h^b)*16777619)&0xffffffff
+              return '%08X'%h
+          assert h32('/')=='2A0C975E'
+          assert h32('/MUSIC/ALBUM')=='064B157D'
+          print('PASS hash-only cursor path: no SD listing/decode/music open, one initial index, 512B image streaming')
+          PY
+      - name: Validate APP-only flasher syntax (never flash in CI)
+        run: |
+          python3 -m py_compile cardputer/tools/FLASH_R67_APP_ONLY.py
+          python3 - <<'PY'
+          from pathlib import Path
+          safe=Path('cardputer/tools/FLASH_R67_APP_ONLY.py').read_text()
+          assert 'read_flash' in safe and '"write_flash"' in safe
+          assert 'erase_flash' not in safe and 'erase_region' not in safe
+          assert 'table != EXPECTED' in safe and 'check_otadata' in safe
+          assert '"sha256"' in safe and 'single-OTA layout' in safe
+          assert '0x10000' in safe and '0x5F0000' in safe
+          print('PASS APP-only flasher source and Python syntax')
+          PY
+      - name: Install pinned PlatformIO and Cardputer libraries
+        run: |
+          python3 -m pip install --disable-pip-version-check platformio 'click==8.1.8'
+          pio pkg install -d cardputer -e m5stack-cardputer
+      - name: Build native ESP32-S3 Standard (NO FLASH)
+        run: pio run -d cardputer -e m5stack-cardputer
+      - name: Build native ESP32-S3 Classic (NO FLASH)
+        run: pio run -d cardputer -e m5stack-cardputer-classic
+      - name: Verified binary artifacts
+        run: |
+          python3 - <<'PY'
+          import json,hashlib
+          from pathlib import Path
+          dst=Path('cardputer/r67_hashed_thumbnails')
+          dst.mkdir(exist_ok=True)
+          report={'edition':'Cardputer R67 hashed album cache',
+                  'cache':'/VGMM5/XXXXXXXX.RGB / 8192 bytes',
+                  'playback_image_buffer_bytes':512,
+                  'flash':'NOT PERFORMED','app_offset':'0x10000',
+                  'variants':{}}
+          for env,label in [('m5stack-cardputer','standard'),
+                            ('m5stack-cardputer-classic','classic')]:
+              data=(Path('cardputer/.pio/build')/env/'firmware.bin').read_bytes()
+              assert len(data)>100000 and data[:1]==b'\xe9'
+              name='Cardputer_R67_HashedArt_'+label+'.bin'
+              (dst/name).write_bytes(data)
+              report['variants'][label]={'name':name,'bytes':len(data),
+                  'sha256':hashlib.sha256(data).hexdigest()}
+          assert report['variants']['standard']['sha256']!=report['variants']['classic']['sha256']
+          (dst/'RESULT.json').write_text(json.dumps(report,indent=2)+'\n')
+          (dst/'HOW_TO_TEST.txt').write_text(
+              '1. On Windows, with microSD inserted, run MAKE_CARDPUTER_THUMBS.cmd E:\\\\ (replace E:).\n'
+              '2. All album caches are stored in /VGMM5/XXXXXXXX.RGB, 8192 bytes each.\n'
+              '3. Flash only the verified Cardputer app for the current device partition layout.\n'
+              '4. Confirm folder cursor moves rapidly and artwork matches in browser and player.\n'
+              '5. No music or original PNG files are modified.\n',
+              encoding='utf-8')
+          print('PASS native standard+Classic no-flash firmware SHA256')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CARDPUTER-R67-8HEX-SD-THUMBNAIL-CACHE-NOFLASH
+          path: |
+            cardputer/r67_hashed_thumbnails/
+            cardputer/MAKE_CARDPUTER_THUMBS.cmd
+            cardputer/tools/MAKE_CARDPUTER_THUMBS.ps1
+            cardputer/FLASH_THIS_CARDPUTER_R67_STANDARD_APP_ONLY.cmd
+            cardputer/FLASH_THIS_CARDPUTER_R67_CLASSIC_APP_ONLY.cmd
+            cardputer/tools/FLASH_R67_APP_ONLY.py
+          retention-days: 14
+
+  windows-sd-cache:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate sample SD album PNG and real 8-hex RGB565 cache on Windows
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $root=Join-Path $env:RUNNER_TEMP 'CardputerSD'
+          $album=Join-Path $root 'MUSIC\ALBUM'
+          [void][System.IO.Directory]::CreateDirectory($album)
+          $img=[System.Drawing.Bitmap]::new(256,256)
+          try {
+            $g=[System.Drawing.Graphics]::FromImage($img)
+            try {
+              $g.Clear([System.Drawing.Color]::FromArgb(25,100,200))
+              $g.DrawEllipse([System.Drawing.Pens]::White,20,20,190,190)
+            } finally { $g.Dispose() }
+            $img.Save((Join-Path $album 'ALBUM.png'),[System.Drawing.Imaging.ImageFormat]::Png)
+          } finally { $img.Dispose() }
+          # Japanese folder names must hash to the same UTF-8 bytes on ESP32.
+          $japanese=Join-Path $root '音楽\カセット'
+          [void][System.IO.Directory]::CreateDirectory($japanese)
+          $jpimg=[System.Drawing.Bitmap]::new(64,64)
+          try {
+            $jpimg.SetPixel(0,0,[System.Drawing.Color]::Red)
+            $jpimg.Save((Join-Path $japanese 'カセット.png'),[System.Drawing.Imaging.ImageFormat]::Png)
+          } finally {$jpimg.Dispose()}
+          $global:LASTEXITCODE=0
+          & ./cardputer/tools/MAKE_CARDPUTER_THUMBS.ps1 $root -AllowFolderRoot
+          if($LASTEXITCODE -ne 0) {throw 'PowerShell converter failed'}
+          $hashFile=Join-Path $root 'VGMM5\064B157D.RGB'
+          if(-not (Test-Path -LiteralPath $hashFile)) {throw "FNV-1a /MUSIC/ALBUM cache not created: $hashFile"}
+          if((Get-Item -LiteralPath $hashFile).Length -ne 8192) {throw 'RGB565 byte length wrong'}
+          $jpHash=Join-Path $root 'VGMM5\037C0295.RGB'
+          if(-not (Test-Path -LiteralPath $jpHash)) {throw 'Japanese album path hash mismatch'}
+          if((Get-Item -LiteralPath $jpHash).Length -ne 8192) {throw 'Japanese RGB565 byte length wrong'}
+          $original=[System.IO.File]::ReadAllBytes((Join-Path $album 'ALBUM.png'))
+          if($original.Length -lt 100){throw 'Source image missing'}
+          $global:LASTEXITCODE=0
+          & ./cardputer/tools/MAKE_CARDPUTER_THUMBS.ps1 $root -AllowFolderRoot
+          if($LASTEXITCODE -ne 0) {throw 'Reuse existing cache failed'}
+          Write-Host 'PASS real Windows System.Drawing preprocessing; 064B157D.RGB is 8192 bytes; source retained'

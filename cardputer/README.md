@@ -24,29 +24,32 @@
 | ページ移動 | `,` ／ `/` |
 | ファイル・フォルダを選択 | `Space` |
 | フォルダを戻る | `..` を選択 |
-| 全曲連続再生 | `A` |
+| 全曲連続再生を開始 | `A`（ファイラ） |
 | 操作ヘルプ | `M` |
 | ルートで再読み込み | `B`／Backspace |
 | 音量 | `+`／`-` |
-| 再生中の停止 | `Space` |
-| 再生を停止して一覧へ戻る | **`BS`（Backspace）** |
+| 再生中の連続再生ON/OFF | **`A`**（曲は止めず、次曲への自動移行だけ切替） |
+| 再生中の停止／連続再生解除 | `Space` |
+| 再生を停止・連続再生解除して一覧へ戻る | **`BS`（Backspace）** |
 | VGMの一時停止・再開 | `P`（画像の下に `PAUSED` 表示） |
 
 microSDのルートにVGM/VGZ・MDXファイルを直接置いて使えます。フォルダに分類しても利用できます。MDXに対応するPDXは、従来のMDX読み込み仕様に合わせて配置してください。
 
-### サムネイル（省略可能）
+### サムネイル — microSDのPNG/JPEGから自動生成
 
-microSDに以下のJPEG／PNG画像を置くと、選択画面と再生画面のサムネイルに表示します。
+アルバムフォルダに通常のPNG/JPEG画像を入れておけば、**最初にそのフォルダへ入った時だけ**Cardputerが自動的に64×64へ縮小し、microSDの `/VGMM5/XXXXXXXX.RGB` に保存します。**事前にWindowsで画像を変換する必要はありません。**
 
-- 曲と同じ名前の画像：`DRAGON_SABER.vgm` に対して `DRAGON_SABER.png` または `DRAGON_SABER.jpg`（曲ごとの絵）
-- フォルダ全体の画像：同じフォルダに `cover.png` または `cover.jpg`（アルバム共通）
-- フォルダの画像：フォルダ内に `cover.png` または `cover.jpg`
+- 対応する名前：`cover.png`、`cover.jpg`、`folder.png`、`フォルダ名.png` など。アルバムフォルダ内で別の名前が付いたPNG/JPGも、ファイル一覧を読み込む際に見つかった最初の画像を使用します。親フォルダの `フォルダ名.png` も候補になります。
+- 縮小時には画像の縦横比を維持します。PNG/JPEGは最大4MiB、縦横各4096pxまでを対象とします。読み取りに失敗した画像は代替グラフィックを表示します。
+- **カーソル移動・再生中にPNG/JPEGを展開しません。** 最初に生成した8,192バイトのRGB565画像を4行（512バイト）単位で読み出します。曲や元画像は変更しません。
+- キャッシュはアルバムフォルダ単位です。フォルダ内で曲を切り替えても同じジャケットを使用します。ファイル名・容量の表示と`M:HELP`は従来どおりです。
+- 特に大きい画像を一括変換したい場合は、補助のWindowsツールも利用できます（`E:`はmicroSDのドライブ名に変更）。
 
-画像は **JPEG／PNG** に対応します（PNG最大8MiB、JPEG最大4MiB）。64×64より大きなPNG／JPEGは、縦横比を保ってサムネイル枠へ縮小します。画像がない場合や読み込みに失敗した場合には、曲ごとに色と波形の異なるサムネイルを自動描画するため、画像ファイルを用意する必要はありません。**選択画面と再生画面は同じ画像**を表示します。
+```bat
+MAKE_CARDPUTER_THUMBS.cmd E:\
+```
 
-情報欄には形式・ファイルサイズを表示します。非圧縮VGMにYM2151/C140のヘッダ情報がある場合には音源名も表示します。VGZの内部音源名は選択時には展開しません（`COMPRESSED` と表示）。
-
-**再生画面**は曲名・音源とサムネイルのみのシンプルな表示です。サムネイルの下に `NOW PLAYING`、`P` で一時停止中は `PAUSED` と表示します。`MICRO SD`、`SPACE STOP`、`VOL`、下部進行バーは表示しません。`BS` を押せば再生を止めて同じフォルダのファイル一覧へ戻ります。
+画像表示は実機検証中です。既存のR67正式版にはまだ統合していません。
 
 ### Windowsでビルド（書き込みなし）
 
@@ -107,21 +110,30 @@ pio run -d cardputer -e m5stack-cardputer-classic
 | Page up/down | `,` / `/` |
 | Select/play | `Space` |
 | Go to parent directory | Select `..` |
-| Play all | `A` |
+| Start play all | `A` in file browser |
 | Help | `M` |
 | Rescan from root | `B` / Backspace |
 | Volume | `+` / `-` |
-| Stop playback | `Space` |
-| Stop and return to file browser | **`BS` (Backspace)** |
+| Toggle auto-play while playing | **`A`**, keeps current song playing |
+| Stop and cancel auto-play | `Space` |
+| Stop, cancel auto-play, return to file browser | **`BS` (Backspace)** |
 | Pause/resume VGM | `P` (shows `PAUSED` below cover) |
 
-### Optional microSD thumbnails
+### Album artwork — automatic PNG/JPEG thumbnail preparation
 
-Put `song.jpg` or `song.png` next to `song.vgm`, or a shared `cover.jpg` / `cover.png` in the same folder (also supports subfolder artwork). PNG up to 8 MiB and JPEG up to 4 MiB are supported. Both formats are scaled to fit the thumbnail while preserving aspect ratio. If a candidate fails to decode, the next matching artwork file is tried. If no image exists or decoding fails, each track receives its own colorful waveform cover. **The browser and now-playing view use the same image.** No external DB or internet connection is required.
+Put an ordinary PNG or JPEG in an album folder on the microSD card. **When entering the folder for the first time**, Cardputer scales it to 64×64, preserves its aspect ratio and saves an 8,192-byte RGB565 thumbnail under `/VGMM5/XXXXXXXX.RGB`. **You do not need a PC conversion step.**
 
-The right pane shows file type and size. For uncompressed VGM it also detects YM2151/C140 header clocks when present. VGZ is marked compressed without decompression during browsing.
+- Typical names: `cover.png`, `cover.jpg`, `folder.png`, `albumname.png`, plus the first other PNG/JPEG found while enumerating the directory once. `albumname.png` next to its folder is supported.
+- Source images up to 4 MiB and 4096×4096 are eligible. Unsupported or undecodable files use the built-in fallback tile.
+- **No image decompression, album enumeration or artwork sprite allocation on cursor movement or during playback.** The cached RGB565 thumbnail is streamed using a four-row (512-byte) buffer; original files remain unchanged.
+- Album artwork is shared between tracks in one folder. This is intentionally an album-level cover, not per-track artwork.
+- Optional Windows batch preconversion is still available for bulk processing; replace `E:` with your SD drive letter.
 
-The now-playing screen has only the track title, chip and artwork with `NOW PLAYING` / `PAUSED` below it. The old SD, stop/volume footer and activity bar are gone. `BS` immediately stops playback and returns to the same directory.
+```bat
+MAKE_CARDPUTER_THUMBS.cmd E:\
+```
+
+Native builds have CI coverage; on-device artwork rendering remains to be confirmed before merging into R67 production.
 
 ### Build on Windows (no flash)
 

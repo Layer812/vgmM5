@@ -27,6 +27,18 @@ uint8_t cdir[PATHMAX] = "/";
 uint8_t dirs[DIRMAX][PATHMAX] = {"/"};
 int dirnum = 0;
 
+// Directory entries and file sizes are enumerated only when the folder changes
+// or the user explicitly requests B/rescan. Moving the cursor NEVER relists SD.
+static bool file_index_valid=false;
+static char indexed_directory[PATHMAX]={};
+static void invalidate_file_index(){file_index_valid=false;}
+
+// Reuse a displayed album cover across adjacent files in the same folder.
+// A path hash + kind is enough: no persistent 64x64 bitmap in RAM.
+static bool browser_preview_valid=false;
+static uint32_t browser_preview_hash=0;
+static uint8_t browser_preview_kind=0;
+
 const char statstr[STATNUM][STATMAX] = {"         ", "loading ", "playing  ", "play all "}; 
 // ビットパターン表示
 // d: 8ビットパターンデータ
@@ -188,6 +200,9 @@ bool ismdxfile(const char *fileName) {
 }
 
 int makevgmlist(fs::FS &fs) {
+  if(file_index_valid && filelist &&
+     strcmp(indexed_directory,(const char*)cdir)==0) return filenum;
+  file_index_valid=false;
   int i = 0;
   if (filelist == nullptr) {
       filelist = (struct fl *)malloc(sizeof(struct fl) * LISTMAX);
@@ -196,11 +211,15 @@ int makevgmlist(fs::FS &fs) {
  // printf("ck1\n");
    //printf("ck6 %s\n", cdir);
   File root = fs.open((const char *)cdir);
-  if (!root.isDirectory()) {
+  if (!root || !root.isDirectory()) {
+    if(root) root.close();
+    filenum=0;
     return 0;
   }
   //printf("ck7 %d\n", dirnum);
   memset(filelist, 0, sizeof(struct fl) * LISTMAX);
+  // One artwork hint from the existing directory enumeration (not a new scan).
+  char album_image_hint[PATHMAX]={};
   if(dirnum > 0){
     strcpy((char *)filelist[0].filename, (char *)dirs[dirnum - 1]);
     filelist[0].type = TYPE_UDIR;
@@ -215,24 +234,48 @@ int makevgmlist(fs::FS &fs) {
 //    printf("ck4 %d %s\n", i, filelist[i]);
     if (isvgmfile((const char *)file.name())){
       snprintf((char*)filelist[i].filename, PATHMAX, "%s", file.name());
+      filelist[i].size_bytes = (uint32_t)file.size();
       filelist[i].type = TYPE_VGM;
       i++;
     } else if (ismdxfile((const char *)file.name())){
       snprintf((char*)filelist[i].filename, PATHMAX, "%s", file.name());
+      filelist[i].size_bytes = (uint32_t)file.size();
       filelist[i].type = TYPE_MDX;
       i++;
     } else if(file.isDirectory()){
       const char* fname = file.name();
-      if (strcmp(fname, "System Volume Information") != 0 && strcmp(fname, "/System Volume Information") != 0) {
+      if (strcmp(fname, "System Volume Information") != 0 && strcmp(fname, "/System Volume Information") != 0 &&
+          strcmp(fname, ".VGMM5") != 0 && strcmp(fname, "/.VGMM5") != 0 &&
+          strcmp(fname, ".vgmm5") != 0 && strcmp(fname, "/.vgmm5") != 0 &&
+          strcmp(fname, "VGMM5") != 0 && strcmp(fname, "/VGMM5") != 0 &&
+          strcmp(fname, "vgmm5") != 0 && strcmp(fname, "/vgmm5") != 0) {
         snprintf((char*)filelist[i].filename, PATHMAX, "%s", fname);
         filelist[i].type = TYPE_SDIR;
         i++;
       }
     }
 //    printf("ck5 %d %s\n", i, filelist[i]);
+    if(!album_image_hint[0] && !file.isDirectory()) {
+      const char* basename=file.name();
+      const char* slash=basename?strrchr(basename,'/'):nullptr;
+      if(slash)basename=slash+1;
+      String lower=basename?String(basename):String("");
+      lower.toLowerCase();
+      if(lower.endsWith(".png") || lower.endsWith(".jpg") ||
+         lower.endsWith(".jpeg"))
+        snprintf(album_image_hint,sizeof(album_image_hint),"%s",basename);
+    }
     file = root.openNextFile();
 //    printf("ck6\n");
   }
+  if(file)file.close();
+  root.close();
+  // Ordinary PNG/JPEG artwork is resized only when entering this folder.
+  // The existing single SD listing supplies a fallback image filename.
+  cardputer_artwork::prepare_album_once((const char*)cdir,album_image_hint);
+  filenum=i;
+  snprintf(indexed_directory,sizeof(indexed_directory),"%s",(const char*)cdir);
+  file_index_valid=true;
   return i;
 }
 
@@ -250,65 +293,64 @@ static bool browser_make_path(char* out, size_t cap, const char* item) {
 
 static void browser_draw_info(int selection) {
   auto& lcd=M5Cardputer.Display;
-  lcd.fillRect(144,27,96,108,BLACK);
-  lcd.drawFastVLine(143,27,108,0x2C68);
   if(selection<0||selection>=filenum||!filelist)return;
   const struct fl& entry=filelist[selection];
-  const bool dir=entry.type==TYPE_SDIR||entry.type==TYPE_UDIR;
+  const bool directory=entry.type==TYPE_SDIR||entry.type==TYPE_UDIR;
   const char* stored=(const char*)entry.filename;
   const char* slash=strrchr(stored,'/');
   const char* name=slash&&slash[1]?slash+1:stored;
   char path[PATHMAX+16]={};
   if(!browser_make_path(path,sizeof(path),stored))return;
   const cardputer_artwork::Kind kind =
-      entry.type==TYPE_UDIR ? cardputer_artwork::PARENT :
-      entry.type==TYPE_SDIR ? cardputer_artwork::FOLDER :
-      entry.type==TYPE_MDX ? cardputer_artwork::MDX : cardputer_artwork::VGM;
-  // The *same* art resolver draws the browser and now-playing views.
-  cardputer_artwork::draw(path,kind,161,31,62);
+      entry.type==TYPE_UDIR?cardputer_artwork::PARENT:
+      entry.type==TYPE_SDIR?cardputer_artwork::FOLDER:
+      entry.type==TYPE_MDX?cardputer_artwork::MDX:cardputer_artwork::VGM;
 
-  const char* format=dir?"DIR":entry.type==TYPE_MDX?"MDX":"VGM";
-  String ext=String(strrchr(name,'.')?strrchr(name,'.'):"");
-  ext.toLowerCase();
-  if(!dir&&ext==".vgz")format="VGZ";
-  String sizeinfo="";
-  String chips=dir?(entry.type==TYPE_UDIR?"PARENT /":"OPEN /"):"AUDIO FILE";
-
-  if(!dir) {
-    File file=SD.open(path, FILE_READ);
-    if(file&&!file.isDirectory()) {
-      const uint32_t length=(uint32_t)file.size();
-      char human[16];
-      if(length>=1048576u)snprintf(human,sizeof(human),"%lu.%luM",
-        (unsigned long)(length/1048576u),
-        (unsigned long)((length%1048576u)*10u/1048576u));
-      else snprintf(human,sizeof(human),"%luK",(unsigned long)((length+1023u)/1024u));
-      sizeinfo=human;
-      if(ext==".vgm"&&length>=0xb0u) {
-        uint8_t header[0xb0]={};
-        if(file.read(header,sizeof(header))==(int)sizeof(header)&&
-           memcmp(header,"Vgm ",4)==0) {
-          const bool ym2151=header[0x30]||header[0x31]||header[0x32]||header[0x33];
-          const bool c140=header[0xa8]||header[0xa9]||header[0xaa]||header[0xab];
-          if(ym2151&&c140)chips="OPM+C140";
-          else if(ym2151)chips="YM2151";
-          else if(c140)chips="C140";
-          else chips="VGM AUDIO";
-        }
-      } else if(ext==".vgz")chips="COMPRESSED";
-      else if(entry.type==TYPE_MDX)chips="X68000 MDX";
-    }
-    if(file)file.close();
+  const uint32_t album_key=cardputer_artwork::album_key(path,kind);
+  // Never clear/reopen/re-read the same album image while moving between
+  // tracks in that folder. Only redraw the two metadata lines (38px).
+  const bool new_album=!browser_preview_valid ||
+                       browser_preview_hash!=album_key ||
+                       browser_preview_kind!=(uint8_t)kind;
+  if(new_album) {
+    lcd.fillRect(144,27,96,108,BLACK);
+    lcd.drawFastVLine(143,27,108,0x2C68);
+    // Exactly one deterministic /.VGMM5/XXXXXXXX.RGB open; no PNG lookup.
+    cardputer_artwork::draw(path,kind,160,31,64);
+    browser_preview_hash=album_key;
+    browser_preview_kind=(uint8_t)kind;
+    browser_preview_valid=true;
   }
+  lcd.fillRect(145,97,95,38,BLACK);
+  const char* format=directory?"DIR":entry.type==TYPE_MDX?"MDX":"VGM";
+  const char* extension=strrchr(name,'.');
+  if(!directory && extension &&
+     (strcmp(extension,".vgz")==0||strcmp(extension,".VGZ")==0))format="VGZ";
 
+  // Size comes from the single makevgmlist() enumeration when we entered
+  // this folder. No SD.open(file), file header read or folder scan on
+  // up/down cursor events, even with hundreds of tracks.
+  char sizeinfo[16]={};
+  if(!directory) {
+    const uint32_t length=entry.size_bytes;
+    if(length>=1048576u)snprintf(sizeinfo,sizeof(sizeinfo),"%lu.%luM",
+      (unsigned long)(length/1048576u),
+      (unsigned long)((length%1048576u)*10u/1048576u));
+    else snprintf(sizeinfo,sizeof(sizeinfo),"%luK",
+                  (unsigned long)((length+1023u)/1024u));
+  }
   lcd.setTextSize(1.5f);
-  lcd.setTextColor(dir?CYAN:0x9FE7);
-  String line=String(format)+(sizeinfo.length()?" "+sizeinfo:"");
-  while(line.length()>0&&lcd.textWidth(line)>87)line.remove(line.length()-1);
+  lcd.setTextColor(directory?CYAN:0x9FE7);
+  String line=String(format)+(sizeinfo[0]?String(" ")+sizeinfo:"");
+  while(line.length()&&lcd.textWidth(line)>87)line.remove(line.length()-1);
   lcd.drawString(line,148,99);
+
+  String label=directory?(entry.type==TYPE_UDIR?"PARENT /":"OPEN /"):
+               entry.type==TYPE_MDX?"X68000 MDX":
+               (strcmp(format,"VGZ")==0?"COMPRESSED":"VGM AUDIO");
   lcd.setTextColor(WHITE);
-  while(chips.length()>0&&lcd.textWidth(chips)>87)chips.remove(chips.length()-1);
-  lcd.drawString(chips,148,117);
+  while(label.length()&&lcd.textWidth(label)>87)label.remove(label.length()-1);
+  lcd.drawString(label,148,117);
 }
 
 void dispfiles(int offset, int chosen, bool start) {
@@ -353,6 +395,7 @@ void dispfiles(int offset, int chosen, bool start) {
 
 int selectfile() {
   browser_help_visible=false;
+  browser_preview_valid=false; // After playback/help the LCD cover was cleared.
   if(filenum<0)filenum=0;
   if(filenum>0&&sel>=filenum)sel=filenum-1;
   if(sel<0)sel=0;
@@ -387,15 +430,39 @@ int selectfile() {
     playall=false;
   }
 
+  // Folder covers such as <foldername>.png often live INSIDE the folder.
+  // In the parent browser, that folder has not been entered yet, so its
+  // cache is absent. Prepare the selected folder only after the cursor
+  // has been idle for 250ms. Never open or decode artwork on key movement.
+  uint32_t cover_idle_since=millis();
+  int cover_prepared_selection=-1;
   while(1) {
     delay(10); // Keyboard polling must yield to the sound and DMA tasks.
     M5Cardputer.update();
-    if(!M5Cardputer.Keyboard.isChange())continue;
+    if(!M5Cardputer.Keyboard.isChange()) {
+      if(!browser_help_visible && cover_prepared_selection!=sel &&
+         filenum>0 && sel>=0 && sel<filenum &&
+         filelist[sel].type==TYPE_SDIR &&
+         (uint32_t)(millis()-cover_idle_since)>=250u) {
+        cover_prepared_selection=sel;
+        char selected_folder[PATHMAX+16]={};
+        if(browser_make_path(selected_folder,sizeof(selected_folder),
+                             (const char*)filelist[sel].filename)) {
+          // Cheap cache-size check inside prepare_album_once; at most one
+          // real PNG/JPEG decode, only when the user stops on a folder.
+          cardputer_artwork::prepare_album_once(selected_folder);
+          browser_preview_valid=false;
+          browser_draw_info(sel);
+        }
+      }
+      continue;
+    }
     const auto state=M5Cardputer.Keyboard.keysState();
 
     if(M5Cardputer.Keyboard.isKeyPressed('m')) {
       if(browser_help_visible) {
         browser_help_visible=false;
+        browser_preview_valid=false;
         disptitle(STATCLR,(char*)"");
         if(filenum>0)dispfiles(disp,sel,false);
         else return -1;
@@ -406,6 +473,7 @@ int selectfile() {
     }
     if(browser_help_visible) {
       browser_help_visible=false;
+      browser_preview_valid=false;
       disptitle(STATCLR,(char*)"");
       if(filenum>0)dispfiles(disp,sel,false);
       else return -1;
@@ -414,7 +482,10 @@ int selectfile() {
     if(filenum==0) {
       if(M5Cardputer.Keyboard.isKeyPressed('b')||
          M5Cardputer.Keyboard.isKeyPressed(0x60)||
-         M5Cardputer.Keyboard.isKeyPressed('\b'))return -1;
+         M5Cardputer.Keyboard.isKeyPressed('\b')) {
+        invalidate_file_index();
+        return -1;
+      }
       continue;
     }
 
@@ -429,6 +500,8 @@ int selectfile() {
       sel=sel+DISPMAX<filenum?sel+DISPMAX:filenum-1; moved=true;
     }
     if(moved) {
+      cover_idle_since=millis();
+      cover_prepared_selection=-1;
       disp=(sel/DISPMAX)*DISPMAX;
       dispfiles(disp,sel,false);
       continue;
@@ -447,7 +520,10 @@ int selectfile() {
     }
     if(M5Cardputer.Keyboard.isKeyPressed('b')||
        M5Cardputer.Keyboard.isKeyPressed(0x60)||
-       M5Cardputer.Keyboard.isKeyPressed('\b'))return -1;
+       M5Cardputer.Keyboard.isKeyPressed('\b')) {
+      invalidate_file_index();
+      return -1;
+    }
     if(M5Cardputer.Keyboard.isKeyPressed('=')) {
       int value=(int)M5.Speaker.getVolume()+20;
       M5.Speaker.setVolume(value>255?255:value);
@@ -496,6 +572,8 @@ bool cnvfile(fs::FS &fs, struct fl *srct, uint8_t *dst){
 }
 
 void filerinit(){
+  invalidate_file_index();
+  browser_preview_valid=false;
   sel=0;
   disp=0;
   dirnum=0;
