@@ -59,6 +59,15 @@ jobs:
           assert 'LGFX_Sprite' not in player
           assert 'board_build.embed_txtfiles' not in cfg
           assert 'cloud_db_' not in v and 'wifi_manager_' not in v
+          # Folder auto-play: A toggles while playing, stop/BS cancel mode.
+          hpp=Path('cardputer/src/filer.hpp').read_text()
+          assert 'extern bool playall;' in hpp
+          player=v.split('void phase_playback() {',1)[1].split('#elif defined(IS_ATOMS3)',1)[0]
+          assert "isKeyPressed('a')" in player and 'playall=!playall;' in player
+          assert player.count('playall=false;') >= 2
+          assert '"A:AUTO ON"' in v and '"A:AUTO OFF"' in v
+          assert '"A     AUTO ON/OFF"' in v
+
           # Cross-platform specification: FNV-1a of UTF8 album path, ASCII lower-case.
           def h32(path):
               h=2166136261
