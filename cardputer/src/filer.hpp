@@ -39,5 +39,6 @@ bool cnvfile(fs::FS &fs, struct fl *srct, uint8_t *dst);
 void filerinit();
 extern struct fl *filelist;
 extern int filenum;
+extern bool playall; // Shared Cardputer folder auto-play state.
 
 #endif // IS_CARDPUTER
