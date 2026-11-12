@@ -24,12 +24,13 @@
 | ページ移動 | `,` ／ `/` |
 | ファイル・フォルダを選択 | `Space` |
 | フォルダを戻る | `..` を選択 |
-| 全曲連続再生 | `A` |
+| 全曲連続再生を開始 | `A`（ファイラ） |
 | 操作ヘルプ | `M` |
 | ルートで再読み込み | `B`／Backspace |
 | 音量 | `+`／`-` |
-| 再生中の停止 | `Space` |
-| 再生を停止して一覧へ戻る | **`BS`（Backspace）** |
+| 再生中の連続再生ON/OFF | **`A`**（曲は止めず、次曲への自動移行だけ切替） |
+| 再生中の停止／連続再生解除 | `Space` |
+| 再生を停止・連続再生解除して一覧へ戻る | **`BS`（Backspace）** |
 | VGMの一時停止・再開 | `P`（画像の下に `PAUSED` 表示） |
 
 microSDのルートにVGM/VGZ・MDXファイルを直接置いて使えます。フォルダに分類しても利用できます。MDXに対応するPDXは、従来のMDX読み込み仕様に合わせて配置してください。
@@ -109,12 +110,13 @@ pio run -d cardputer -e m5stack-cardputer-classic
 | Page up/down | `,` / `/` |
 | Select/play | `Space` |
 | Go to parent directory | Select `..` |
-| Play all | `A` |
+| Start play all | `A` in file browser |
 | Help | `M` |
 | Rescan from root | `B` / Backspace |
 | Volume | `+` / `-` |
-| Stop playback | `Space` |
-| Stop and return to file browser | **`BS` (Backspace)** |
+| Toggle auto-play while playing | **`A`**, keeps current song playing |
+| Stop and cancel auto-play | `Space` |
+| Stop, cancel auto-play, return to file browser | **`BS` (Backspace)** |
 | Pause/resume VGM | `P` (shows `PAUSED` below cover) |
 
 ### Album artwork — automatic PNG/JPEG thumbnail preparation
