@@ -709,7 +709,6 @@ void phase_playback() {
             // Toggle folder auto-play without interrupting the current song.
             // A while playing: ON -> OFF (or OFF -> ON).
             playall=!playall;
-            loopflag=false;
             cardputer_player_dirty=true;
         }
         if(M5Cardputer.Keyboard.isKeyPressed('m')) {
