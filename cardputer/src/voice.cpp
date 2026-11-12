@@ -605,9 +605,10 @@ static void cardputer_draw_playback_help() {
     lcd.drawLine(0,27,239,27,0x2C68);
     lcd.setTextColor(WHITE);
     lcd.drawString("BS    BACK TO FILES",7,35);
-    lcd.drawString("SPACE STOP",7,57);
-    lcd.drawString("P     PAUSE/RESUME VGM",7,79);
-    lcd.drawString("+/-   VOLUME",7,101);
+    lcd.drawString("SPACE STOP",7,56);
+    lcd.drawString("A     AUTO ON/OFF",7,77);
+    lcd.drawString("P     PAUSE/RESUME VGM",7,98);
+    lcd.drawString("+/-   VOLUME",7,119);
 }
 
 static void cardputer_draw_playback_view() {
@@ -653,6 +654,11 @@ static void cardputer_draw_playback_view() {
     lcd.setTextSize(1.5f);
     lcd.setTextColor(0x7FFE);
     lcd.drawString(cardputer_fit_text(chip,130),6,77);
+    // Auto-play is independent of the currently playing track.
+    // Always show the state so pressing A has visible feedback.
+    lcd.setTextSize(1.5f);
+    lcd.setTextColor(playall ? GREEN : 0x7BEF);
+    lcd.drawString(playall ? "A:AUTO ON" : "A:AUTO OFF",6,109);
 
     // The right-hand thumbnail is deliberately the same as in the browser.
     const cardputer_artwork::Kind kind=mdx?cardputer_artwork::MDX:cardputer_artwork::VGM;
@@ -682,6 +688,7 @@ void phase_playback() {
         if(state.del ||
            M5Cardputer.Keyboard.isKeyPressed('\b') ||
            M5Cardputer.Keyboard.isKeyPressed(0x7f)) {
+            playall=false; // Backspace cancels ALL as well as the current song.
             cardputer_ui_paused=false;
             cardputer_playback_help=false;
             vgm_engine_stop();
@@ -690,12 +697,20 @@ void phase_playback() {
             return;  // next loop iteration redraws the same SD directory
         }
         if(M5Cardputer.Keyboard.isKeyPressed(' ')) {
+            playall=false; // Stop must not start the next track automatically.
             cardputer_ui_paused=false;
             cardputer_playback_help=false;
             vgm_engine_stop();
             mdx_engine_stop();
             cardputer_player_dirty=true;
             return;
+        }
+        if(M5Cardputer.Keyboard.isKeyPressed('a')) {
+            // Toggle folder auto-play without interrupting the current song.
+            // A while playing: ON -> OFF (or OFF -> ON).
+            playall=!playall;
+            loopflag=false;
+            cardputer_player_dirty=true;
         }
         if(M5Cardputer.Keyboard.isKeyPressed('m')) {
             cardputer_playback_help=!cardputer_playback_help;
