@@ -13,7 +13,7 @@ struct EngineApi {
   bool (*vgm_idle)()=nullptr;
   bool (*queue_flushed)()=nullptr;
 };
-enum class PlayerState { Idle, PlayingVgm, PlayingMdx, Failed };
+enum class PlayerState { Idle, PlayingVgm, PlayingMdx, PlayingPcm, Failed };
 class EngineBridge {
 public:
  explicit EngineBridge(EngineApi api): api_(api) {}
