@@ -1,0 +1,11 @@
+{
+  "format": "vgmM5-tab5-r61-r5-candidate-v1",
+  "base_commit": "742d3143bfe845d99f8531f68eacf1e25f1dab1f",
+  "preserved_manifest": "tab5/PUBLIC_SOURCE_SHA256.json",
+  "modified_path": "firmware/src/fm_engine.c",
+  "original_blob_sha1": "e61968a51584096193bd12856b9f655ef07e07d0",
+  "patched_blob_sha1": "dcad3f690246de08f166ef4dbae682587781de80",
+  "condition": "VGMM5_TAB5_YM2151_R5_ALGO0_PREVIEW",
+  "enabled_in_candidate": 1,
+  "description": "Only YM2151 algorithm-0 synthesis routing. Original 84-source SHA-256 manifest and R61 UI/Speaker/FIR/timing untouched. No physical flash."
+}
