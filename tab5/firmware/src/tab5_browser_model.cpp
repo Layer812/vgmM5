@@ -6,7 +6,8 @@ namespace tab5 {
 bool Browser::audio(const std::string& name) {
   const auto p=name.find_last_of('.'); if(p==std::string::npos) return false;
   std::string ext=name.substr(p); std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return (char)std::tolower(c);});
-  return ext==".vgm" || ext==".vgz" || ext==".mdx";
+  return ext==".vgm" || ext==".vgz" || ext==".mdx" ||
+         ext==".mp3" || ext==".flac";
 }
 std::string Browser::join(const std::string& base,const std::string& name){return (base=="/"?"/":base+"/")+name;}
 void Browser::load(std::string dir,std::vector<Entry> list){
