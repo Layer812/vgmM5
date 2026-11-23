@@ -1,10 +1,16 @@
 #include "tab5_engine_bridge.hpp"
+#include "tab5_pcm_file_engine.hpp"
 #include <algorithm>
 #include <cctype>
 namespace tab5 {
-void EngineBridge::stop_both(){if(api_.vgm_stop)api_.vgm_stop();if(api_.mdx_stop)api_.mdx_stop();}
+void EngineBridge::stop_both(){
+ if(pcm_file_engine_owns_queue())pcm_file_engine_stop();
+ if(api_.vgm_stop)api_.vgm_stop();
+ if(api_.mdx_stop)api_.mdx_stop();
+}
 bool EngineBridge::any_producer_active() const {
- return (api_.vgm_active && api_.vgm_active()) ||
+ return pcm_file_engine_owns_queue() || pcm_file_engine_worker_running() ||
+        (api_.vgm_active && api_.vgm_active()) ||
         (api_.mdx_active && api_.mdx_active()) ||
         (api_.vgm_idle && !api_.vgm_idle()) ||
         (api_.queue_flushed && !api_.queue_flushed());
@@ -29,10 +35,18 @@ bool EngineBridge::dispatch(Browser& b,const Action& a){
    auto ext=a.path.substr(dot);
    std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return (char)std::tolower(c);});
    bool ok=false;
-   if(ext==".mdx") {if(api_.mdx_play)ok=api_.mdx_play(a.path.c_str(),true);if(ok)state_=PlayerState::PlayingMdx;}
+   if(ext==".mp3"||ext==".flac") {
+     ok=pcm_file_engine_play(a.path.c_str(),true);
+     if(ok)state_=PlayerState::PlayingPcm;
+   }
+   else if(ext==".mdx") {if(api_.mdx_play)ok=api_.mdx_play(a.path.c_str(),true);if(ok)state_=PlayerState::PlayingMdx;}
    else if(ext==".vgm"||ext==".vgz") {if(api_.vgm_play)ok=api_.vgm_play(a.path.c_str(),true);if(ok)state_=PlayerState::PlayingVgm;}
    else {error_="Unsupported extension";clear_failed_play(b);return false;}
-   if(!ok){error_="Playback start failed or engine unavailable";clear_failed_play(b);return false;}
+   if(!ok){
+     error_=(ext==".mp3"||ext==".flac")?
+         pcm_file_engine_get_error():"Playback start failed or engine unavailable";
+     clear_failed_play(b);return false;
+   }
    // R14: highlight the track actually started by PREV/NEXT or Folder Auto.
    // Do not move the cursor on failed starts or when browsing another folder.
    if(b.playing_index>=0 && b.playing_index<(int)b.entries.size() &&
@@ -48,6 +62,7 @@ bool EngineBridge::poll_end(Browser& b){
  bool active=false;
  if(state_==PlayerState::PlayingVgm){if(!api_.vgm_active)return false;active=api_.vgm_active();}
  else if(state_==PlayerState::PlayingMdx){if(!api_.mdx_active)return false;active=api_.mdx_active();}
+ else if(state_==PlayerState::PlayingPcm){active=pcm_file_engine_is_playing();}
  else return false;
  if(active)return false;
  // EOF is not end of audible playback. Wait for the last PCM pointers to
