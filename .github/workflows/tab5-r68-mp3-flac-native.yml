@@ -150,11 +150,29 @@ jobs:
           b=p.read_bytes()
           assert 100000<len(b)<0x800000 and b[0]==0xe9,'invalid P4 firmware'
           shutil.copyfile(p,'tab5/r68_artifacts/firmware.bin')
+          # Complete ESP-IDF handoff images are shipped alongside the APP.
+          # These are built in ONE native PlatformIO run and are NOT flashed in CI.
+          build=p.parent
+          for name,limit,firstbyte in [('bootloader.bin',0x6000,0xe9),
+                                        ('partitions.bin',0x1000,0xaa)]:
+              source=build/name
+              assert source.is_file(),f'Missing ESP-IDF handoff image: {source}'
+              raw=source.read_bytes()
+              assert 0<len(raw)<=limit,(name,len(raw),'offset overlap')
+              assert raw[0]==firstbyte,(name,'bad image header')
+              shutil.copyfile(source,'tab5/r68_artifacts/'+name)
+              print('ESP-IDF handoff image:',name,len(raw),hashlib.sha256(raw).hexdigest())
+          csv=Path('tab5/firmware/tab5_live_humanxdf_preserve_16MB.csv').read_text()
+          assert '0x10000' in csv and '0x810000' in csv
+          shutil.copyfile('tab5/firmware/tab5_live_humanxdf_preserve_16MB.csv',
+                          'tab5/r68_artifacts/partitions.csv')
+          print('Layout: bootloader @0x2000, partition table @0x8000, APP @0x10000')
+
           report=dict(target='M5Stack Tab5 ESP32-P4',mp3_flac='COMPILED_UNVERIFIED',image_size=len(b),sha256=hashlib.sha256(b).hexdigest(),native_build='PASS',host_ay_scc='PASS',host_c352='PASS',host_msm6258='PASS',host_r65_mix_tail='PASS',host_r67_silent_dither='PASS',R66_A_user_listening='NO_POPS',c140_gain='PLUS_6_DB_CANDIDATE',flash='NOT PERFORMED',physical_audio='PENDING',stable_main_untouched=True)
           Path('tab5/r68_artifacts/RESULT.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
           print(report)
           PY
-          sha256sum tab5/r68_artifacts/firmware.bin > tab5/r68_artifacts/SHA256SUMS.txt
+          (cd tab5/r68_artifacts && sha256sum firmware.bin bootloader.bin partitions.bin > SHA256SUMS.txt)
           cp tab5/firmware/.pio/R61_M5GFX_PATCH_SHA256.json tab5/r68_artifacts/
       - uses: actions/upload-artifact@v4
         if: success()
