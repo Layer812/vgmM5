@@ -22,6 +22,10 @@ jobs:
             -Itab5/firmware/src -Inuttx/tab5_mp3flac \
             nuttx/tab5_mp3flac/vgmm5_nuttx_codec.c \
             nuttx/tab5_mp3flac/test_codec.c -o /tmp/vgmm5_codec_test
+      - name: Install ffmpeg for synthetic MP3/FLAC fixtures
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
       - name: Generate real MP3 FLAC files and exercise decoder and 48k PCM samples
         run: |
           set -euxo pipefail
