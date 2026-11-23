@@ -17,6 +17,7 @@
 #include <esp_heap_caps.h>
 #include <esp_timer.h> // R42: per-completed-block CPU budget observer (not in sample loop)
 #include "tab5_psram_bounds.hpp"
+#include "tab5_pcm_file_engine.hpp"
 #include "tab5_track_meta.hpp"
 #include "tab5_vgm_mix_tail.hpp"
 #if defined(VGMM5_R66_SILENCE_DITHER)
@@ -153,7 +154,8 @@ bool vgm_engine_generation_idle(void) {
 // True only if generators cannot publish, AudioPlayTask cannot submit, and
 // Speaker_Class has relinquished all queued PCM pointers.
 bool vgm_audio_queue_flush_if_idle(void) {
-    if (!vgm_engine_generation_idle() || mdx_engine_is_playing()) return false;
+    if (!vgm_engine_generation_idle() || mdx_engine_is_playing() ||
+        pcm_file_engine_worker_running()) return false;
     s_audio_fence.close();
     uint32_t began = millis();
     while (!s_audio_fence.idle()) {
@@ -1825,7 +1827,8 @@ void audio_play_task(void *args) {
         // Reclaim only buffers for which M5Unified reported the release.
         s_audio_queue.reclaim(wav_count);
         const bool natural_tail = s_audio_tail_drain.load(std::memory_order_acquire);
-        const bool any_playing = (isPlaying && !isPaused) || mdx_engine_is_playing() || natural_tail;
+        const bool any_playing = (isPlaying && !isPaused) || mdx_engine_is_playing() ||
+                                 pcm_file_engine_is_playing() || natural_tail;
         // Short tracks may end before 12 blocks were buffered. Drain them,
         // rather than waiting forever for a producer that has already ended.
         if (prebuffering && (s_audio_queue.pending() >= (WAV_BUFF_COUNT - 4) || natural_tail)) {
