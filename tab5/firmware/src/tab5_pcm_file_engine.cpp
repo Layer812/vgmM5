@@ -8,6 +8,7 @@
 #include <atomic>
 #include <new>
 #include <string.h>
+#include <strings.h>
 #include <stdio.h>
 #include <stdint.h>
 #include "vgm_engine.h"
@@ -28,6 +29,7 @@ constexpr unsigned kFlacFrames=1024;
 std::atomic<bool> s_stop{false};
 std::atomic<bool> s_active{false};
 std::atomic<bool> s_worker{false};
+std::atomic<bool> s_owned{false};
 std::atomic<bool> s_open_done{false};
 std::atomic<bool> s_open_ok{false};
 std::atomic<unsigned> s_source_rate{0};
@@ -67,7 +69,6 @@ struct Decoder {
     auto* self=static_cast<Decoder*>(user);
     if(!self||!self->file||s_stop.load(std::memory_order_relaxed))return 0;
     // sd::File.read() returns an int; clamp to the open file's remaining bytes.
-    if(len>4096)len=4096;
     const int n=self->file.read(static_cast<uint8_t*>(out),len);
     return n>0?(size_t)n:0;
   }
@@ -278,10 +279,12 @@ bool pcm_file_engine_play(const char* path,bool use_sd) {
   s_source_channels.store(0,std::memory_order_release);
   s_active.store(true,std::memory_order_release);
   s_worker.store(true,std::memory_order_release);
+  s_owned.store(true,std::memory_order_release);
   if(xTaskCreatePinnedToCore(task,"Mp3FlacDecode",16384,nullptr,2,nullptr,0)!=pdPASS) {
     error("MP3/FLAC task creation failed");
     s_active.store(false,std::memory_order_release);
     s_worker.store(false,std::memory_order_release);
+    s_owned.store(false,std::memory_order_release);
     return false;
   }
   const uint32_t began=millis();
@@ -296,6 +299,7 @@ bool pcm_file_engine_play(const char* path,bool use_sd) {
   return true;
 }
 void pcm_file_engine_stop() {
+  if(!s_owned.load(std::memory_order_acquire))return;
   s_stop.store(true,std::memory_order_release);
   const uint32_t began=millis();
   while(s_worker.load(std::memory_order_acquire) && millis()-began<2500u)
@@ -306,14 +310,20 @@ void pcm_file_engine_stop() {
   }
   s_active.store(false,std::memory_order_release);
   vgm_audio_queue_cancel_tail_drain();
-  if(!vgm_audio_queue_flush_if_idle())
+  if(!vgm_audio_queue_flush_if_idle()) {
     error("Speaker queue not safely flushed");
+  } else {
+    s_owned.store(false,std::memory_order_release);
+  }
 }
 bool pcm_file_engine_is_playing() {
   return s_active.load(std::memory_order_acquire);
 }
 bool pcm_file_engine_worker_running() {
   return s_worker.load(std::memory_order_acquire);
+}
+bool pcm_file_engine_owns_queue() {
+  return s_owned.load(std::memory_order_acquire);
 }
 const char* pcm_file_engine_get_error(){return s_error;}
 unsigned pcm_file_engine_source_rate(){return s_source_rate.load();}
