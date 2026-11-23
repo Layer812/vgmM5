@@ -18,7 +18,8 @@ struct NowPlayingView {
 inline NowPlayingView now_playing_view(const Browser& browser, PlayerState state) {
   NowPlayingView view;
   view.failed = (state == PlayerState::Failed);
-  view.playing = (state == PlayerState::PlayingVgm || state == PlayerState::PlayingMdx)
+  view.playing = (state == PlayerState::PlayingVgm || state == PlayerState::PlayingMdx ||
+                  state == PlayerState::PlayingPcm)
                && !browser.playing_path.empty();
   if (!view.playing) return view;
   const std::string::size_type slash=browser.playing_path.find_last_of('/');

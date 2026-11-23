@@ -21,6 +21,7 @@
 #include "tab5_peak_hold.hpp"
 #include "vgm_engine.h"
 #include "mdx_engine.hpp"
+#include "tab5_pcm_file_engine.hpp"
 extern void mdx_engine_diag_print(void);
 #include <algorithm>
 #include <vector>
@@ -249,8 +250,10 @@ static void render_now_playing(bool force=false) {
   M5.Display.setTextDatum(top_left);
   M5.Display.setTextWrap(false);
   const tab5::TrackMeta* meta=nullptr;
-  if(view.playing) meta=engine.state()==PlayerState::PlayingMdx?
-                  &mdx_engine_get_metadata():&vgm_engine_get_metadata();
+  if(view.playing) {
+    if(engine.state()==PlayerState::PlayingMdx)meta=&mdx_engine_get_metadata();
+    else if(engine.state()==PlayerState::PlayingVgm)meta=&vgm_engine_get_metadata();
+  }
   M5.Display.setTextSize(2);
   M5.Display.setTextColor(cyan,surf);
   M5.Display.setCursor(x,now.y+48);
@@ -295,6 +298,21 @@ static void render_now_playing(bool force=false) {
       }else detail(214,"LENGTH: UNKNOWN");
     }
   }
+  if(view.playing && engine.state()==PlayerState::PlayingPcm){
+    // No invented GD3/MDX tags: report actual stream format and decoder rate.
+    const bool flac=view.filename.size()>=5 &&
+      view.filename.substr(view.filename.size()-5)==".flac";
+    M5.Display.setTextSize(2);
+    M5.Display.setTextColor(soft,surf);
+    M5.Display.setCursor(x,now.y+139);
+    M5.Display.printf("FORMAT: %s",flac?"FLAC":"MP3");
+    M5.Display.setCursor(x,now.y+164);
+    M5.Display.printf("PCM: %lu Hz / %u CH",
+       (unsigned long)pcm_file_engine_source_rate(),
+       (unsigned)pcm_file_engine_source_channels());
+    M5.Display.setCursor(x,now.y+189);
+    r20_fit_text(String("FILE: ")+view.filename.c_str(),width);
+  }
   if (view.playing)
     Serial.printf("[R31][NOW_PLAYING] %s (%d/%d)\n",browser.playing_path.c_str(),view.ordinal,view.total);
 }
@@ -336,7 +354,9 @@ static void render_channel_monitor(bool active,bool force=false){
   const uint16_t lit=tab5_rgb565(0x7a91ef);
   const uint16_t soft=tab5_rgb565(0xa9bacd);
   static tab5::Snapshot snapshot;
-  if(active)tab5::g_live_monitor.snapshot(snapshot);
+  // Compressed audio has no YM/FM channel state; never display stale VGM notes.
+  if(active && engine.state()!=PlayerState::PlayingPcm)
+    tab5::g_live_monitor.snapshot(snapshot);
   else snapshot.count=0;
   constexpr unsigned per_page=16;
   const unsigned pages=snapshot.count ? (unsigned)((snapshot.count+per_page-1)/per_page):1u;
@@ -490,7 +510,8 @@ static void update_spectrum(bool active, uint32_t now) {
 }
 static bool engine_is_playing() {
   const PlayerState state=engine.state();
-  return state==PlayerState::PlayingVgm || state==PlayerState::PlayingMdx;
+  return state==PlayerState::PlayingVgm || state==PlayerState::PlayingMdx ||
+         state==PlayerState::PlayingPcm;
 }
 static void render_primary_button(bool force=false) {
   static int last_visual_state=-1;

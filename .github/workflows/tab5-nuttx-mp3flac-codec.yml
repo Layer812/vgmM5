@@ -1,0 +1,62 @@
+name: Tab5 NuttX MP3 FLAC standalone POSIX decoder (NO FLASH)
+on:
+  push:
+    branches:
+      - dev/tab5-r68-mp3-flac-playback-20261123
+    paths:
+      - nuttx/tab5_mp3flac/**
+      - .github/workflows/tab5-nuttx-mp3flac-codec.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  codec:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile actual NuttX-portable MP3 FLAC decoder with gcc (NO FLASH)
+        run: |
+          set -euxo pipefail
+          gcc -std=gnu11 -O2 -g -Wall -Wextra -Wno-unused-function \
+            -Itab5/firmware/src -Inuttx/tab5_mp3flac \
+            nuttx/tab5_mp3flac/vgmm5_nuttx_codec.c \
+            nuttx/tab5_mp3flac/test_codec.c -o /tmp/vgmm5_codec_test
+      - name: Install ffmpeg for synthetic MP3/FLAC fixtures
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+      - name: Generate real MP3 FLAC files and exercise decoder and 48k PCM samples
+        run: |
+          set -euxo pipefail
+          ffmpeg -hide_banner -loglevel error -f lavfi -i "sine=frequency=440:duration=0.8" -ar 44100 -ac 2 -c:a libmp3lame -q:a 5 /tmp/440_44k.mp3 -y
+          ffmpeg -hide_banner -loglevel error -f lavfi -i "sine=frequency=880:duration=0.8" -ar 48000 -ac 2 -c:a flac /tmp/880_48k.flac -y
+          ffmpeg -hide_banner -loglevel error -f lavfi -i "sine=frequency=220:duration=0.8" -ar 96000 -ac 1 -c:a flac /tmp/220_96k_mono.flac -y
+          /tmp/vgmm5_codec_test /tmp/440_44k.mp3 /tmp/out_mp3.raw
+          /tmp/vgmm5_codec_test /tmp/880_48k.flac /tmp/out_flac.raw
+          /tmp/vgmm5_codec_test /tmp/220_96k_mono.flac /tmp/out_flac_96k.raw
+          python3 - <<'PY'
+          from pathlib import Path
+          for f in ('/tmp/out_mp3.raw','/tmp/out_flac.raw','/tmp/out_flac_96k.raw'):
+              b=Path(f).read_bytes()
+              assert 32000*4<len(b)<96000*4,(f,len(b))
+              assert any(b),f
+              print('PASS',f,'PCM 16bit stereo 48k',len(b),'bytes')
+          PY
+      - name: Package source-only NuttX decoder and pinned permissive headers
+        run: |
+          set -euxo pipefail
+          mkdir -p artifacts/vgmm5_nuttx_mp3flac_r1/vendor
+          cp nuttx/tab5_mp3flac/vgmm5_nuttx_codec.c artifacts/vgmm5_nuttx_mp3flac_r1/
+          cp nuttx/tab5_mp3flac/vgmm5_nuttx_codec.h artifacts/vgmm5_nuttx_mp3flac_r1/
+          cp nuttx/tab5_mp3flac/test_codec.c artifacts/vgmm5_nuttx_mp3flac_r1/
+          cp nuttx/tab5_mp3flac/README_JA.md artifacts/vgmm5_nuttx_mp3flac_r1/
+          cp tab5/firmware/src/vendor/minimp3.h artifacts/vgmm5_nuttx_mp3flac_r1/vendor/
+          cp tab5/firmware/src/vendor/dr_flac.h artifacts/vgmm5_nuttx_mp3flac_r1/vendor/
+          (cd artifacts/vgmm5_nuttx_mp3flac_r1 && sha256sum *.c *.h vendor/*.h > SHA256SUMS.txt)
+          echo "SOURCE ONLY. NO FLASH. NuttX I2S hookup requires existing pxaudio_module.c source." > artifacts/vgmm5_nuttx_mp3flac_r1/NO_FLASH.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vgmM5-NuttX-MP3-FLAC-R1-DECODER-SOURCE-NOFLASH
+          path: artifacts/vgmm5_nuttx_mp3flac_r1/
+          retention-days: 14

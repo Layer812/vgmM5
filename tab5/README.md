@@ -8,6 +8,18 @@ M5Stack Tab5（ESP32-P4）向けのVGM/VGZ・MDXプレイヤーです。microSD�
 
 ![vgmM5 Tab5 実機画面](tab5.png)
 
+### 開発版 R68 — MP3/FLAC再生（実機未検証）
+
+R67のVGM/VGZ/MDX機能を維持して、microSDから**MP3とFLACをストリーミング再生**する試作版です。既存の44.1kHz/16bitステレオPCMリング、Speaker/I2S/ES8388、音声キュー解放コールバックをそのまま使用し、音源エンジンの同時実行を禁止します。
+
+- ファイラで `.mp3` / `.flac` を選択し、PLAY/STOP、NEXT/PREV、Repeat、Folder Autoに対応。
+- MP3: `minimp3`（CC0）、FLAC: `dr_flac`（Public Domain/MIT-0）をソース内でバージョン固定。
+- モノラル/ステレオ、8〜48kHzのデコードに対応し、44.1kHzへ整数線形リサンプリング。FLACの高ビット深度は16bit PCMへ変換。
+- 曲全体をメモリへ読み込まず、microSDから小単位でデコードします。ジャケット表示は既存のPNG/JPEG/BMP検索を維持。
+- R67の演奏時無音±1 LSB対策、YM2151等の音源計算、LCDフォント、タッチUI、HumanXDFを変更しません。
+- ID3/Vorbis Commentの文字列抽出や48kHz超のハイレゾFLACは初期版の対象外です。楽曲名はファイル名を表示します。
+- **本版は開発用です。ネイティブビルドおよび実機再生が確認できるまで正式版R67へ統合しません。**
+
 ### 正式版 R67（2026年11月4日）
 
 **R67はGitHub `main` に正式統合済みです。** [統合PR #24](https://github.com/Layer812/vgmM5/pull/24) / [ネイティブビルド・回帰テスト PASS](https://github.com/Layer812/vgmM5/actions/runs/41661806444)
